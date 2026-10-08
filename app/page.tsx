@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import {
   ArrowDown,
   ExternalLink,
@@ -59,11 +60,19 @@ export default function HomePage() {
               <p className="text-sm font-medium text-cream/85">AI 旅行规划助手</p>
               <p className="text-xl font-semibold text-white">Serendipity</p>
             </div>
-            <p className="max-w-[45%] text-right text-sm leading-6 text-cream/85">
-              本地优先
-              <br className="hidden sm:block" />
-              个人旅行助手
-            </p>
+            <div className="max-w-[45%] text-right">
+              <p className="text-sm leading-6 text-cream/85">
+                本地优先
+                <br className="hidden sm:block" />
+                个人旅行助手
+              </p>
+              <Link
+                href="/trips"
+                className="mt-2 inline-flex min-h-11 items-center rounded-md border border-cream/70 px-3 py-2 text-sm font-medium text-cream transition-colors hover:border-cream hover:bg-cream/10"
+              >
+                我的旅行
+              </Link>
+            </div>
           </header>
           <div className="mt-auto max-w-3xl px-5 pb-10 sm:px-10 lg:px-16 lg:pb-14">
             <h1 className="max-w-2xl text-4xl font-bold leading-10 text-white sm:text-5xl sm:leading-12">
@@ -87,7 +96,7 @@ export default function HomePage() {
                 查看展示样例
               </a>
               <p className="text-base leading-7 text-cream/85">
-                现在可以用一句话创建原话草稿，先完整保留你的想法。
+                现在可以用一句话保存原话草稿，重启应用后也能继续。
               </p>
             </div>
           </div>
@@ -124,7 +133,7 @@ export default function HomePage() {
             用一句话开始一趟旅行
           </h2>
           <p className="mt-4 max-w-3xl text-base leading-7 text-graphite">
-            先写下你的想法，应用会完整保留原话并生成一个临时草稿标识。它不会假装已经理解需求，也不会显示“AI 已生成行程”。
+            先写下你的想法，应用会完整保留原话并保存到本机数据库。它不会假装已经理解需求，也不会显示“AI 已生成行程”。
           </p>
           <TripDraftForm />
         </div>

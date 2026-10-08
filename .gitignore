@@ -16,6 +16,12 @@ npm-debug.log*
 docs/
 PROJECT_STATUS.md
 
+# local data and browser test output
+data/
+test-data/
+test-results/
+playwright-report/
+
 # environment
 .env
 .env.*
