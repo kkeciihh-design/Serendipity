@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Serendipity",
-  description: "AI 旅行规划助手的本地项目骨架。",
+  description: "AI 旅行规划助手：把想法整理成可确认、可执行的旅行计划。",
 };
 
 export const viewport: Viewport = {

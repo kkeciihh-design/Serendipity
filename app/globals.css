@@ -2,12 +2,29 @@
 
 @theme {
   --font-sans: ui-sans-serif, system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --color-cream: #faf7f0;
+  --color-shell: #f2ede2;
+  --color-charcoal: #232a26;
+  --color-graphite: #4f5b53;
+  --color-sage: #57765a;
+  --color-sage-soft: #e5ece2;
+  --color-clay: #a85439;
+  --color-clay-soft: #f4e6dd;
+  --color-sand: #ded2c0;
+  --color-focus: #1f5f45;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.6;
 }
 
 html,
 body {
   min-height: 100%;
-  background-color: #f8fafc;
-  color: #0f172a;
+  background-color: var(--color-cream);
+  color: var(--color-charcoal);
   font-family: var(--font-sans);
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 3px;
 }

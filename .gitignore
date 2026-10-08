@@ -12,6 +12,10 @@ next-env.d.ts
 *.log
 npm-debug.log*
 
+# local project documentation
+docs/
+PROJECT_STATUS.md
+
 # environment
 .env
 .env.*
