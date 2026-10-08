@@ -1,12 +1,10 @@
 import Image from "next/image";
 import {
   ArrowDown,
-  CircleCheck,
   ExternalLink,
-  ReceiptText,
-  ShieldCheck,
 } from "lucide-react";
 import { SampleTripCard, type SampleTrip } from "./components/sample-trip-card";
+import { TripDraftForm } from "./components/trip-draft-form";
 
 const sampleTrips: SampleTrip[] = [
   {
@@ -39,24 +37,6 @@ const sampleTrips: SampleTrip[] = [
       "第二天：啤酒博物馆、台东步行街、灯光海岸。",
       "第三天：老城早餐、信号山、出发前整理清单。",
     ],
-  },
-];
-
-const planningPrinciples = [
-  {
-    icon: CircleCheck,
-    title: "需求先确认",
-    description: "AI 提取和追问只形成待确认摘要，重要理解不被静默写入计划。",
-  },
-  {
-    icon: ReceiptText,
-    title: "时间和预算程序算",
-    description: "衔接、合计和红线由应用计算，不直接相信模型口算结果。",
-  },
-  {
-    icon: ShieldCheck,
-    title: "事实与估算分开",
-    description: "票价、开放时间和路线会保留来源；无法核验的内容明确标为待确认。",
   },
 ];
 
@@ -94,14 +74,20 @@ export default function HomePage() {
             </p>
             <div className="mt-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
               <a
-                href="#sample-trips"
+                href="#trip-input"
                 className="inline-flex min-h-12 items-center gap-2 rounded-md bg-cream px-5 py-3 text-base font-semibold text-charcoal transition-colors hover:bg-white focus-visible:outline-cream"
               >
-                查看展示样例
+                开始创建旅行
                 <ArrowDown aria-hidden="true" className="size-5" />
               </a>
+              <a
+                href="#sample-trips"
+                className="inline-flex min-h-12 items-center rounded-md border border-cream/70 px-5 py-3 text-base font-medium text-cream transition-colors hover:border-cream hover:bg-cream/10 focus-visible:outline-cream"
+              >
+                查看展示样例
+              </a>
               <p className="text-base leading-7 text-cream/85">
-                创建旅行输入将在阶段 02 开放，本页不放置无结果的创建按钮。
+                现在可以用一句话创建原话草稿，先完整保留你的想法。
               </p>
             </div>
           </div>
@@ -128,31 +114,19 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="bg-shell px-5 py-12 sm:px-10 sm:py-16 lg:px-16">
+      <section
+        id="trip-input"
+        className="scroll-mt-4 bg-shell px-5 py-12 sm:px-10 sm:py-16 lg:px-16"
+      >
         <div className="mx-auto max-w-6xl">
           <p className="text-sm font-medium text-sage">我的旅行</p>
           <h2 className="mt-2 text-3xl font-bold leading-9 text-charcoal">
-            当前还没有个人旅行
+            用一句话开始一趟旅行
           </h2>
           <p className="mt-4 max-w-3xl text-base leading-7 text-graphite">
-            下一阶段会在这里开放一句话创建输入。现在保留空状态，避免让你误以为已经发生保存或生成。
+            先写下你的想法，应用会完整保留原话并生成一个临时草稿标识。它不会假装已经理解需求，也不会显示“AI 已生成行程”。
           </p>
-          <div className="mt-8 grid gap-6 border-t border-sand pt-8 md:grid-cols-3">
-            {planningPrinciples.map((principle) => (
-              <div key={principle.title}>
-                <principle.icon
-                  aria-hidden="true"
-                  className="size-6 text-sage"
-                />
-                <h3 className="mt-3 text-lg font-semibold text-charcoal">
-                  {principle.title}
-                </h3>
-                <p className="mt-2 text-base leading-7 text-graphite">
-                  {principle.description}
-                </p>
-              </div>
-            ))}
-          </div>
+          <TripDraftForm />
         </div>
       </section>
 
