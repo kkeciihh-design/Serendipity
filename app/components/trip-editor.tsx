@@ -9,11 +9,14 @@ import {
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { formatTripDateTime } from "@/lib/trip-format";
+import {
+  TripRequestWorkspace,
+  type TripRequestClient,
+} from "./trip-request-workspace";
 
 type TripEditorTrip = {
   id: string;
   title: string;
-  originalRequest: string;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -24,54 +27,50 @@ type SaveFeedback = {
   message: string;
 };
 
-const MAX_REQUEST_LENGTH = 3000;
 const MAX_TITLE_LENGTH = 80;
-
 const countCharacters = (text: string) => Array.from(text).length;
 
-const readApiError = async (response: Response) => {
+async function readApiError(response: Response) {
   const payload = (await response.json().catch(() => null)) as {
     error?: string;
   } | null;
-
   return (
     payload?.error ??
     `保存失败（HTTP ${response.status}）。你正在编辑的内容没有丢，请稍后重试。`
   );
-};
+}
 
-export function TripEditor({ trip }: { trip: TripEditorTrip }) {
+export function TripEditor({
+  trip,
+  request,
+}: {
+  trip: TripEditorTrip;
+  request: TripRequestClient;
+}) {
   const router = useRouter();
   const [savedTrip, setSavedTrip] = useState(trip);
   const [title, setTitle] = useState(trip.title);
-  const [requestText, setRequestText] = useState(trip.originalRequest);
   const [feedback, setFeedback] = useState<SaveFeedback | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
 
-  const isDirty = title !== savedTrip.title || requestText !== savedTrip.originalRequest;
-  const requestCharacterCount = countCharacters(requestText);
-  const isRequestTooLong = requestCharacterCount > MAX_REQUEST_LENGTH;
+  const isDirty = title !== savedTrip.title;
   const isTitleTooLong = countCharacters(title.trim()) > MAX_TITLE_LENGTH;
   const canConfirmDelete = deleteConfirmation === savedTrip.title;
 
-  const saveTrip = async (event: React.FormEvent<HTMLFormElement>) => {
+  const saveTitle = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-
     if (isSaving) {
       setFeedback({
         tone: "error",
-        message: "正在保存这趟旅行，请稍候，不要重复点击。",
+        message: "正在保存标题，请稍候，不要重复点击。",
       });
       return;
     }
     if (title.trim().length === 0) {
-      setFeedback({
-        tone: "error",
-        message: "旅行标题不能为空。",
-      });
+      setFeedback({ tone: "error", message: "旅行标题不能为空。" });
       return;
     }
     if (isTitleTooLong) {
@@ -81,37 +80,15 @@ export function TripEditor({ trip }: { trip: TripEditorTrip }) {
       });
       return;
     }
-    if (requestText.trim().length === 0) {
-      setFeedback({
-        tone: "error",
-        message: "旅行想法原话不能为空。",
-      });
-      return;
-    }
-    if (isRequestTooLong) {
-      setFeedback({
-        tone: "error",
-        message: `旅行想法过长：当前 ${requestCharacterCount} 字，最多 ${MAX_REQUEST_LENGTH} 字。`,
-      });
-      return;
-    }
 
     setIsSaving(true);
-    setFeedback({
-      tone: "info",
-      message: "正在保存修改...",
-    });
-
+    setFeedback({ tone: "info", message: "正在保存标题..." });
     try {
       const response = await fetch(`/api/trips/${trip.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: title.trim(),
-          originalRequest: requestText,
-        }),
+        body: JSON.stringify({ title: title.trim() }),
       });
-
       if (!response.ok) {
         throw new Error(await readApiError(response));
       }
@@ -119,10 +96,9 @@ export function TripEditor({ trip }: { trip: TripEditorTrip }) {
       const payload = (await response.json()) as { trip: TripEditorTrip };
       setSavedTrip(payload.trip);
       setTitle(payload.trip.title);
-      setRequestText(payload.trip.originalRequest);
       setFeedback({
         tone: "success",
-        message: "修改已保存到本机数据库。",
+        message: "标题已保存；这不会改变需求修订或确认状态。",
       });
       router.refresh();
     } catch (error) {
@@ -144,11 +120,7 @@ export function TripEditor({ trip }: { trip: TripEditorTrip }) {
     }
 
     setIsDeleting(true);
-    setFeedback({
-      tone: "info",
-      message: "正在删除这趟旅行...",
-    });
-
+    setFeedback({ tone: "info", message: "正在删除这趟旅行..." });
     try {
       const response = await fetch(`/api/trips/${trip.id}`, {
         method: "DELETE",
@@ -173,31 +145,28 @@ export function TripEditor({ trip }: { trip: TripEditorTrip }) {
     <div className="mt-5 space-y-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-sage">草稿详情</p>
+          <p className="text-sm font-medium text-sage">旅行详情</p>
           <h1 className="mt-1 text-3xl font-bold leading-9 text-charcoal">
             {savedTrip.title}
           </h1>
         </div>
         <span
           className={`inline-flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
-            isDirty
-              ? "bg-clay-soft text-clay"
-              : "bg-sage-soft text-sage"
+            isDirty ? "bg-clay-soft text-clay" : "bg-sage-soft text-sage"
           }`}
         >
           <HardDriveDownload aria-hidden="true" className="size-4" />
-          {isDirty ? "有未保存修改" : `已保存 · ${formatTripDateTime(new Date(savedTrip.updatedAt))}`}
+          {isDirty
+            ? "标题未保存"
+            : `已保存 · ${formatTripDateTime(new Date(savedTrip.updatedAt))}`}
         </span>
       </header>
 
       <form
-        onSubmit={saveTrip}
+        onSubmit={saveTitle}
         className="rounded-lg border border-sand/80 bg-white p-5 shadow-[0_1px_2px_rgba(35,42,38,0.06)] sm:p-6"
       >
-        <label
-          htmlFor="trip-title"
-          className="text-lg font-semibold text-charcoal"
-        >
+        <label htmlFor="trip-title" className="text-lg font-semibold text-charcoal">
           旅行标题
         </label>
         <input
@@ -210,32 +179,6 @@ export function TripEditor({ trip }: { trip: TripEditorTrip }) {
           aria-describedby="trip-editor-feedback"
           className="mt-3 min-h-12 w-full rounded-md border border-sand bg-cream px-4 py-3 text-base leading-7 text-charcoal focus:border-sage focus:outline-none"
         />
-
-        <label
-          htmlFor="trip-original-request"
-          className="mt-6 block text-lg font-semibold text-charcoal"
-        >
-          旅行想法原话
-        </label>
-        <textarea
-          id="trip-original-request"
-          name="trip-original-request"
-          value={requestText}
-          onChange={(event) => setRequestText(event.target.value)}
-          rows={10}
-          aria-invalid={isRequestTooLong || feedback?.tone === "error"}
-          aria-describedby="trip-request-count trip-editor-feedback"
-          className="mt-3 min-h-56 w-full resize-y rounded-md border border-sand bg-cream px-4 py-3 text-base leading-8 text-charcoal focus:border-sage focus:outline-none"
-        />
-        <p
-          id="trip-request-count"
-          className={`mt-2 text-sm leading-6 ${
-            isRequestTooLong ? "text-clay" : "text-graphite"
-          }`}
-        >
-          当前 {requestCharacterCount}/{MAX_REQUEST_LENGTH} 字；修改后点击保存才会写入本机数据库。
-        </p>
-
         <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <button
             type="submit"
@@ -243,7 +186,7 @@ export function TripEditor({ trip }: { trip: TripEditorTrip }) {
             className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-sage px-5 py-3 text-base font-semibold text-white transition-colors hover:bg-focus disabled:cursor-not-allowed disabled:bg-graphite/70"
           >
             <Save aria-hidden="true" className="size-5" />
-            {isSaving ? "正在保存..." : "保存修改"}
+            {isSaving ? "正在保存..." : "保存标题"}
           </button>
           <button
             type="button"
@@ -259,6 +202,8 @@ export function TripEditor({ trip }: { trip: TripEditorTrip }) {
         </div>
       </form>
 
+      <TripRequestWorkspace initialRequest={request} />
+
       <div
         id="trip-editor-feedback"
         aria-live="polite"
@@ -271,7 +216,7 @@ export function TripEditor({ trip }: { trip: TripEditorTrip }) {
         }`}
       >
         {feedback?.message ??
-          "这里会显示保存或删除状态。保存失败时，输入框内容不会被清空。"}
+          "标题修改不进入需求修订；原话、摘要和追问答案在需求确认区统一保存。"}
       </div>
 
       {showDeleteConfirm ? (

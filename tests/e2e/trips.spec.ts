@@ -30,22 +30,31 @@ test("旅行可保存、打开、修改并跨刷新保留", async ({ page }) => 
     page.getByRole("heading", { name: "杭州两日轻松漫步" }),
   ).toBeVisible();
 
-  await page.getByRole("link", { name: "打开继续" }).click();
+  await page
+    .getByRole("article")
+    .filter({ hasText: "杭州两日轻松漫步" })
+    .getByRole("link", { name: "打开继续" })
+    .click();
   await expect(page).toHaveURL(/\/trips\/[^/]+$/);
-  await expect(page.locator("#trip-original-request")).toHaveValue(originalText);
+  await expect(page.locator("#trip-request-original")).toHaveValue(originalText);
 
   await page.locator("#trip-title").fill("杭州两日修改版");
   await page
-    .locator("#trip-original-request")
+    .locator("#trip-request-original")
     .fill(`${originalText}\n第二天下午要返程。`);
-  await page.getByRole("button", { name: "保存修改" }).click();
+  await page.getByRole("button", { name: "保存标题" }).click();
+  await expect(page.getByText("标题已保存；这不会改变需求修订或确认状态。")).toBeVisible();
 
-  await expect(page.getByText("修改已保存到本机数据库。")).toBeVisible();
-  await expect(page.getByText("有未保存修改")).toHaveCount(0);
+  await page.getByRole("button", { name: "保存需求修订" }).click();
+  await expect(
+    page.getByText(/需求修订 2 已保存，需要重新确认/),
+  ).toBeVisible();
+
+  await expect(page.getByText("标题未保存")).toHaveCount(0);
 
   await page.reload();
   await expect(page.locator("#trip-title")).toHaveValue("杭州两日修改版");
-  await expect(page.locator("#trip-original-request")).toHaveValue(
+  await expect(page.locator("#trip-request-original")).toHaveValue(
     `${originalText}\n第二天下午要返程。`,
   );
 

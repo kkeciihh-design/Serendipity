@@ -108,7 +108,7 @@ export default async function HomePage() {
                 查看展示样例
               </a>
               <p className="text-base leading-7 text-cream/85">
-                现在可以用一句话保存原话草稿，重启应用后也能继续。
+              现在可以用一句话保存原话草稿，再让 AI 核对需求和关键问题。
               </p>
             </div>
           </div>
@@ -145,7 +145,7 @@ export default async function HomePage() {
             用一句话开始一趟旅行
           </h2>
           <p className="mt-4 max-w-3xl text-base leading-7 text-graphite">
-            先写下你的想法，应用会完整保留原话并保存到本机数据库。它不会假装已经理解需求，也不会显示“AI 已生成行程”。
+            先写下你的想法，应用会完整保留原话并保存到本机数据库。AI 只生成待确认的需求摘要，不会直接生成行程。
           </p>
           <TripDraftForm />
         </div>

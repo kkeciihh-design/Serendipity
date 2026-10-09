@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  TripRevisionConflictError,
   TripNotFoundError,
   TripValidationError,
   deleteTrip,
@@ -27,6 +28,9 @@ function tripErrorResponse(error: unknown, fallbackStatus: number) {
       { error: error.message },
       { status: 404 },
     );
+  }
+  if (error instanceof TripRevisionConflictError) {
+    return NextResponse.json({ error: error.message }, { status: 409 });
   }
 
   console.error("Trip detail operation failed", {
