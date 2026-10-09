@@ -9,6 +9,7 @@
     "start:test": "node scripts/ensure-database.mjs && next start -p 3100",
     "db:migrate": "node scripts/ensure-database.mjs",
     "verify:phase03": "node scripts/verify-phase03.mjs",
+    "verify:phase04": "node scripts/verify-phase04.mjs",
     "postinstall": "prisma generate",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
