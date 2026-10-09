@@ -48,7 +48,7 @@ export default async function TripsPage() {
       <section className="px-5 py-8 sm:px-10 sm:py-12 lg:px-16">
         <div className="mx-auto max-w-6xl">
           <p className="text-sm leading-6 text-graphite">
-            旅行草稿保存在本机数据库中，重启应用后仍会保留。这里只保存原话和标题，本阶段还没有解析需求或生成行程。
+            旅行和需求修订保存在本机数据库中，重启应用后仍会保留。点开旅行后可以让 AI 理解原话、核对摘要并确认当前修订。
           </p>
 
           {trips.length === 0 ? (
@@ -77,8 +77,20 @@ export default async function TripsPage() {
                 <li key={trip.id} className="h-full">
                   <article className="flex h-full flex-col rounded-lg border border-sand/80 bg-white p-5 shadow-[0_1px_2px_rgba(35,42,38,0.06)] sm:p-6">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="rounded-md bg-sage-soft px-3 py-2 text-sm font-medium text-sage">
-                        草稿
+                      <span
+                        className={`rounded-md px-3 py-2 text-sm font-medium ${
+                          trip.request?.confirmedRevision ===
+                          trip.request?.requestRevision
+                            ? "bg-sage-soft text-sage"
+                            : "bg-shell text-graphite"
+                        }`}
+                      >
+                        {trip.request?.confirmedRevision ===
+                        trip.request?.requestRevision
+                          ? `需求修订 ${trip.request?.requestRevision} 已确认`
+                          : trip.request?.extractedRequest
+                            ? `需求修订 ${trip.request?.requestRevision} 待确认`
+                            : "原话草稿"}
                       </span>
                       <span className="text-sm text-graphite">
                         修改于 {formatTripDateTime(trip.updatedAt)}

@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { requirePageAppAccess } from "@/lib/page-access";
 import { TripEditor } from "@/app/components/trip-editor";
 import { getTrip } from "@/lib/trips";
+import { getTripRequestRecord } from "@/lib/trip-request-service";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,8 @@ export default async function TripDetailPage({ params }: TripDetailPageProps) {
     notFound();
   }
 
+  const request = await getTripRequestRecord(trip.id);
+
   return (
     <main className="min-h-dvh bg-cream px-5 py-8 sm:px-10 sm:py-12 lg:px-16">
       <div className="mx-auto max-w-4xl">
@@ -37,6 +40,7 @@ export default async function TripDetailPage({ params }: TripDetailPageProps) {
             createdAt: trip.createdAt.toISOString(),
             updatedAt: trip.updatedAt.toISOString(),
           }}
+          request={request}
         />
       </div>
     </main>

@@ -10,6 +10,8 @@
     "db:migrate": "node scripts/ensure-database.mjs",
     "verify:phase03": "node scripts/verify-phase03.mjs",
     "verify:phase04": "node scripts/verify-phase04.mjs",
+    "verify:phase05": "node scripts/verify-phase05.mjs",
+    "capture:phase05": "node scripts/capture-phase05-screens.mjs",
     "postinstall": "prisma generate",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

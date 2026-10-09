@@ -95,10 +95,19 @@ function parseModels(payload: unknown) {
 function textFromResponse(payload: unknown, provider: AIProvider) {
   if (provider === "openai-chat-completions") {
     const choices = (payload as { choices?: unknown }).choices;
-    const content = Array.isArray(choices)
-      ? (choices[0] as { message?: { content?: unknown } })?.message?.content
+    const message = Array.isArray(choices)
+      ? (choices[0] as { message?: { content?: unknown } })?.message
       : undefined;
-    return typeof content === "string" ? content : "";
+    if (typeof message?.content === "string") {
+      return message.content;
+    }
+    if (Array.isArray(message?.content)) {
+      return message.content
+        .map((part) => (part as { text?: unknown }).text)
+        .filter((text): text is string => typeof text === "string")
+        .join("");
+    }
+    return "";
   }
 
   if (provider === "openai-responses") {
@@ -112,13 +121,14 @@ function textFromResponse(payload: unknown, provider: AIProvider) {
       return "";
     }
 
-    const content = (output[0] as { content?: unknown })?.content;
-    if (!Array.isArray(content)) {
-      return "";
-    }
-
-    const text = (content[0] as { text?: unknown })?.text;
-    return typeof text === "string" ? text : "";
+    return output
+      .flatMap((item) => {
+        const content = (item as { content?: unknown }).content;
+        return Array.isArray(content) ? content : [];
+      })
+      .map((part) => (part as { text?: unknown }).text)
+      .filter((text): text is string => typeof text === "string")
+      .join("");
   }
 
   const content = (payload as { content?: unknown }).content;
@@ -126,8 +136,10 @@ function textFromResponse(payload: unknown, provider: AIProvider) {
     return "";
   }
 
-  const text = (content[0] as { text?: unknown })?.text;
-  return typeof text === "string" ? text : "";
+  return content
+    .map((part) => (part as { text?: unknown }).text)
+    .filter((text): text is string => typeof text === "string")
+    .join("");
 }
 
 function requestUrl(baseUrl: string, provider: AIProvider) {
