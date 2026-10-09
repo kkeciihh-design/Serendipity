@@ -4,6 +4,7 @@ import {
   createTrip,
   listTrips,
 } from "@/lib/trips";
+import { hasAppAccess, unauthorizedResponse } from "@/lib/access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +32,11 @@ function tripErrorResponse(error: unknown, fallbackStatus: number) {
   );
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!hasAppAccess(request)) {
+    return unauthorizedResponse();
+  }
+
   try {
     const trips = await listTrips();
     return NextResponse.json({ trips });
@@ -41,6 +46,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (!hasAppAccess(request)) {
+    return unauthorizedResponse();
+  }
+
   try {
     const body = await request.json();
     const trip = await createTrip(body);

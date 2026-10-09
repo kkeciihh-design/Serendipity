@@ -1,6 +1,9 @@
 import Link from "next/link";
+import { requirePageAppAccess } from "@/lib/page-access";
 
-export default function NotFoundPage() {
+export default async function NotFoundPage() {
+  await requirePageAppAccess();
+
   return (
     <main className="flex min-h-dvh items-center justify-center bg-[#f8fafc] px-6 py-10">
       <section className="w-full max-w-md text-center">

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { requirePageAppAccess } from "@/lib/page-access";
 import { TripEditor } from "@/app/components/trip-editor";
 import { getTrip } from "@/lib/trips";
 
@@ -11,6 +12,8 @@ type TripDetailPageProps = {
 };
 
 export default async function TripDetailPage({ params }: TripDetailPageProps) {
+  await requirePageAppAccess();
+
   const { id } = await params;
   const trip = await getTrip(id);
 

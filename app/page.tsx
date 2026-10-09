@@ -3,7 +3,9 @@ import Link from "next/link";
 import {
   ArrowDown,
   ExternalLink,
+  Settings,
 } from "lucide-react";
+import { requirePageAppAccess } from "@/lib/page-access";
 import { SampleTripCard, type SampleTrip } from "./components/sample-trip-card";
 import { TripDraftForm } from "./components/trip-draft-form";
 
@@ -41,7 +43,9 @@ const sampleTrips: SampleTrip[] = [
   },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  await requirePageAppAccess();
+
   return (
     <main className="min-h-dvh bg-cream">
       <section className="relative flex min-h-[70svh] max-h-[820px] flex-col overflow-hidden">
@@ -71,6 +75,14 @@ export default function HomePage() {
                 className="mt-2 inline-flex min-h-11 items-center rounded-md border border-cream/70 px-3 py-2 text-sm font-medium text-cream transition-colors hover:border-cream hover:bg-cream/10"
               >
                 我的旅行
+              </Link>
+              <Link
+                href="/settings"
+                title="个人设置"
+                aria-label="个人设置"
+                className="mt-2 inline-flex min-h-11 w-11 items-center justify-center rounded-md border border-cream/70 text-cream transition-colors hover:border-cream hover:bg-cream/10"
+              >
+                <Settings aria-hidden="true" className="size-5" />
               </Link>
             </div>
           </header>

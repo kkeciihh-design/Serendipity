@@ -1,11 +1,14 @@
 import Link from "next/link";
-import { ArrowRight, FilePlus2, MapPinned } from "lucide-react";
+import { ArrowRight, FilePlus2, MapPinned, Settings } from "lucide-react";
+import { requirePageAppAccess } from "@/lib/page-access";
 import { listTrips } from "@/lib/trips";
 import { formatTripDateTime, summarizeRequest } from "@/lib/trip-format";
 
 export const dynamic = "force-dynamic";
 
 export default async function TripsPage() {
+  await requirePageAppAccess();
+
   const trips = await listTrips();
 
   return (
@@ -29,6 +32,14 @@ export default async function TripsPage() {
             >
               <FilePlus2 aria-hidden="true" className="size-4" />
               新建旅行
+            </Link>
+            <Link
+              href="/settings"
+              title="个人设置"
+              aria-label="个人设置"
+              className="inline-flex min-h-11 w-11 items-center justify-center rounded-md border border-sand text-graphite transition-colors hover:border-sage hover:text-sage"
+            >
+              <Settings aria-hidden="true" className="size-5" />
             </Link>
           </div>
         </div>

@@ -6,6 +6,7 @@ import {
   getTrip,
   updateTrip,
 } from "@/lib/trips";
+import { hasAppAccess, unauthorizedResponse } from "@/lib/access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,7 +44,11 @@ function tripErrorResponse(error: unknown, fallbackStatus: number) {
   );
 }
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
+  if (!hasAppAccess(request)) {
+    return unauthorizedResponse();
+  }
+
   try {
     const { id } = await context.params;
     const trip = await getTrip(id);
@@ -62,6 +67,10 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
+  if (!hasAppAccess(request)) {
+    return unauthorizedResponse();
+  }
+
   try {
     const { id } = await context.params;
     const body = await request.json();
@@ -78,7 +87,11 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
+  if (!hasAppAccess(request)) {
+    return unauthorizedResponse();
+  }
+
   try {
     const { id } = await context.params;
     await deleteTrip(id);

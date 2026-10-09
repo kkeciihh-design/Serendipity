@@ -17,3 +17,26 @@ model Trip {
 
   @@map("Trip")
 }
+
+model AppSettings {
+  id                  String    @id @default("singleton")
+  passwordHash        String?
+  passwordSalt        String?
+  provider            String?
+  baseUrl             String?
+  model               String?
+  apiKeyCiphertext    String?
+  apiKeyLast4         String?
+  promptVersion       Int       @default(1)
+  basePrompt          String
+  systemPrompt        String
+  connectionStatus    String    @default("not_configured")
+  connectionCheckedAt DateTime?
+  connectionProvider  String?
+  connectionModel     String?
+  connectionError     String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@map("AppSettings")
+}
