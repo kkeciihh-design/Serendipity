@@ -20,6 +20,7 @@ export class TripRequestExtractionError extends Error {
   category:
     | "configuration"
     | "invalid_url"
+    | "aborted"
     | "auth"
     | "model"
     | "rate_limit"

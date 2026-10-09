@@ -8,6 +8,7 @@ import {
   ListChecks,
   Save,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   emptyRequestSnapshot,
@@ -66,9 +67,16 @@ function formatMoney(cents: number) {
 
 export function TripRequestWorkspace({
   initialRequest,
+  onStateChange,
 }: {
   initialRequest: TripRequestClient;
+  onStateChange?: (state: {
+    requestRevision: number;
+    confirmed: boolean;
+    hasUnsavedEdits: boolean;
+  }) => void;
 }) {
+  const router = useRouter();
   const [record, setRecord] = useState(initialRequest);
   const [originalRequest, setOriginalRequest] = useState(
     initialRequest.originalRequest,
@@ -149,6 +157,14 @@ export function TripRequestWorkspace({
     !isSaving &&
     !isExtracting &&
     record.extractedRequest !== null;
+
+  useEffect(() => {
+    onStateChange?.({
+      requestRevision: record.requestRevision,
+      confirmed: isConfirmed,
+      hasUnsavedEdits,
+    });
+  }, [record.requestRevision, isConfirmed, hasUnsavedEdits, onStateChange]);
 
   const setSnapshotField = <K extends RequestFieldKey>(
     field: K,
@@ -248,6 +264,7 @@ export function TripRequestWorkspace({
 
       const payload = (await response.json()) as { request: TripRequestClient };
       applyRecord(payload.request, false);
+      router.refresh();
       setFeedback({
         tone: "success",
         message: `需求修订 ${payload.request.requestRevision} 已保存，需要重新确认后才能用于后续规划。`,
@@ -314,6 +331,7 @@ export function TripRequestWorkspace({
         );
 
       applyRecord(payload.request, localEdited);
+      router.refresh();
       setFeedback({
         tone: localEdited ? "info" : "success",
         message: localEdited

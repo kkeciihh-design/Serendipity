@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z, type ZodType } from "zod";
 import { getDatabaseUrl } from "./data-directory";
+import { markCurrentPlanStale } from "./plan-service";
 import { deriveTripTitle } from "./trip-title";
 
 const MAX_REQUEST_LENGTH = 3000;
@@ -204,7 +205,10 @@ export async function updateTrip(id: string, input: unknown): Promise<Trip> {
           throw new TripRevisionConflictError();
         }
 
-        data.status = "requirement_pending";
+      }
+
+      if (originalRequestChanged) {
+        await markCurrentPlanStale(transaction, id);
       }
 
       return transaction.trip.update({

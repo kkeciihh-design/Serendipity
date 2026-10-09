@@ -7,8 +7,13 @@ import {
   Trash2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { formatTripDateTime } from "@/lib/trip-format";
+import {
+  PlanPreview,
+  type PlanRequestState,
+  type PlanVersionClient,
+} from "./plan-preview";
 import {
   TripRequestWorkspace,
   type TripRequestClient,
@@ -43,9 +48,13 @@ async function readApiError(response: Response) {
 export function TripEditor({
   trip,
   request,
+  plans,
+  selectedVersionNumber,
 }: {
   trip: TripEditorTrip;
   request: TripRequestClient;
+  plans: PlanVersionClient[];
+  selectedVersionNumber: number | null;
 }) {
   const router = useRouter();
   const [savedTrip, setSavedTrip] = useState(trip);
@@ -55,6 +64,17 @@ export function TripEditor({
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [requestState, setRequestState] = useState<PlanRequestState>({
+    requestRevision: request.requestRevision,
+    confirmed:
+      request.confirmedRevision === request.requestRevision &&
+      request.confirmedRequest !== null,
+    hasUnsavedEdits: false,
+  });
+  const handleRequestStateChange = useCallback(
+    (state: PlanRequestState) => setRequestState(state),
+    [],
+  );
 
   const isDirty = title !== savedTrip.title;
   const isTitleTooLong = countCharacters(title.trim()) > MAX_TITLE_LENGTH;
@@ -202,7 +222,17 @@ export function TripEditor({
         </div>
       </form>
 
-      <TripRequestWorkspace initialRequest={request} />
+      <TripRequestWorkspace
+        initialRequest={request}
+        onStateChange={handleRequestStateChange}
+      />
+
+      <PlanPreview
+        tripId={trip.id}
+        plans={plans}
+        selectedVersionNumber={selectedVersionNumber}
+        requestState={requestState}
+      />
 
       <div
         id="trip-editor-feedback"
