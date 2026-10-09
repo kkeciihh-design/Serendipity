@@ -5,17 +5,23 @@ import { requirePageAppAccess } from "@/lib/page-access";
 import { TripEditor } from "@/app/components/trip-editor";
 import { getTrip } from "@/lib/trips";
 import { getTripRequestRecord } from "@/lib/trip-request-service";
+import { listPlanVersions } from "@/lib/plan-service";
 
 export const dynamic = "force-dynamic";
 
 type TripDetailPageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ planVersion?: string }>;
 };
 
-export default async function TripDetailPage({ params }: TripDetailPageProps) {
+export default async function TripDetailPage({
+  params,
+  searchParams,
+}: TripDetailPageProps) {
   await requirePageAppAccess();
 
   const { id } = await params;
+  const { planVersion } = await searchParams;
   const trip = await getTrip(id);
 
   if (!trip) {
@@ -23,6 +29,14 @@ export default async function TripDetailPage({ params }: TripDetailPageProps) {
   }
 
   const request = await getTripRequestRecord(trip.id);
+  const plans = await listPlanVersions(trip.id);
+  const parsedPlanVersion = planVersion ? Number(planVersion) : null;
+  const selectedVersionNumber =
+    parsedPlanVersion !== null &&
+    Number.isInteger(parsedPlanVersion) &&
+    plans.some((plan) => plan.versionNumber === parsedPlanVersion)
+      ? parsedPlanVersion
+      : null;
 
   return (
     <main className="min-h-dvh bg-cream px-5 py-8 sm:px-10 sm:py-12 lg:px-16">
@@ -41,6 +55,8 @@ export default async function TripDetailPage({ params }: TripDetailPageProps) {
             updatedAt: trip.updatedAt.toISOString(),
           }}
           request={request}
+          plans={plans}
+          selectedVersionNumber={selectedVersionNumber}
         />
       </div>
     </main>

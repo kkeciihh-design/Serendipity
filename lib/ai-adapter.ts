@@ -394,6 +394,7 @@ export type AICompletionResult =
       ok: false;
       category:
         | "invalid_url"
+        | "aborted"
         | "auth"
         | "model"
         | "rate_limit"
@@ -413,6 +414,7 @@ export async function completeText(input: {
   userPrompt: string;
   maxTokens?: number;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<AICompletionResult> {
   let url: URL;
   try {
@@ -437,6 +439,7 @@ export async function completeText(input: {
   }
 
   const maxTokens = input.maxTokens ?? 1600;
+  const timeoutSignal = AbortSignal.timeout(input.timeoutMs ?? REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -467,7 +470,9 @@ export async function completeText(input: {
                 messages: [{ role: "user", content: input.userPrompt }],
               },
       ),
-      signal: AbortSignal.timeout(input.timeoutMs ?? REQUEST_TIMEOUT_MS),
+      signal: input.signal
+        ? AbortSignal.any([timeoutSignal, input.signal])
+        : timeoutSignal,
       cache: "no-store",
       redirect: "error",
     });
@@ -544,6 +549,17 @@ export async function completeText(input: {
 
     return { ok: true, content };
   } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.name === "AbortError" || error.name === "TimeoutError") &&
+      input.signal?.aborted
+    ) {
+      return {
+        ok: false,
+        category: "aborted",
+        message: "本次 AI 请求已取消，结果不会保存。",
+      };
+    }
     if (error instanceof Error && error.name === "TimeoutError") {
       return {
         ok: false,

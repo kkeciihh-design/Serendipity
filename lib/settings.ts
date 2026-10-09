@@ -444,3 +444,7 @@ export async function savePrompts(input: unknown) {
 
   return getSafeSettings();
 }
+
+export async function closeSettingsStore() {
+  await prisma.$disconnect();
+}

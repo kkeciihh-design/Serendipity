@@ -12,9 +12,12 @@ model Trip {
   title           String
   originalRequest String
   status          String   @default("draft")
+  currentPlanVersionId String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   request         TripRequest?
+  planVersions    PlanVersion[] @relation("TripPlanVersions")
+  currentPlanVersion PlanVersion? @relation("CurrentPlanVersion", fields: [currentPlanVersionId], references: [id])
 
   @@map("Trip")
 }
@@ -36,6 +39,25 @@ model TripRequest {
   updatedAt          DateTime  @updatedAt
 
   @@map("TripRequest")
+}
+
+model PlanVersion {
+  id                  String   @id @default(uuid())
+  tripId              String
+  trip                Trip     @relation("TripPlanVersions", fields: [tripId], references: [id], onDelete: Cascade)
+  versionNumber       Int
+  requestRevision     Int
+  requestSnapshot     String
+  events              String
+  pendingItems        String
+  validationResults   String
+  requirementUpToDate Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  currentForTrip     Trip[]   @relation("CurrentPlanVersion")
+
+  @@unique([tripId, versionNumber])
+  @@map("PlanVersion")
 }
 
 model AppSettings {

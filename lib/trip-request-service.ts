@@ -16,6 +16,7 @@ import {
   type RequestQuestion,
   type RequestSnapshot,
 } from "./trip-request";
+import { markCurrentPlanStale } from "./plan-service";
 
 const MAX_REQUEST_LENGTH = 3000;
 const countCodePoints = (text: string) => Array.from(text).length;
@@ -353,15 +354,13 @@ export async function saveRequestDraft(tripId: string, input: unknown) {
       throw new TripRequestConflictError();
     }
 
-    await transaction.trip.update({
-      where: { id: tripId },
-      data: {
-        ...(originalChanged && parsed.originalRequest
-          ? { originalRequest: parsed.originalRequest }
-          : {}),
-        status: "requirement_pending",
-      },
-    });
+    if (originalChanged && parsed.originalRequest) {
+      await transaction.trip.update({
+        where: { id: tripId },
+        data: { originalRequest: parsed.originalRequest },
+      });
+    }
+    await markCurrentPlanStale(transaction, tripId);
 
     return transaction.tripRequest.findUnique({
       where: { tripId },
@@ -413,10 +412,7 @@ export async function saveExtractionResult(input: {
       );
     }
 
-    await transaction.trip.update({
-      where: { id: input.tripId },
-      data: { status: "requirement_pending" },
-    });
+    await markCurrentPlanStale(transaction, input.tripId);
     return transaction.tripRequest.findUnique({
       where: { tripId: input.tripId },
     });
