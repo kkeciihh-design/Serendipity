@@ -34,6 +34,7 @@ import type {
   PlanPendingItem,
   PlanValidationResults,
 } from "@/lib/plan";
+import type { EvidenceFactClient } from "@/lib/evidence";
 import type { RequestSnapshot } from "@/lib/trip-request";
 
 export type PlanVersionClient = {
@@ -50,6 +51,7 @@ export type PlanVersionClient = {
   isCurrent: boolean;
   createdAt: string;
   updatedAt: string;
+  evidenceFacts?: EvidenceFactClient[];
 };
 
 export type PlanRequestState = {

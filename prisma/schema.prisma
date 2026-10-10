@@ -8,16 +8,17 @@ datasource db {
 }
 
 model Trip {
-  id              String   @id @default(uuid())
-  title           String
-  originalRequest String
-  status          String   @default("draft")
+  id                   String         @id @default(uuid())
+  title                String
+  originalRequest      String
+  status               String         @default("draft")
   currentPlanVersionId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  request         TripRequest?
-  planVersions    PlanVersion[] @relation("TripPlanVersions")
-  currentPlanVersion PlanVersion? @relation("CurrentPlanVersion", fields: [currentPlanVersionId], references: [id])
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  request              TripRequest?
+  planVersions         PlanVersion[]  @relation("TripPlanVersions")
+  evidenceFacts        EvidenceFact[]
+  currentPlanVersion   PlanVersion?   @relation("CurrentPlanVersion", fields: [currentPlanVersionId], references: [id])
 
   @@map("Trip")
 }
@@ -42,23 +43,58 @@ model TripRequest {
 }
 
 model PlanVersion {
-  id                  String   @id @default(uuid())
+  id                  String         @id @default(uuid())
   tripId              String
-  trip                Trip     @relation("TripPlanVersions", fields: [tripId], references: [id], onDelete: Cascade)
+  trip                Trip           @relation("TripPlanVersions", fields: [tripId], references: [id], onDelete: Cascade)
   versionNumber       Int
   requestRevision     Int
   requestSnapshot     String
   events              String
-  costs               String   @default("[]")
+  costs               String         @default("[]")
   pendingItems        String
   validationResults   String
-  requirementUpToDate Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  currentForTrip     Trip[]   @relation("CurrentPlanVersion")
+  requirementUpToDate Boolean        @default(true)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  currentForTrip      Trip[]         @relation("CurrentPlanVersion")
+  evidenceFacts       EvidenceFact[]
 
   @@unique([tripId, versionNumber])
   @@map("PlanVersion")
+}
+
+model EvidenceFact {
+  id                String      @id @default(uuid())
+  tripId            String
+  trip              Trip        @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  planVersionId     String
+  planVersion       PlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  targetType        String
+  targetId          String
+  field             String
+  status            String
+  sourceTitle       String
+  sourceUrl         String
+  sourcePublisher   String
+  sourcePublishedAt DateTime?
+  sourceDateStatus  String?
+  extractedValue    String
+  searchProvider    String
+  searchQuery       String
+  retrievedAt       DateTime
+  applicableFrom    DateTime?
+  applicableUntil   DateTime?
+  lastRefreshAt     DateTime?
+  lastRefreshStatus String?
+  lastRefreshError  String?
+  contentQuote      String
+  conflictReason    String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@unique([planVersionId, targetType, targetId, field])
+  @@index([tripId, planVersionId])
+  @@map("EvidenceFact")
 }
 
 model AppSettings {
@@ -78,6 +114,11 @@ model AppSettings {
   connectionProvider  String?
   connectionModel     String?
   connectionError     String?
+  searchProvider      String?   @default("duckduckgo")
+  searchLanguage      String?   @default("en")
+  searchStatus        String?   @default("not_tested")
+  searchCheckedAt     DateTime?
+  searchError         String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 

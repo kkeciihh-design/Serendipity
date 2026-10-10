@@ -308,6 +308,32 @@ export async function savePlanVersion(input: {
   }
 }
 
+async function copyEvidenceFacts(
+  transaction: Prisma.TransactionClient,
+  sourcePlanVersionId: string,
+  destinationPlanVersionId: string,
+  validEventIds: Set<string>,
+) {
+  const facts = await transaction.evidenceFact.findMany({
+    where: { planVersionId: sourcePlanVersionId },
+  });
+  const copies = facts
+    .filter((fact) => validEventIds.has(fact.targetId))
+    .map((fact) => {
+      const { id, createdAt, updatedAt, ...payload } = fact;
+      void id;
+      void createdAt;
+      void updatedAt;
+      return {
+        ...payload,
+        planVersionId: destinationPlanVersionId,
+      };
+    });
+  if (copies.length > 0) {
+    await transaction.evidenceFact.createMany({ data: copies });
+  }
+}
+
 export async function savePlanEventEdit(input: {
   tripId: string;
   expectedPlanVersion: number;
@@ -373,6 +399,13 @@ export async function savePlanEventEdit(input: {
           requirementUpToDate: row.requirementUpToDate,
         },
       });
+
+      await copyEvidenceFacts(
+        transaction,
+        row.id,
+        created.id,
+        new Set(editedPlan.events.map((event) => event.id)),
+      );
 
       await transaction.trip.update({
         where: { id: row.tripId },
@@ -480,6 +513,13 @@ export async function savePlanCostEdit(input: {
           requirementUpToDate: row.requirementUpToDate,
         },
       });
+
+      await copyEvidenceFacts(
+        transaction,
+        row.id,
+        created.id,
+        new Set(currentPlan.events.map((event) => event.id)),
+      );
 
       await transaction.trip.update({
         where: { id: row.tripId },
