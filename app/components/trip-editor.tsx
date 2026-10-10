@@ -10,10 +10,10 @@ import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { formatTripDateTime } from "@/lib/trip-format";
 import {
-  PlanPreview,
+  PlanOverview,
   type PlanRequestState,
   type PlanVersionClient,
-} from "./plan-preview";
+} from "./plan-overview";
 import {
   TripRequestWorkspace,
   type TripRequestClient,
@@ -227,8 +227,9 @@ export function TripEditor({
         onStateChange={handleRequestStateChange}
       />
 
-      <PlanPreview
+      <PlanOverview
         tripId={trip.id}
+        tripTitle={savedTrip.title}
         plans={plans}
         selectedVersionNumber={selectedVersionNumber}
         requestState={requestState}

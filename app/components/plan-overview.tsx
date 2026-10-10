@@ -4,14 +4,26 @@ import {
   Banknote,
   CalendarRange,
   CircleAlert,
-  Clock,
   History,
+  ListChecks,
   MapPin,
+  PencilLine,
   Sparkles,
   XCircle,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  buildPlanOverviewDays,
+  formatBudgetTarget,
+  formatMoneyAmount,
+  formatPlanPace,
+  formatRequestDateRange,
+  formatTravelerCount,
+  planRequiresUpdate,
+  planStatusLabel,
+} from "@/lib/plan-overview";
 import type {
   PlanEvent,
   PlanPendingItem,
@@ -84,17 +96,15 @@ function formatDuration(seconds: number) {
   return minutes === 0 ? `${hours} 小时` : `${hours} 小时 ${minutes} 分钟`;
 }
 
-function formatMoney(cents: number | null) {
-  return cents === null ? "待确认" : `约 ${(cents / 100).toFixed(0)} 元`;
-}
-
-export function PlanPreview({
+export function PlanOverview({
   tripId,
+  tripTitle,
   plans,
   selectedVersionNumber,
   requestState,
 }: {
   tripId: string;
+  tripTitle: string;
   plans: PlanVersionClient[];
   selectedVersionNumber: number | null;
   requestState: PlanRequestState;
@@ -103,11 +113,14 @@ export function PlanPreview({
   const currentPlan = plans.find((plan) => plan.isCurrent) ?? null;
   const selectedPlan =
     plans.find(
-      (plan) => plan.versionNumber === (selectedVersionNumber ?? currentPlan?.versionNumber),
+      (plan) =>
+        plan.versionNumber ===
+        (selectedVersionNumber ?? currentPlan?.versionNumber),
     ) ?? currentPlan;
   const [previewPlan, setPreviewPlan] = useState<PlanVersionClient | null>(
     selectedPlan,
   );
+  const [selectedDayNumber, setSelectedDayNumber] = useState(1);
   const [isGenerating, setIsGenerating] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -115,6 +128,7 @@ export function PlanPreview({
 
   useEffect(() => {
     setPreviewPlan(selectedPlan);
+    setSelectedDayNumber(1);
   }, [selectedPlan]);
 
   useEffect(() => {
@@ -138,6 +152,29 @@ export function PlanPreview({
   const displayPlan = previewPlan ?? selectedPlan;
   const canGenerate =
     !isGenerating && requestState.confirmed && !requestState.hasUnsavedEdits;
+  const days = useMemo(
+    () =>
+      displayPlan
+        ? buildPlanOverviewDays(
+            displayPlan.events,
+            displayPlan.requestSnapshot,
+          )
+        : [],
+    [displayPlan],
+  );
+  const selectedDay =
+    days.find((day) => day.dayNumber === selectedDayNumber) ?? days[0] ?? null;
+  const requiresUpdate = displayPlan
+    ? planRequiresUpdate({
+        requestRevision: displayPlan.requestRevision,
+        requirementUpToDate: displayPlan.requirementUpToDate,
+        latestRequestRevision: requestState.requestRevision,
+      })
+    : false;
+  const statusLabel = planStatusLabel(
+    displayPlan,
+    requestState.requestRevision,
+  );
 
   const generatePlan = async () => {
     if (!canGenerate) {
@@ -175,6 +212,7 @@ export function PlanPreview({
         plan: PlanVersionClient;
       };
       setPreviewPlan(payload.plan);
+      setSelectedDayNumber(1);
       setFeedback({
         tone: payload.plan.validationResults.warnings.length > 0
           ? "info"
@@ -210,67 +248,50 @@ export function PlanPreview({
     abortControllerRef.current?.abort();
   };
 
-  const groupedEvents = useMemo(() => {
-    if (!displayPlan) {
-      return [];
-    }
-    const days = new Map<number, PlanEvent[]>();
-    for (const event of displayPlan.events) {
-      const day = days.get(event.dayNumber) ?? [];
-      day.push(event);
-      days.set(event.dayNumber, day);
-    }
-    return [...days.entries()]
-      .sort((left, right) => left[0] - right[0])
-      .map(([dayNumber, events]) => ({
-        dayNumber,
-        events: [...events].sort((left, right) =>
-          left.startTime.localeCompare(right.startTime),
-        ),
-      }));
-  }, [displayPlan]);
-
   return (
     <section
-      aria-labelledby="plan-preview-title"
+      aria-labelledby="plan-overview-title"
       className="rounded-lg border border-sand/80 bg-white p-5 shadow-[0_1px_2px_rgba(35,42,38,0.06)] sm:p-6"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="flex items-center gap-2 text-sm font-medium text-sage">
-            <CalendarRange aria-hidden="true" className="size-4" />
-            基础行程预览
+            <CalendarRange aria-hidden="true" className="size-4 shrink-0" />
+            行程总览
           </p>
           <h2
-            id="plan-preview-title"
-            className="mt-2 text-2xl font-bold leading-8 text-charcoal"
+            id="plan-overview-title"
+            className="mt-2 break-words text-2xl font-bold leading-8 text-charcoal"
           >
             {displayPlan
-              ? `计划版本 ${displayPlan.versionNumber}`
-              : "尚无基础计划"}
+              ? `计划版本 ${displayPlan.versionNumber}｜${tripTitle}`
+              : `${tripTitle}｜尚无基础计划`}
           </h2>
           {displayPlan ? (
-            <p className="mt-2 text-sm text-graphite">
+            <p className="mt-2 text-sm leading-6 text-graphite">
               依据需求修订 {displayPlan.requestRevision} 的确认快照生成；
-              目的地 {displayPlan.requestSnapshot.destination ?? "待确认"}
+              摘要、每日安排和待确认事项来自同一计划版本。
             </p>
           ) : null}
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex shrink-0 flex-col items-end gap-2">
           <span
             className={`inline-flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
-              displayPlan?.requirementUpToDate
-                ? "bg-sage-soft text-sage"
-                : "bg-clay-soft text-clay"
+              !displayPlan || (!displayPlan.isCurrent && !requiresUpdate)
+                ? "bg-shell text-graphite"
+                : requiresUpdate
+                  ? "bg-clay-soft text-clay"
+                  : "bg-sage-soft text-sage"
             }`}
           >
             <CircleAlert aria-hidden="true" className="size-4" />
-            {displayPlan
-              ? displayPlan.requirementUpToDate
-                ? "需求依据当前有效"
-                : "旧计划待更新"
-              : "等待确认需求"}
+            {statusLabel}
           </span>
+          {requestState.hasUnsavedEdits ? (
+            <span className="inline-flex min-h-9 items-center rounded-md bg-clay-soft px-3 text-sm text-clay">
+              需求修改未保存
+            </span>
+          ) : null}
           {plans.length > 1 ? (
             <span className="inline-flex items-center gap-2 text-sm text-graphite">
               <History aria-hidden="true" className="size-4" />
@@ -293,7 +314,54 @@ export function PlanPreview({
         </div>
       </div>
 
-      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+      {displayPlan ? (
+        <dl className="mt-5 grid gap-x-5 gap-y-4 border-y border-sand/80 py-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div>
+            <dt className="text-sm text-graphite">旅行标题</dt>
+            <dd className="mt-1 break-words text-base font-semibold text-charcoal">
+              {tripTitle}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-sm text-graphite">目的地</dt>
+            <dd className="mt-1 break-words text-base font-semibold text-charcoal">
+              {displayPlan.requestSnapshot.destination ?? "未确认"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-sm text-graphite">日期</dt>
+            <dd className="mt-1 text-base font-semibold text-charcoal">
+              {formatRequestDateRange(displayPlan.requestSnapshot)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-sm text-graphite">人数</dt>
+            <dd className="mt-1 text-base font-semibold text-charcoal">
+              {formatTravelerCount(displayPlan.requestSnapshot)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-sm text-graphite">节奏</dt>
+            <dd className="mt-1 text-base font-semibold text-charcoal">
+              {formatPlanPace(displayPlan.requestSnapshot)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-sm text-graphite">费用</dt>
+            <dd className="mt-1 text-base font-semibold text-charcoal">
+              {formatBudgetTarget(displayPlan.requestSnapshot)}｜费用待核算
+            </dd>
+          </div>
+        </dl>
+      ) : null}
+
+      {displayPlan && requiresUpdate ? (
+        <p className="mt-4 rounded-md bg-clay-soft px-4 py-3 text-base leading-7 text-clay">
+          最新需求已经变化；本页仍完整展示这个计划自己的确认快照。请回到需求确认区核对、确认新修订，再生成新计划版本。
+        </p>
+      ) : null}
+
+      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
         <button
           type="button"
           onClick={generatePlan}
@@ -307,6 +375,19 @@ export function PlanPreview({
               ? `生成新计划版本 V${(currentPlan.versionNumber ?? 0) + 1}`
               : "生成基础行程"}
         </button>
+        <a
+          href="#request-workspace"
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md border border-sage px-5 py-3 text-base font-semibold text-sage transition-colors hover:bg-sage-soft"
+        >
+          <PencilLine aria-hidden="true" className="size-5" />
+          修改需求
+        </a>
+        <Link
+          href="/trips"
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md border border-sand px-5 py-3 text-base font-semibold text-graphite transition-colors hover:border-sage hover:text-sage"
+        >
+          返回旅行列表
+        </Link>
         {isGenerating ? (
           <button
             type="button"
@@ -348,15 +429,47 @@ export function PlanPreview({
             </div>
           ) : null}
 
-          <div className="mt-5 space-y-5">
-            {groupedEvents.map(({ dayNumber, events }) => (
-              <div key={dayNumber}>
-                <h3 className="flex items-center gap-2 text-lg font-semibold text-charcoal">
-                  <Clock aria-hidden="true" className="size-4 text-sage" />
-                  第 {dayNumber} 天｜{events[0]?.date}
-                </h3>
+          <div className="mt-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-lg font-semibold text-charcoal">
+                每日安排
+              </h3>
+              <p className="text-sm text-graphite">
+                共 {days.length} 天｜{displayPlan.events.length} 个日程｜
+                {displayPlan.pendingItems.length} 项待确认
+              </p>
+            </div>
+            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+              {days.map((day) => (
+                <button
+                  key={day.dayNumber}
+                  type="button"
+                  onClick={() => setSelectedDayNumber(day.dayNumber)}
+                  aria-pressed={day.dayNumber === selectedDay?.dayNumber}
+                  className={`min-h-16 min-w-40 max-w-72 shrink-0 rounded-md border px-3 py-2 text-left transition-colors ${
+                    day.dayNumber === selectedDay?.dayNumber
+                      ? "border-sage bg-sage-soft text-sage"
+                      : "border-sand bg-cream text-graphite hover:border-sage"
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">
+                    第 {day.dayNumber} 天｜{day.date}
+                  </span>
+                  <span className="mt-1 block break-words text-sm leading-5">
+                    {day.theme}｜{day.events.length} 项
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {selectedDay ? (
+              <>
+                <h4 className="mt-5 text-lg font-semibold text-charcoal">
+                  第 {selectedDay.dayNumber} 天｜{selectedDay.date}｜
+                  {selectedDay.theme}
+                </h4>
                 <ol className="mt-3 divide-y divide-sand/80 rounded-md border border-sand/80">
-                  {events.map((event) => (
+                  {selectedDay.events.map((event) => (
                     <li
                       key={event.id}
                       className="grid gap-2 bg-white p-4 sm:grid-cols-[110px_1fr_auto] sm:items-start"
@@ -364,17 +477,24 @@ export function PlanPreview({
                       <p className="text-sm font-semibold text-sage">
                         {event.startTime}–{event.endTime}
                       </p>
-                      <div>
-                        <p className="text-base font-semibold text-charcoal">
+                      <div className="min-w-0">
+                        <p className="break-words text-base font-semibold text-charcoal">
                           {event.title}
                         </p>
                         <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-graphite">
                           <span>{eventTypeLabels[event.type]}</span>
-                          <span>建议 {formatDuration(event.suggestedDurationSeconds)}</span>
+                          <span>
+                            建议 {formatDuration(event.suggestedDurationSeconds)}
+                          </span>
                           {event.locationName ? (
-                            <span className="inline-flex items-center gap-1">
-                              <MapPin aria-hidden="true" className="size-4" />
-                              {event.locationName}
+                            <span className="inline-flex min-w-0 items-center gap-1">
+                              <MapPin
+                                aria-hidden="true"
+                                className="size-4 shrink-0"
+                              />
+                              <span className="break-words">
+                                {event.locationName}
+                              </span>
                             </span>
                           ) : null}
                           {event.note ? <span>{event.note}</span> : null}
@@ -382,18 +502,19 @@ export function PlanPreview({
                       </div>
                       <p className="inline-flex min-h-9 items-center gap-2 rounded-md bg-cream px-3 text-sm text-graphite sm:justify-self-end">
                         <Banknote aria-hidden="true" className="size-4" />
-                        {formatMoney(event.costDraftCents)}｜
+                        {formatMoneyAmount(event.costDraftCents)}｜
                         {costStatusLabels[event.costStatus]}
                       </p>
                     </li>
                   ))}
                 </ol>
-              </div>
-            ))}
+              </>
+            ) : null}
           </div>
 
           <div className="mt-6 rounded-md bg-shell p-4">
-            <h3 className="text-base font-semibold text-charcoal">
+            <h3 className="flex items-center gap-2 text-base font-semibold text-charcoal">
+              <ListChecks aria-hidden="true" className="size-4 text-sage" />
               待确认事项（{displayPlan.pendingItems.length}）
             </h3>
             <ul className="mt-2 space-y-2 text-sm leading-6 text-graphite">
@@ -413,7 +534,7 @@ export function PlanPreview({
         </>
       ) : (
         <p className="mt-5 rounded-md bg-shell px-4 py-3 text-base leading-7 text-graphite">
-          确认当前需求修订后，可以生成包含去返程、餐饮、活动、休息、住宿区域和准备事项的基础草稿。
+          当前还没有保存的基础计划。确认需求修订后，可以生成包含去返程、餐饮、活动、休息、住宿区域和准备事项的基础草稿。
         </p>
       )}
     </section>
