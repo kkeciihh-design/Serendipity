@@ -1,4 +1,4 @@
-import type { PlanEvent } from "./plan";
+import { planEventStart, type PlanEvent } from "./plan";
 import type { RequestSnapshot } from "./trip-request";
 
 export type PlanOverviewDay = {
@@ -53,6 +53,12 @@ export function formatPlanPace(snapshot: RequestSnapshot) {
     : planPaceLabels[snapshot.pace];
 }
 
+export function formatPlanEventTimeRange(event: PlanEvent) {
+  const endDate = event.endDate;
+  const crossesMidnight = Boolean(endDate && endDate !== event.date);
+  return `${event.startTime}–${crossesMidnight ? `次日 ${event.endTime}` : event.endTime}`;
+}
+
 function dayTheme(events: PlanEvent[], snapshot: RequestSnapshot) {
   const destination = snapshot.destination ?? "目的地";
   if (events.some((event) => event.type === "departure_transport")) {
@@ -84,8 +90,9 @@ export function buildPlanOverviewDays(
       dayNumber,
       date: dayEvents[0]?.date ?? "",
       theme: dayTheme(dayEvents, snapshot),
-      events: [...dayEvents].sort((left, right) =>
-        left.startTime.localeCompare(right.startTime),
+      events: [...dayEvents].sort(
+        (left, right) =>
+          planEventStart(left).getTime() - planEventStart(right).getTime(),
       ),
     }));
 }

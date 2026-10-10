@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPlanOverviewDays,
   formatBudgetTarget,
+  formatPlanEventTimeRange,
   planRequiresUpdate,
   planStatusLabel,
 } from "../lib/plan-overview";
@@ -27,7 +28,8 @@ function snapshot(input: Partial<RequestSnapshot> = {}) {
 }
 
 function event(
-  input: Pick<PlanEvent, "id" | "dayNumber" | "date" | "startTime" | "endTime" | "type" | "title">,
+  input: Partial<PlanEvent> &
+    Pick<PlanEvent, "id" | "dayNumber" | "date" | "startTime" | "endTime" | "type" | "title">,
 ): PlanEvent {
   return {
     ...input,
@@ -98,6 +100,23 @@ describe("plan overview formatting", () => {
     expect(formatBudgetTarget(snapshot({ budgetAmountCents: null }))).toBe(
       "预算目标未确认",
     );
+  });
+
+  it("formats cross-midnight event times with the next-day marker", () => {
+    expect(
+      formatPlanEventTimeRange(
+        event({
+          id: "overnight",
+          dayNumber: 1,
+          date: "2026-11-01",
+          startTime: "23:00",
+          endTime: "01:00",
+          endDate: "2026-11-02",
+          type: "activity",
+          title: "夜间抵达活动",
+        }),
+      ),
+    ).toBe("23:00–次日 01:00");
   });
 
   it("detects stale plans from both persisted flags and latest request revisions", () => {

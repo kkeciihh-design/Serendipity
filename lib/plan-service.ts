@@ -5,12 +5,21 @@ import {
   planEventSchema,
   planPendingItemSchema,
   planValidationResultsSchema,
+  preparePlanForStorage,
+  validatePlan,
   type AIPlanOutput,
   type PlanCapture,
   type PlanEvent,
   type PlanPendingItem,
   type PlanValidationResults,
 } from "./plan";
+import {
+  applyPlanEventEdit,
+  planEventEditHasChanges,
+  PlanEventFixedError,
+  PlanEventLockedError,
+  type PlanEventEditInput,
+} from "./plan-edit";
 import { requestSnapshotSchema, type RequestSnapshot } from "./trip-request";
 
 export class PlanValidationError extends Error {
@@ -181,6 +190,7 @@ export async function savePlanVersion(input: {
   }
 
   const { capture } = input;
+  const plan = preparePlanForStorage(input.plan);
   try {
     return await prisma.$transaction(async (transaction) => {
       if (input.abortSignal?.aborted) {
@@ -220,8 +230,8 @@ export async function savePlanVersion(input: {
           versionNumber,
           requestRevision: capture.expectedRequestRevision,
           requestSnapshot: JSON.stringify(capture.requestSnapshot),
-          events: JSON.stringify(input.plan.events),
-          pendingItems: JSON.stringify(input.plan.pendingItems),
+          events: JSON.stringify(plan.events),
+          pendingItems: JSON.stringify(plan.pendingItems),
           validationResults: JSON.stringify(input.validationResults),
           requirementUpToDate: true,
         },
@@ -255,6 +265,102 @@ export async function savePlanVersion(input: {
       throw new PlanConflictError(
         "当前计划版本已经变化，旧生成结果不能提交。",
       );
+    }
+    throw error;
+  }
+}
+
+export async function savePlanEventEdit(input: {
+  tripId: string;
+  expectedPlanVersion: number;
+  edit: PlanEventEditInput;
+}) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      const row = await transaction.planVersion.findUnique({
+        where: {
+          tripId_versionNumber: {
+            tripId: input.tripId,
+            versionNumber: input.expectedPlanVersion,
+          },
+        },
+        include: { trip: { select: { currentPlanVersionId: true } } },
+      });
+      if (!row) {
+        throw new PlanNotFoundError();
+      }
+      if (row.trip.currentPlanVersionId !== row.id) {
+        throw new PlanConflictError("只能编辑当前计划版本；历史版本保持只读。");
+      }
+
+      const currentPlan = serializePlan(row);
+      const sourcePlan: AIPlanOutput = {
+        events: currentPlan.events,
+        pendingItems: currentPlan.pendingItems,
+      };
+      if (!planEventEditHasChanges(sourcePlan, input.edit)) {
+        throw new PlanValidationError("本次没有需要保存的修改。");
+      }
+
+      const editedPlan = preparePlanForStorage(
+        applyPlanEventEdit(sourcePlan, input.edit),
+      );
+      const validationResults = validatePlan(
+        editedPlan,
+        currentPlan.requestSnapshot,
+      );
+      if (validationResults.errors.length > 0) {
+        throw new PlanValidationError(validationResults.errors[0]);
+      }
+
+      const created = await transaction.planVersion.create({
+        data: {
+          tripId: row.tripId,
+          versionNumber: row.versionNumber + 1,
+          requestRevision: row.requestRevision,
+          requestSnapshot: row.requestSnapshot,
+          events: JSON.stringify(editedPlan.events),
+          pendingItems: JSON.stringify(editedPlan.pendingItems),
+          validationResults: JSON.stringify(validationResults),
+          requirementUpToDate: row.requirementUpToDate,
+        },
+      });
+
+      await transaction.trip.update({
+        where: { id: row.tripId },
+        data: {
+          currentPlanVersionId: created.id,
+          status: !row.requirementUpToDate
+            ? "plan_needs_update"
+            : validationResults.warnings.length > 0
+              ? "plan_needs_review"
+              : "planned",
+        },
+      });
+
+      const saved = await transaction.planVersion.findUnique({
+        where: { id: created.id },
+        include: { trip: { select: { currentPlanVersionId: true } } },
+      });
+      if (!saved) {
+        throw new PlanConflictError();
+      }
+      return serializePlan(saved);
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw new PlanConflictError(
+        "当前计划版本已经变化，本次编辑不能提交，请刷新后重试。",
+      );
+    }
+    if (
+      error instanceof PlanEventLockedError ||
+      error instanceof PlanEventFixedError
+    ) {
+      throw new PlanConflictError(error.message);
     }
     throw error;
   }
