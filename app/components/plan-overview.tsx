@@ -13,6 +13,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  calculateBudgetSummary,
+  overspendStatusLabels,
+  formatMoneyRange,
+  type PlanCostItem,
+} from "@/lib/budget";
+import {
   buildPlanOverviewDays,
   formatBudgetTarget,
   formatPlanPace,
@@ -21,6 +27,7 @@ import {
   planRequiresUpdate,
   planStatusLabel,
 } from "@/lib/plan-overview";
+import { PlanBudget } from "./plan-budget";
 import { PlanTimeline } from "./plan-timeline";
 import type {
   PlanEvent,
@@ -36,6 +43,7 @@ export type PlanVersionClient = {
   requestRevision: number;
   requestSnapshot: RequestSnapshot;
   events: PlanEvent[];
+  costs: PlanCostItem[];
   pendingItems: PlanPendingItem[];
   validationResults: PlanValidationResults;
   requirementUpToDate: boolean;
@@ -90,6 +98,7 @@ export function PlanOverview({
     selectedPlan,
   );
   const [selectedDayNumber, setSelectedDayNumber] = useState(1);
+  const [activeTab, setActiveTab] = useState<"timeline" | "budget">("timeline");
   const [isGenerating, setIsGenerating] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -129,6 +138,16 @@ export function PlanOverview({
             displayPlan.requestSnapshot,
           )
         : [],
+    [displayPlan],
+  );
+  const budgetSummary = useMemo(
+    () =>
+      displayPlan
+        ? calculateBudgetSummary(
+            displayPlan.costs,
+            displayPlan.requestSnapshot,
+          )
+        : null,
     [displayPlan],
   );
   const selectedDay =
@@ -323,7 +342,12 @@ export function PlanOverview({
           <div>
             <dt className="text-sm text-graphite">费用</dt>
             <dd className="mt-1 text-base font-semibold text-charcoal">
-              {formatBudgetTarget(displayPlan.requestSnapshot)}｜费用待核算
+              {budgetSummary
+                ? `${formatBudgetTarget(displayPlan.requestSnapshot)}｜预计 ${formatMoneyRange(
+                    budgetSummary.totalMinCents,
+                    budgetSummary.totalMaxCents,
+                  )}｜${overspendStatusLabels[budgetSummary.overspendStatus]}`
+                : "费用待核算"}
             </dd>
           </div>
         </dl>
@@ -404,52 +428,92 @@ export function PlanOverview({
           ) : null}
 
           <div className="mt-5">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h3 className="text-lg font-semibold text-charcoal">
-                每日安排
-              </h3>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div
+                role="tablist"
+                aria-label="计划视图"
+                className="inline-flex rounded-md border border-sand bg-cream p-1"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "timeline"}
+                  onClick={() => setActiveTab("timeline")}
+                  className={`min-h-11 rounded px-4 text-sm font-semibold transition-colors ${
+                    activeTab === "timeline"
+                      ? "bg-sage text-white"
+                      : "text-graphite hover:text-sage"
+                  }`}
+                >
+                  每日时间轴
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "budget"}
+                  onClick={() => setActiveTab("budget")}
+                  className={`min-h-11 rounded px-4 text-sm font-semibold transition-colors ${
+                    activeTab === "budget"
+                      ? "bg-sage text-white"
+                      : "text-graphite hover:text-sage"
+                  }`}
+                >
+                  预算
+                </button>
+              </div>
               <p className="text-sm text-graphite">
                 共 {days.length} 天｜{displayPlan.events.length} 个日程｜
                 {displayPlan.pendingItems.length} 项待确认
               </p>
             </div>
-            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-              {days.map((day) => (
-                <button
-                  key={day.dayNumber}
-                  type="button"
-                  onClick={() => setSelectedDayNumber(day.dayNumber)}
-                  aria-pressed={day.dayNumber === selectedDay?.dayNumber}
-                  className={`min-h-16 min-w-40 max-w-72 shrink-0 rounded-md border px-3 py-2 text-left transition-colors ${
-                    day.dayNumber === selectedDay?.dayNumber
-                      ? "border-sage bg-sage-soft text-sage"
-                      : "border-sand bg-cream text-graphite hover:border-sage"
-                  }`}
-                >
-                  <span className="block text-sm font-semibold">
-                    第 {day.dayNumber} 天｜{day.date}
-                  </span>
-                  <span className="mt-1 block break-words text-sm leading-5">
-                    {day.theme}｜{day.events.length} 项
-                  </span>
-                </button>
-              ))}
-            </div>
 
-            {selectedDay ? (
+            {activeTab === "timeline" ? (
               <>
-                <h4 className="mt-5 text-lg font-semibold text-charcoal">
-                  第 {selectedDay.dayNumber} 天｜{selectedDay.date}｜
-                  {selectedDay.theme}
-                </h4>
-                <PlanTimeline
-                  tripId={tripId}
-                  plan={displayPlan}
-                  day={selectedDay}
-                  onSaved={handlePlanSaved}
-                />
+                <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                  {days.map((day) => (
+                    <button
+                      key={day.dayNumber}
+                      type="button"
+                      onClick={() => setSelectedDayNumber(day.dayNumber)}
+                      aria-pressed={day.dayNumber === selectedDay?.dayNumber}
+                      className={`min-h-16 min-w-40 max-w-72 shrink-0 rounded-md border px-3 py-2 text-left transition-colors ${
+                        day.dayNumber === selectedDay?.dayNumber
+                          ? "border-sage bg-sage-soft text-sage"
+                          : "border-sand bg-cream text-graphite hover:border-sage"
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">
+                        第 {day.dayNumber} 天｜{day.date}
+                      </span>
+                      <span className="mt-1 block break-words text-sm leading-5">
+                        {day.theme}｜{day.events.length} 项
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                {selectedDay ? (
+                  <>
+                    <h4 className="mt-5 text-lg font-semibold text-charcoal">
+                      第 {selectedDay.dayNumber} 天｜{selectedDay.date}｜
+                      {selectedDay.theme}
+                    </h4>
+                    <PlanTimeline
+                      tripId={tripId}
+                      plan={displayPlan}
+                      day={selectedDay}
+                      onSaved={handlePlanSaved}
+                    />
+                  </>
+                ) : null}
               </>
-            ) : null}
+            ) : (
+              <PlanBudget
+                tripId={tripId}
+                plan={displayPlan}
+                onSaved={handlePlanSaved}
+              />
+            )}
           </div>
 
           <div className="mt-6 rounded-md bg-shell p-4">

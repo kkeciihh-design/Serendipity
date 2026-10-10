@@ -169,7 +169,7 @@ async function seedTimelinePlan(tripId: string) {
 
 function mockedPlan(tripId: string, versionNumber = 1) {
   const dates = futureDates();
-  return {
+  const plan = {
     id: `plan-${versionNumber}`,
     tripId,
     versionNumber,
@@ -278,6 +278,33 @@ function mockedPlan(tripId: string, versionNumber = 1) {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+  return {
+    ...plan,
+    costs: plan.events.map((event) => ({
+      id: `cost-${event.id}`,
+      linkedEventId: event.id,
+      category:
+        event.type === "departure_transport" ||
+        event.type === "return_transport"
+          ? "transport"
+          : event.type === "activity"
+            ? "ticket"
+            : "other",
+      currency: "CNY",
+      unit: "one_time",
+      unitAmountCents: event.costDraftCents,
+      unitAmountMaxCents: null,
+      quantity: null,
+      certainty:
+        event.costStatus === "estimated"
+          ? "estimated"
+          : "pending_confirmation",
+      paymentStatus: "not_paid",
+      source: "ai_draft",
+      eventRemoved: false,
+      note: null,
+    })),
+  };
 }
 
 test("shows a generated basic plan and keeps costs visibly unverified", async ({
@@ -302,7 +329,7 @@ test("shows a generated basic plan and keeps costs visibly unverified", async ({
     page.getByRole("heading", { name: /计划版本 1/ }),
   ).toBeVisible();
   await expect(page.getByText("依据需求修订 2 的确认快照生成")).toBeVisible();
-  await expect(page.getByText("费用待核算")).toBeVisible();
+  await expect(page.getByText(/预计 120 元/)).toBeVisible();
   await expect(page.getByText("前往长沙")).toBeVisible();
   await expect(page.getByText("湘江边散步")).toBeVisible();
   await expect(page.getByText("120 元｜估算")).toBeVisible();
@@ -369,7 +396,8 @@ test("overview switches days and plan versions without mixing request snapshots"
       note: null,
     };
   };
-  const overviewPlan = (versionNumber: number, destination: string) => ({
+  const overviewPlan = (versionNumber: number, destination: string) => {
+  const plan = {
     id: `overview-plan-${versionNumber}`,
     tripId,
     versionNumber,
@@ -399,7 +427,32 @@ test("overview switches days and plan versions without mixing request snapshots"
     isCurrent: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-  });
+  };
+  return {
+    ...plan,
+    costs: plan.events.map((event) => ({
+      id: `cost-${event.id}`,
+      linkedEventId: event.id,
+      category:
+        event.type === "departure_transport" ||
+        event.type === "return_transport"
+          ? "transport"
+          : event.type === "activity"
+            ? "ticket"
+            : "other",
+      currency: "CNY",
+      unit: "one_time",
+      unitAmountCents: event.costDraftCents,
+      unitAmountMaxCents: null,
+      quantity: null,
+      certainty: "pending_confirmation",
+      paymentStatus: "not_paid",
+      source: "ai_draft",
+      eventRemoved: false,
+      note: null,
+    })),
+  };
+};
 
   await page.route(`**/api/trips/${tripId}/plans/generate`, async (route) => {
     const body = JSON.parse(route.request().postData() ?? "{}") as {
@@ -575,6 +628,243 @@ test("timeline edits, locks, cancellation, and cross-midnight times persist", as
       clientWidth: document.documentElement.clientWidth,
     }));
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  } finally {
+    const prisma = new PrismaClient({
+      datasources: { db: { url: e2eDatabaseUrl } },
+    });
+    await prisma.trip.delete({ where: { id: tripId } });
+    await prisma.$disconnect();
+  }
+});
+
+async function seedBudgetPlan(tripId: string) {
+  const dates = futureDates();
+  const prisma = new PrismaClient({
+    datasources: { db: { url: e2eDatabaseUrl } },
+  });
+  const requestSnapshot = {
+    destination: "长沙",
+    startDate: dates.startDate,
+    endDate: dates.endDate,
+    travelerCount: 2,
+    budgetAmountCents: 150000,
+    budgetScope: "total",
+    pace: "balanced",
+    interests: ["城市漫步"],
+    accommodation: null,
+    constraints: [],
+    fieldSources: {
+      destination: "user_confirmed",
+      startDate: "program_derived",
+      endDate: "program_derived",
+      travelerCount: "user_confirmed",
+      budgetAmountCents: "user_confirmed",
+      budgetScope: "user_confirmed",
+      pace: "user_confirmed",
+      interests: "user_confirmed",
+      accommodation: "unspecified",
+      constraints: "unspecified",
+    },
+  };
+  const event = (
+    id: string,
+    dayNumber: number,
+    type: string,
+    title: string,
+    startTime: string,
+    endTime: string,
+  ) => ({
+    id,
+    dayNumber,
+    date: dayNumber === 1 ? dates.startDate : dates.endDate,
+    startTime,
+    endTime,
+    type,
+    title,
+    locationName: type === "preparation" ? null : "长沙区域",
+    suggestedDurationSeconds: 3600,
+    costDraftCents: null,
+    costStatus: "pending_confirmation",
+    note: null,
+  });
+  const events = [
+    event("d1-preparation", 1, "preparation", "当日准备", "07:30", "07:50"),
+    event("d1-breakfast", 1, "meal", "早餐", "08:00", "08:45"),
+    event("departure", 1, "departure_transport", "前往长沙", "09:00", "10:00"),
+    event("d1-activity", 1, "activity", "城市公园散步", "11:00", "12:00"),
+    event("d1-taxi", 1, "local_transport", "打车前往展览", "12:10", "12:30"),
+    event("d1-lunch", 1, "meal", "午餐", "12:40", "13:30"),
+    event("d1-optional", 1, "activity", "可选城市展览", "14:00", "15:00"),
+    event("d1-rest", 1, "rest", "回酒店休息", "15:10", "15:40"),
+    event("d1-hotel", 1, "accommodation", "住宿区域", "20:00", "22:00"),
+    event("d2-preparation", 2, "preparation", "返程前准备", "07:30", "07:50"),
+    event("d2-breakfast", 2, "meal", "早餐", "08:00", "08:45"),
+    event("d2-activity", 2, "activity", "湘江边散步", "10:00", "12:00"),
+    event("d2-lunch", 2, "meal", "午餐", "12:30", "13:30"),
+    event("d2-rest", 2, "rest", "休息", "14:00", "14:30"),
+    event("return", 2, "return_transport", "返程", "17:00", "19:00"),
+  ];
+  const cost = (
+    id: string,
+    category: string,
+    unitAmountCents: number | null,
+    overrides: Record<string, unknown> = {},
+  ) => ({
+    id: `cost-${id}`,
+    linkedEventId: id,
+    category,
+    currency: "CNY",
+    unit: "one_time",
+    unitAmountCents,
+    unitAmountMaxCents: null,
+    quantity: null,
+    certainty:
+      unitAmountCents === null ? "pending_confirmation" : "user_confirmed",
+    paymentStatus: "not_paid",
+    source: unitAmountCents === null ? "ai_draft" : "user_confirmed",
+    eventRemoved: false,
+    note: null,
+    ...overrides,
+  });
+  const costs = [
+    cost("d1-preparation", "other", null),
+    cost("d1-breakfast", "meal", null),
+    cost("departure", "transport", 48600),
+    cost("d1-activity", "ticket", 6000),
+    cost("d1-taxi", "local_transport", 8000, {
+      certainty: "estimated",
+      source: "ai_draft",
+    }),
+    cost("d1-lunch", "meal", 26000),
+    cost("d1-optional", "ticket", null),
+    cost("d1-rest", "other", 12000),
+    cost("d1-hotel", "accommodation", 28000),
+    cost("d2-preparation", "other", null),
+    cost("d2-breakfast", "meal", null),
+    cost("d2-activity", "ticket", null),
+    cost("d2-lunch", "meal", null),
+    cost("d2-rest", "other", null),
+    cost("return", "transport", null),
+  ];
+  const plan = await prisma.planVersion.create({
+    data: {
+      tripId,
+      versionNumber: 1,
+      requestRevision: 2,
+      requestSnapshot: JSON.stringify(requestSnapshot),
+      events: JSON.stringify(events),
+      costs: JSON.stringify(costs),
+      pendingItems: JSON.stringify([
+        {
+          id: "price",
+          category: "price",
+          title: "确认主要费用",
+          reason: "本阶段没有实时价格依据。",
+          requiredBefore: dates.startDate,
+        },
+      ]),
+      validationResults: JSON.stringify({
+        status: "valid",
+        errors: [],
+        warnings: [],
+      }),
+      requirementUpToDate: true,
+    },
+  });
+  await prisma.trip.update({
+    where: { id: tripId },
+    data: { currentPlanVersionId: plan.id, status: "planned" },
+  });
+  await prisma.$disconnect();
+}
+
+test("budget tab shows totals from the plan snapshot and persists confirmed amounts", async ({
+  page,
+}) => {
+  const tripId = await createConfirmedTrip(page);
+  await seedBudgetPlan(tripId);
+
+  try {
+    const draftResponse = await page.request.patch(
+      `/api/trips/${tripId}/request`,
+      {
+        data: {
+          expectedRequestRevision: 2,
+          request: {
+            destination: "长沙",
+            startDate: futureDates().startDate,
+            endDate: futureDates().endDate,
+            travelerCount: 4,
+            budgetAmountCents: 300000,
+            budgetScope: "total",
+            pace: "balanced",
+            interests: ["城市漫步"],
+            accommodation: null,
+            constraints: [],
+            fieldSources: {
+              destination: "user_confirmed",
+              startDate: "program_derived",
+              endDate: "program_derived",
+              travelerCount: "user_confirmed",
+              budgetAmountCents: "user_confirmed",
+              budgetScope: "user_confirmed",
+              pace: "user_confirmed",
+              interests: "user_confirmed",
+              accommodation: "unspecified",
+              constraints: "unspecified",
+            },
+          },
+        },
+      },
+    );
+    expect(draftResponse.status()).toBe(200);
+
+    await page.goto(`/trips/${tripId}`);
+    await expect(page.getByText("当前计划待更新")).toBeVisible();
+    await expect(
+      page.getByText(/预算目标 1500 元（全程总预算）｜预计 1286 元/),
+    ).toBeVisible();
+
+    await page.getByRole("tab", { name: "预算" }).click();
+    await expect(page.getByText("预计费用")).toBeVisible();
+    await expect(page.getByText("1286 元").first()).toBeVisible();
+    await expect(
+      page.getByText(/人均 643 元｜2 人｜1 间房｜1 晚/),
+    ).toBeVisible();
+    await expect(page.getByText("未知金额 9 项不计入合计")).toBeVisible();
+
+    await page.getByRole("button", { name: /可选城市展览/ }).click();
+    await page
+      .getByLabel("单价（元，留空表示未知）")
+      .fill("70");
+    await page.getByLabel("已支付").check();
+    await page.getByRole("button", { name: "确认金额" }).click();
+    await expect(
+      page.getByText(/计划版本 2 已保存；费用沿用本计划的需求快照。/),
+    ).toBeVisible();
+    await expect(page.getByText("1356 元").first()).toBeVisible();
+
+    await page.reload();
+    await page.getByRole("tab", { name: "预算" }).click();
+    await expect(page.getByText("1356 元").first()).toBeVisible();
+    await expect(page.getByText("已支付 70 元").first()).toBeVisible();
+    await expect(
+      page.getByText(/预算目标 1500 元（全程总预算）/),
+    ).toBeVisible();
+
+    await page.getByRole("link", { name: "V1" }).click();
+    await expect(
+      page.getByRole("heading", { name: /计划版本 1/ }),
+    ).toBeVisible();
+    await page.getByRole("tab", { name: "预算" }).click();
+    await expect(page.getByText("历史版本费用只读")).toBeVisible();
+    await page.getByRole("button", { name: /前往长沙/ }).click();
+    await expect(
+      page.getByRole("button", { name: "确认金额" }),
+    ).toBeDisabled();
+    await expect(
+      page.getByLabel("单价（元，留空表示未知）"),
+    ).toBeDisabled();
   } finally {
     const prisma = new PrismaClient({
       datasources: { db: { url: e2eDatabaseUrl } },

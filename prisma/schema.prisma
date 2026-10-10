@@ -49,6 +49,7 @@ model PlanVersion {
   requestRevision     Int
   requestSnapshot     String
   events              String
+  costs               String   @default("[]")
   pendingItems        String
   validationResults   String
   requirementUpToDate Boolean  @default(true)
