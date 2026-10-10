@@ -1,5 +1,14 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import {
+  applyPlanCostEdit,
+  CostEditValidationError,
+  derivePlanCosts,
+  planCostItemSchema,
+  validatePlanCosts,
+  type PlanCostEditInput,
+  type PlanCostItem,
+} from "./budget";
 import { getDatabaseUrl } from "./data-directory";
 import {
   planEventSchema,
@@ -52,6 +61,7 @@ export type PlanVersionRecord = {
   requestRevision: number;
   requestSnapshot: RequestSnapshot;
   events: PlanEvent[];
+  costs: PlanCostItem[];
   pendingItems: PlanPendingItem[];
   validationResults: PlanValidationResults;
   requirementUpToDate: boolean;
@@ -91,15 +101,37 @@ function parseSnapshot(value: string): RequestSnapshot {
   }
 }
 
+function parseStoredCosts(value: string, events: PlanEvent[]): PlanCostItem[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new PlanValidationError("计划费用数据无法读取。");
+  }
+
+  // 阶段09前创建的计划版本没有费用 JSON；读取时从事件草稿派生，保证旧计划可核算。
+  if (Array.isArray(parsed) && parsed.length === 0) {
+    return derivePlanCosts(events);
+  }
+
+  const result = z.array(planCostItemSchema).safeParse(parsed);
+  if (!result.success) {
+    throw new PlanValidationError("计划费用数据无法读取。");
+  }
+  return result.data;
+}
+
 function serializePlan(record: PlanVersionRow): PlanVersionRecord {
   try {
+    const events = z.array(planEventSchema).parse(JSON.parse(record.events));
     return {
       id: record.id,
       tripId: record.tripId,
       versionNumber: record.versionNumber,
       requestRevision: record.requestRevision,
       requestSnapshot: parseSnapshot(record.requestSnapshot),
-      events: z.array(planEventSchema).parse(JSON.parse(record.events)),
+      events,
+      costs: parseStoredCosts(record.costs, events),
       pendingItems: z
         .array(planPendingItemSchema)
         .parse(JSON.parse(record.pendingItems)),
@@ -191,6 +223,11 @@ export async function savePlanVersion(input: {
 
   const { capture } = input;
   const plan = preparePlanForStorage(input.plan);
+  const costs = derivePlanCosts(plan.events);
+  const costErrors = validatePlanCosts(costs, plan.events);
+  if (costErrors.length > 0) {
+    throw new PlanValidationError(costErrors[0]);
+  }
   try {
     return await prisma.$transaction(async (transaction) => {
       if (input.abortSignal?.aborted) {
@@ -231,6 +268,7 @@ export async function savePlanVersion(input: {
           requestRevision: capture.expectedRequestRevision,
           requestSnapshot: JSON.stringify(capture.requestSnapshot),
           events: JSON.stringify(plan.events),
+          costs: JSON.stringify(costs),
           pendingItems: JSON.stringify(plan.pendingItems),
           validationResults: JSON.stringify(input.validationResults),
           requirementUpToDate: true,
@@ -305,6 +343,15 @@ export async function savePlanEventEdit(input: {
       const editedPlan = preparePlanForStorage(
         applyPlanEventEdit(sourcePlan, input.edit),
       );
+      const editedCosts = currentPlan.costs.map((cost) =>
+        input.edit.remove && cost.linkedEventId === input.edit.eventId
+          ? { ...cost, eventRemoved: true }
+          : cost,
+      );
+      const costErrors = validatePlanCosts(editedCosts, editedPlan.events);
+      if (costErrors.length > 0) {
+        throw new PlanValidationError(costErrors[0]);
+      }
       const validationResults = validatePlan(
         editedPlan,
         currentPlan.requestSnapshot,
@@ -320,6 +367,7 @@ export async function savePlanEventEdit(input: {
           requestRevision: row.requestRevision,
           requestSnapshot: row.requestSnapshot,
           events: JSON.stringify(editedPlan.events),
+          costs: JSON.stringify(editedCosts),
           pendingItems: JSON.stringify(editedPlan.pendingItems),
           validationResults: JSON.stringify(validationResults),
           requirementUpToDate: row.requirementUpToDate,
@@ -361,6 +409,107 @@ export async function savePlanEventEdit(input: {
       error instanceof PlanEventFixedError
     ) {
       throw new PlanConflictError(error.message);
+    }
+    throw error;
+  }
+}
+
+export async function savePlanCostEdit(input: {
+  tripId: string;
+  expectedPlanVersion: number;
+  edit: PlanCostEditInput;
+}) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      const row = await transaction.planVersion.findUnique({
+        where: {
+          tripId_versionNumber: {
+            tripId: input.tripId,
+            versionNumber: input.expectedPlanVersion,
+          },
+        },
+        include: { trip: { select: { currentPlanVersionId: true } } },
+      });
+      if (!row) {
+        throw new PlanNotFoundError();
+      }
+      if (row.trip.currentPlanVersionId !== row.id) {
+        throw new PlanConflictError("只能编辑当前计划版本；历史版本保持只读。");
+      }
+
+      const currentPlan = serializePlan(row);
+      let editedCosts: PlanCostItem[];
+      try {
+        editedCosts = applyPlanCostEdit(currentPlan.costs, input.edit);
+      } catch (error) {
+        if (error instanceof CostEditValidationError) {
+          throw new PlanValidationError(error.message);
+        }
+        throw error;
+      }
+      const costErrors = validatePlanCosts(
+        editedCosts,
+        currentPlan.events,
+      );
+      if (costErrors.length > 0) {
+        throw new PlanValidationError(costErrors[0]);
+      }
+
+      const sourcePlan: AIPlanOutput = {
+        events: currentPlan.events,
+        pendingItems: currentPlan.pendingItems,
+      };
+      const validationResults = validatePlan(
+        sourcePlan,
+        currentPlan.requestSnapshot,
+      );
+      if (validationResults.errors.length > 0) {
+        throw new PlanValidationError(validationResults.errors[0]);
+      }
+
+      const created = await transaction.planVersion.create({
+        data: {
+          tripId: row.tripId,
+          versionNumber: row.versionNumber + 1,
+          requestRevision: row.requestRevision,
+          requestSnapshot: row.requestSnapshot,
+          events: row.events,
+          costs: JSON.stringify(editedCosts),
+          pendingItems: row.pendingItems,
+          validationResults: JSON.stringify(validationResults),
+          requirementUpToDate: row.requirementUpToDate,
+        },
+      });
+
+      await transaction.trip.update({
+        where: { id: row.tripId },
+        data: {
+          currentPlanVersionId: created.id,
+          status: !row.requirementUpToDate
+            ? "plan_needs_update"
+            : validationResults.warnings.length > 0
+              ? "plan_needs_review"
+              : "planned",
+        },
+      });
+
+      const saved = await transaction.planVersion.findUnique({
+        where: { id: created.id },
+        include: { trip: { select: { currentPlanVersionId: true } } },
+      });
+      if (!saved) {
+        throw new PlanConflictError();
+      }
+      return serializePlan(saved);
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw new PlanConflictError(
+        "当前计划版本已经变化，本次费用修改不能提交，请刷新后重试。",
+      );
     }
     throw error;
   }

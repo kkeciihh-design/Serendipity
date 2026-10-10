@@ -167,6 +167,7 @@ export function PlanTimeline({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            type: "event",
             eventId: selectedEvent.id,
             startTime: draft.startTime,
             durationMinutes: draft.durationMinutes,
