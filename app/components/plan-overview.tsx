@@ -1,12 +1,10 @@
 "use client";
 
 import {
-  Banknote,
   CalendarRange,
   CircleAlert,
   History,
   ListChecks,
-  MapPin,
   PencilLine,
   Sparkles,
   XCircle,
@@ -17,13 +15,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   buildPlanOverviewDays,
   formatBudgetTarget,
-  formatMoneyAmount,
   formatPlanPace,
   formatRequestDateRange,
   formatTravelerCount,
   planRequiresUpdate,
   planStatusLabel,
 } from "@/lib/plan-overview";
+import { PlanTimeline } from "./plan-timeline";
 import type {
   PlanEvent,
   PlanPendingItem,
@@ -57,23 +55,6 @@ type Feedback = {
   message: string;
 };
 
-const eventTypeLabels: Record<PlanEvent["type"], string> = {
-  departure_transport: "去程",
-  local_transport: "市内交通",
-  return_transport: "返程",
-  meal: "餐饮",
-  activity: "活动",
-  accommodation: "住宿区域",
-  rest: "休息",
-  preparation: "准备",
-};
-
-const costStatusLabels: Record<PlanEvent["costStatus"], string> = {
-  estimated: "估算",
-  pending_confirmation: "待确认",
-  user_confirmed: "已确认",
-};
-
 async function readApiError(response: Response) {
   const payload = (await response.json().catch(() => null)) as {
     error?: string;
@@ -82,18 +63,6 @@ async function readApiError(response: Response) {
     payload?.error ??
     `生成失败（HTTP ${response.status}）。已有计划没有被覆盖，请稍后重试。`
   );
-}
-
-function formatDuration(seconds: number) {
-  if (seconds < 60) {
-    return `${seconds} 秒`;
-  }
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.ceil((seconds % 3600) / 60);
-  if (hours === 0) {
-    return `${minutes} 分钟`;
-  }
-  return minutes === 0 ? `${hours} 小时` : `${hours} 小时 ${minutes} 分钟`;
 }
 
 export function PlanOverview({
@@ -246,6 +215,11 @@ export function PlanOverview({
 
   const cancelGeneration = () => {
     abortControllerRef.current?.abort();
+  };
+
+  const handlePlanSaved = (savedPlan: PlanVersionClient) => {
+    setPreviewPlan(savedPlan);
+    router.refresh();
   };
 
   return (
@@ -468,46 +442,12 @@ export function PlanOverview({
                   第 {selectedDay.dayNumber} 天｜{selectedDay.date}｜
                   {selectedDay.theme}
                 </h4>
-                <ol className="mt-3 divide-y divide-sand/80 rounded-md border border-sand/80">
-                  {selectedDay.events.map((event) => (
-                    <li
-                      key={event.id}
-                      className="grid gap-2 bg-white p-4 sm:grid-cols-[110px_1fr_auto] sm:items-start"
-                    >
-                      <p className="text-sm font-semibold text-sage">
-                        {event.startTime}–{event.endTime}
-                      </p>
-                      <div className="min-w-0">
-                        <p className="break-words text-base font-semibold text-charcoal">
-                          {event.title}
-                        </p>
-                        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-graphite">
-                          <span>{eventTypeLabels[event.type]}</span>
-                          <span>
-                            建议 {formatDuration(event.suggestedDurationSeconds)}
-                          </span>
-                          {event.locationName ? (
-                            <span className="inline-flex min-w-0 items-center gap-1">
-                              <MapPin
-                                aria-hidden="true"
-                                className="size-4 shrink-0"
-                              />
-                              <span className="break-words">
-                                {event.locationName}
-                              </span>
-                            </span>
-                          ) : null}
-                          {event.note ? <span>{event.note}</span> : null}
-                        </p>
-                      </div>
-                      <p className="inline-flex min-h-9 items-center gap-2 rounded-md bg-cream px-3 text-sm text-graphite sm:justify-self-end">
-                        <Banknote aria-hidden="true" className="size-4" />
-                        {formatMoneyAmount(event.costDraftCents)}｜
-                        {costStatusLabels[event.costStatus]}
-                      </p>
-                    </li>
-                  ))}
-                </ol>
+                <PlanTimeline
+                  tripId={tripId}
+                  plan={displayPlan}
+                  day={selectedDay}
+                  onSaved={handlePlanSaved}
+                />
               </>
             ) : null}
           </div>

@@ -221,6 +221,68 @@ describe("basic plan validation", () => {
     expect(result.errors.some((error) => error.includes("时段重叠"))).toBe(true);
   });
 
+  it("accepts a cross-midnight event within the trip dates", () => {
+    const plan = completePlan(2);
+    const dates = futureDates(2).dates;
+    const activity = plan.events.find(
+      (item) => item.id === "day-1-activity",
+    )!;
+    activity.startTime = "23:00";
+    activity.endTime = "01:00";
+    activity.endDate = dates[1];
+    activity.suggestedDurationSeconds = 7200;
+
+    const result = validatePlan(plan, snapshotFor(2));
+    expect(result.errors).toEqual([]);
+    expect(result.status).toBe("valid");
+  });
+
+  it("rejects a cross-midnight event that overlaps the next day", () => {
+    const plan = completePlan(2);
+    const dates = futureDates(2).dates;
+    const activity = plan.events.find(
+      (item) => item.id === "day-1-activity",
+    )!;
+    activity.startTime = "23:00";
+    activity.endTime = "01:00";
+    activity.endDate = dates[1];
+    activity.suggestedDurationSeconds = 7200;
+
+    const nextDayPreparation = plan.events.find(
+      (item) => item.id === "day-2-preparation",
+    )!;
+    nextDayPreparation.startTime = "00:30";
+    nextDayPreparation.endTime = "00:50";
+
+    const result = validatePlan(plan, snapshotFor(2));
+    expect(result.errors.some((error) => error.includes("时段重叠"))).toBe(true);
+  });
+
+  it("rejects cross-midnight events that end after the trip", () => {
+    const plan = completePlan(2);
+    const dates = futureDates(2).dates;
+    const returnEvent = plan.events.find((item) => item.id === "return")!;
+    returnEvent.startTime = "23:00";
+    returnEvent.endTime = "01:00";
+    returnEvent.endDate = "2099-01-01";
+    returnEvent.suggestedDurationSeconds = 7200;
+
+    const result = validatePlan(plan, snapshotFor(2));
+    expect(result.errors).toContain("返程 的结束日期只能当天或次日。");
+    expect(result.errors).toContain("返程 的结束日期超出行程日期范围。");
+    expect(dates.length).toBe(2);
+  });
+
+  it("rejects zero and negative-duration events", () => {
+    const plan = completePlan(2);
+    const activity = plan.events.find(
+      (item) => item.id === "day-1-activity",
+    )!;
+    activity.endTime = activity.startTime;
+    const result = validatePlan(plan, snapshotFor(2));
+    expect(result.errors.some((error) => error.includes("结束时刻必须晚于开始时刻"))).toBe(true);
+  });
+
   it("rejects negative durations through schema validation", () => {
     const plan = completePlan(2);
     plan.events[0].suggestedDurationSeconds = -1;

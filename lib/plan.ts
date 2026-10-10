@@ -22,6 +22,10 @@ export const planCostStatusSchema = z.enum([
 
 export type PlanCostStatus = z.infer<typeof planCostStatusSchema>;
 
+export const planEventStatusSchema = z.enum(["suggested", "confirmed"]);
+
+export type PlanEventStatus = z.infer<typeof planEventStatusSchema>;
+
 const planDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "计划日期必须使用 YYYY-MM-DD。");
@@ -34,11 +38,15 @@ export const planEventSchema = z.object({
   id: z.string().trim().min(1).max(80),
   dayNumber: z.number().int().min(1).max(4),
   date: planDate,
+  endDate: planDate.nullable().optional(),
   startTime: planTime,
   endTime: planTime,
   type: planEventTypeSchema,
   title: z.string().trim().min(1).max(120),
   locationName: z.string().trim().max(160).nullable(),
+  order: z.number().int().min(1).nullable().optional(),
+  status: planEventStatusSchema.optional(),
+  locked: z.boolean().optional(),
   suggestedDurationSeconds: z
     .number()
     .int()
@@ -104,6 +112,67 @@ function formatDate(date: Date) {
   return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, "0")}-${`${date.getDate()}`.padStart(2, "0")}`;
 }
 
+function parsePlanDateTime(date: string, time: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  return new Date(year, month - 1, day, hour, minute, 0, 0);
+}
+
+export function formatPlanDate(date: Date) {
+  return formatDate(date);
+}
+
+export function nextPlanDate(date: string) {
+  const next = parseDate(date);
+  next.setDate(next.getDate() + 1);
+  return formatDate(next);
+}
+
+export function planEventStart(event: PlanEvent) {
+  return parsePlanDateTime(event.date, event.startTime);
+}
+
+export function planEventEnd(event: PlanEvent) {
+  if (event.endDate) {
+    return parsePlanDateTime(event.endDate, event.endTime);
+  }
+
+  const [startHour, startMinute] = event.startTime.split(":").map(Number);
+  const [endHour, endMinute] = event.endTime.split(":").map(Number);
+  const endDate =
+    endHour * 60 + endMinute < startHour * 60 + startMinute
+      ? nextPlanDate(event.date)
+      : event.date;
+  return parsePlanDateTime(endDate, event.endTime);
+}
+
+export function sortPlanEvents(events: PlanEvent[]) {
+  return [...events].sort((left, right) => {
+    const leftStart = planEventStart(left).getTime();
+    const rightStart = planEventStart(right).getTime();
+    if (leftStart !== rightStart) {
+      return leftStart - rightStart;
+    }
+    return (left.order ?? 0) - (right.order ?? 0) || left.id.localeCompare(right.id);
+  });
+}
+
+export function preparePlanForStorage(plan: AIPlanOutput): AIPlanOutput {
+  return {
+    events: sortPlanEvents(plan.events).map((event, index) => {
+      const end = planEventEnd(event);
+      return {
+        ...event,
+        order: index + 1,
+        status: event.status ?? "suggested",
+        locked: event.locked ?? false,
+        endDate: formatPlanDate(end),
+      };
+    }),
+    pendingItems: plan.pendingItems,
+  };
+}
+
 export function tripDates(snapshot: RequestSnapshot) {
   if (!snapshot.startDate || !snapshot.endDate) {
     throw new Error("生成计划前必须有确认的出发和返回日期。");
@@ -120,19 +189,14 @@ export function tripDates(snapshot: RequestSnapshot) {
   return dates;
 }
 
-function minutes(value: string) {
-  const [hour, minute] = value.split(":").map(Number);
-  return hour * 60 + minute;
-}
-
 function eventEndsAfterStart(event: PlanEvent) {
-  return minutes(event.endTime) > minutes(event.startTime);
+  return planEventEnd(event).getTime() > planEventStart(event).getTime();
 }
 
 function overlaps(left: PlanEvent, right: PlanEvent) {
   return (
-    minutes(left.startTime) < minutes(right.endTime) &&
-    minutes(right.startTime) < minutes(left.endTime)
+    planEventStart(left).getTime() < planEventEnd(right).getTime() &&
+    planEventStart(right).getTime() < planEventEnd(left).getTime()
   );
 }
 
@@ -165,8 +229,18 @@ export function validatePlan(
         `第 ${event.dayNumber} 天的日期必须等于 ${dates[event.dayNumber - 1]}。`,
       );
     }
+    if (
+      event.endDate &&
+      event.endDate !== event.date &&
+      event.endDate !== nextPlanDate(event.date)
+    ) {
+      errors.push(`${event.title} 的结束日期只能当天或次日。`);
+    }
     if (!eventEndsAfterStart(event)) {
-      errors.push(`${event.title} 的结束时间必须晚于开始时间。`);
+      errors.push(`${event.title} 的结束时刻必须晚于开始时刻。`);
+    }
+    if (formatPlanDate(planEventEnd(event)) > dates[dates.length - 1]) {
+      errors.push(`${event.title} 的结束日期超出行程日期范围。`);
     }
 
     if (
@@ -177,15 +251,11 @@ export function validatePlan(
     }
   }
 
-  const sortedEvents = [...plan.events].sort(
-    (left, right) =>
-      left.dayNumber - right.dayNumber ||
-      minutes(left.startTime) - minutes(right.startTime),
-  );
+  const sortedEvents = sortPlanEvents(plan.events);
   for (let index = 1; index < sortedEvents.length; index += 1) {
     const left = sortedEvents[index - 1];
     const right = sortedEvents[index];
-    if (left.dayNumber === right.dayNumber && overlaps(left, right)) {
+    if (overlaps(left, right)) {
       errors.push(`${left.title} 与 ${right.title} 的时段重叠。`);
     }
   }
@@ -279,7 +349,7 @@ export function validatePlan(
 }
 
 export function normalizePlanOutput(output: AIPlanOutput): AIPlanOutput {
-  return {
+  return preparePlanForStorage({
     events: output.events.map((event) => ({
       ...event,
       costStatus:
@@ -288,7 +358,7 @@ export function normalizePlanOutput(output: AIPlanOutput): AIPlanOutput {
           : event.costStatus,
     })),
     pendingItems: output.pendingItems,
-  };
+  });
 }
 
 export function parseAIPlanOutput(raw: string): AIPlanOutput {

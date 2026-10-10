@@ -475,4 +475,169 @@ describe("plan versions", () => {
     });
     expect((await planService.listPlanVersions(trip.id)).length).toBe(1);
   });
+
+  it("edits current plans into new versions while preserving ids, snapshots, and locks", async () => {
+    const original = "阶段08验收：两天长沙每日时间轴。";
+    const trip = await trips.createTrip({ originalRequest: original });
+    const snapshot = snapshotWith();
+    await requestService.saveExtractionResult({
+      tripId: trip.id,
+      expectedRequestRevision: 1,
+      expectedOriginalRequest: original,
+      snapshot,
+      questions: [],
+      assumptions: [],
+    });
+    const confirmed = await requestService.confirmRequest(trip.id, {
+      expectedRequestRevision: 2,
+    });
+    const capture = await planService.getPlanGenerationContext(
+      trip.id,
+      confirmed.requestRevision,
+    );
+
+    const initialPlan = completePlan(capture.requestSnapshot);
+    initialPlan.events.push(
+      event({
+        id: "d1-optional-activity",
+        dayNumber: 1,
+        date: capture.requestSnapshot.startDate!,
+        startTime: "15:00",
+        endTime: "16:00",
+        type: "activity",
+        title: "可选城市展览",
+        suggestedDurationSeconds: 3600,
+      }),
+    );
+    const initialValidation = validatePlan(
+      initialPlan,
+      capture.requestSnapshot,
+    );
+    const first = await planService.savePlanVersion({
+      capture,
+      plan: initialPlan,
+      validationResults: initialValidation,
+    });
+    const firstIds = first.events.map((event) => event.id);
+
+    const locked = await planService.savePlanEventEdit({
+      tripId: trip.id,
+      expectedPlanVersion: first.versionNumber,
+      edit: {
+        eventId: "d1-optional-activity",
+        startTime: "15:00",
+        durationMinutes: 60,
+        note: "展览门票已买",
+        locked: true,
+        status: "confirmed",
+        remove: false,
+      },
+    });
+    expect(locked.versionNumber).toBe(2);
+    expect(locked.requestRevision).toBe(first.requestRevision);
+    expect(locked.requestSnapshot.destination).toBe("长沙");
+    expect(locked.events.map((event) => event.id)).toEqual(firstIds);
+    expect(
+      locked.events.find((event) => event.id === "d1-optional-activity"),
+    ).toMatchObject({
+      note: "展览门票已买",
+      locked: true,
+      status: "confirmed",
+    });
+
+    await expect(
+      planService.savePlanEventEdit({
+        tripId: trip.id,
+        expectedPlanVersion: locked.versionNumber,
+        edit: {
+          eventId: "d1-optional-activity",
+          startTime: "15:00",
+          durationMinutes: 60,
+          note: "展览门票已买",
+          locked: true,
+          status: "confirmed",
+          remove: true,
+        },
+      }),
+    ).rejects.toMatchObject({ name: "PlanConflictError" });
+
+    const unlocked = await planService.savePlanEventEdit({
+      tripId: trip.id,
+      expectedPlanVersion: locked.versionNumber,
+      edit: {
+        eventId: "d1-optional-activity",
+        startTime: "15:00",
+        durationMinutes: 60,
+        note: "展览门票已买",
+        locked: false,
+        status: "confirmed",
+        remove: false,
+      },
+    });
+    expect(unlocked.versionNumber).toBe(3);
+    expect(
+      unlocked.events.find((event) => event.id === "d1-optional-activity"),
+    ).toMatchObject({
+      startTime: "15:00",
+      suggestedDurationSeconds: 3600,
+      locked: false,
+    });
+
+    const removed = await planService.savePlanEventEdit({
+      tripId: trip.id,
+      expectedPlanVersion: unlocked.versionNumber,
+      edit: {
+        eventId: "d1-optional-activity",
+        startTime: "15:00",
+        durationMinutes: 60,
+        note: "展览门票已买",
+        locked: false,
+        status: "confirmed",
+        remove: true,
+      },
+    });
+    expect(removed.versionNumber).toBe(4);
+    expect(removed.events.map((event) => event.id)).toEqual(
+      firstIds.filter((id) => id !== "d1-optional-activity"),
+    );
+
+    await changeAndConfirm(
+      trip.id,
+      confirmed.requestRevision,
+      snapshotWith({ destination: "株洲" }),
+    );
+    const dates = tripDates(capture.requestSnapshot);
+    const staleEdited = await planService.savePlanEventEdit({
+      tripId: trip.id,
+      expectedPlanVersion: removed.versionNumber,
+      edit: {
+        eventId: "d1-activity",
+        startTime: "23:00",
+        durationMinutes: 120,
+        note: "夜间抵达后活动",
+        locked: false,
+        status: "confirmed",
+        remove: false,
+      },
+    });
+    expect(staleEdited.versionNumber).toBe(5);
+    expect(staleEdited.requestRevision).toBe(2);
+    expect(staleEdited.requestSnapshot.destination).toBe("长沙");
+    expect(staleEdited.requirementUpToDate).toBe(false);
+    expect(
+      staleEdited.events.find((event) => event.id === "d1-activity"),
+    ).toMatchObject({
+      startTime: "23:00",
+      endTime: "01:00",
+      endDate: dates[1],
+      suggestedDurationSeconds: 7200,
+    });
+
+    const history = await planService.listPlanVersions(trip.id);
+    expect(history.map((plan) => plan.versionNumber)).toEqual([
+      5, 4, 3, 2, 1,
+    ]);
+    expect(history[0].requestSnapshot.destination).toBe("长沙");
+    expect(history[0].isCurrent).toBe(true);
+  });
 });
