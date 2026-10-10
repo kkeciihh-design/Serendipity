@@ -84,6 +84,19 @@ test("settings APIs are protected before password setup", async ({
 
   const tripsResponse = await request.get("/api/trips");
   expect(tripsResponse.status()).toBe(200);
+
+  const searchTestResponse = await request.post(
+    "/api/settings/search/test",
+    {
+      data: { provider: "duckduckgo", language: "en" },
+    },
+  );
+  expect(searchTestResponse.status()).toBe(401);
+
+  const searchSaveResponse = await request.post("/api/settings/search", {
+    data: { provider: "duckduckgo", language: "en" },
+  });
+  expect(searchSaveResponse.status()).toBe(401);
 });
 
 test("configures a personal password and a working AI connection", async ({
@@ -114,6 +127,10 @@ test("configures a personal password and a working AI connection", async ({
   await page.getByRole("button", { name: "保存配置" }).click();
   await expect(page.getByText("AI 配置已保存，重启应用后仍可使用。")).toBeVisible();
   await expect(page.getByText("已配置，末尾 alue")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "来源搜索" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "保存搜索配置" }),
+  ).toBeDisabled();
 
   const pageHtml = await page.content();
   expect(pageHtml).not.toContain(testApiKey);

@@ -6,6 +6,7 @@ import { TripEditor } from "@/app/components/trip-editor";
 import { getTrip } from "@/lib/trips";
 import { getTripRequestRecord } from "@/lib/trip-request-service";
 import { listPlanVersions } from "@/lib/plan-service";
+import { listEvidenceFacts } from "@/lib/evidence-service";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,13 @@ export default async function TripDetailPage({
 
   const request = await getTripRequestRecord(trip.id);
   const plans = await listPlanVersions(trip.id);
+  const evidenceFacts = await listEvidenceFacts(trip.id);
+  const plansWithEvidence = plans.map((plan) => ({
+    ...plan,
+    evidenceFacts: evidenceFacts.filter(
+      (fact) => fact.planVersionId === plan.id,
+    ),
+  }));
   const parsedPlanVersion = planVersion ? Number(planVersion) : null;
   const selectedVersionNumber =
     parsedPlanVersion !== null &&
@@ -55,7 +63,7 @@ export default async function TripDetailPage({
             updatedAt: trip.updatedAt.toISOString(),
           }}
           request={request}
-          plans={plans}
+          plans={plansWithEvidence}
           selectedVersionNumber={selectedVersionNumber}
         />
       </div>

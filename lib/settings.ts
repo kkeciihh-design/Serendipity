@@ -42,6 +42,9 @@ const AI_PROVIDERS = [
 
 export type AIProvider = (typeof AI_PROVIDERS)[number];
 
+const SEARCH_PROVIDERS = ["duckduckgo"] as const;
+const SEARCH_LANGUAGES = ["en", "zh-CN"] as const;
+
 const aiBaseConfigurationSchema = z.object({
   provider: z.enum(AI_PROVIDERS),
   baseUrl: z
@@ -80,6 +83,11 @@ const promptSchema = z.object({
 export type AIConfigurationInput = z.infer<typeof aiConfigurationSchema>;
 export type AIModelConfigurationInput = z.infer<typeof aiBaseConfigurationSchema>;
 export type PromptInput = z.infer<typeof promptSchema>;
+const searchConfigurationSchema = z.object({
+  provider: z.enum(SEARCH_PROVIDERS),
+  language: z.enum(SEARCH_LANGUAGES),
+});
+export type SearchConfigurationInput = z.infer<typeof searchConfigurationSchema>;
 export type SafeSettings = {
   passwordConfigured: boolean;
   ai: {
@@ -96,6 +104,13 @@ export type SafeSettings = {
     version: number;
     basePrompt: string;
     systemPrompt: string;
+  };
+  search: {
+    provider: "duckduckgo";
+    language: "en" | "zh-CN";
+    status: string;
+    checkedAt: string | null;
+    error: string | null;
   };
 };
 
@@ -254,6 +269,14 @@ export async function getSafeSettings(): Promise<SafeSettings> {
       version: record.promptVersion,
       basePrompt: record.basePrompt,
       systemPrompt: record.systemPrompt,
+    },
+    search: {
+      provider:
+        record.searchProvider === "duckduckgo" ? "duckduckgo" : "duckduckgo",
+      language: record.searchLanguage === "zh-CN" ? "zh-CN" : "en",
+      status: record.searchStatus ?? "not_tested",
+      checkedAt: record.searchCheckedAt?.toISOString() ?? null,
+      error: record.searchError,
     },
   };
 }
@@ -418,6 +441,83 @@ export async function saveAIConfiguration(
       connectionProvider: effective.provider,
       connectionModel: effective.model,
       connectionError: null,
+    },
+  });
+
+  return getSafeSettings();
+}
+
+export async function effectiveSearchConfiguration(input: unknown) {
+  return parseOrThrow(searchConfigurationSchema, input);
+}
+
+export async function storedSearchConfiguration(): Promise<{
+  provider: "duckduckgo";
+  language: "en" | "zh-CN";
+}> {
+  const record = await getSettingsRecord();
+  return {
+    provider: record.searchProvider === "duckduckgo" ? "duckduckgo" : "duckduckgo",
+    language: record.searchLanguage === "zh-CN" ? "zh-CN" : "en",
+  };
+}
+
+function fingerprintSearchConfiguration(input: {
+  provider: string;
+  language: string;
+}) {
+  const stableJson = JSON.stringify([
+    input.provider.trim(),
+    input.language.trim(),
+  ]);
+  return crypto.createHash("sha256").update(stableJson).digest("base64url");
+}
+
+export function createSearchTestToken(input: {
+  provider: string;
+  language: string;
+}) {
+  return createSignedPayload({
+    fingerprint: fingerprintSearchConfiguration(input),
+    expiresAt: Date.now() + TEST_TOKEN_TTL_MS,
+  });
+}
+
+export function verifySearchTestToken(
+  token: string | undefined,
+  input: { provider: string; language: string },
+) {
+  const payload = verifySignedPayload<{
+    fingerprint?: unknown;
+    expiresAt?: unknown;
+  }>(token);
+  if (
+    !payload ||
+    typeof payload.fingerprint !== "string" ||
+    typeof payload.expiresAt !== "number" ||
+    payload.expiresAt <= Date.now() ||
+    payload.fingerprint !== fingerprintSearchConfiguration(input)
+  ) {
+    throw new SettingsValidationError("当前搜索配置尚未通过连接测试，请先测试。");
+  }
+}
+
+export async function saveSearchConfiguration(
+  input: unknown,
+  testToken: string | undefined,
+) {
+  const parsed = await effectiveSearchConfiguration(input);
+  await getSettingsRecord();
+  verifySearchTestToken(testToken, parsed);
+
+  await store.appSettings.update({
+    where: { id: SINGLETON_ID },
+    data: {
+      searchProvider: parsed.provider,
+      searchLanguage: parsed.language,
+      searchStatus: "connected",
+      searchCheckedAt: new Date(),
+      searchError: null,
     },
   });
 

@@ -15,6 +15,7 @@
     "verify:phase07": "node scripts/verify-phase07.mjs",
     "verify:phase08": "node scripts/verify-phase08.mjs",
     "verify:phase09": "node scripts/verify-phase09.mjs",
+    "verify:phase10": "node scripts/verify-phase10.mjs",
     "capture:phase05": "node scripts/capture-phase05-screens.mjs",
     "capture:phase06": "node scripts/capture-phase06-screens.mjs",
     "postinstall": "prisma generate",

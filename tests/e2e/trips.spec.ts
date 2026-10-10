@@ -133,7 +133,7 @@ test("响应式布局可读且无横向溢出", async ({ page }) => {
   ] as const;
 
   await page.goto("/");
-  await page.locator("#trip-request").fill("杭州两日轻松漫步");
+  await page.locator("#trip-request").fill("响应式布局专属两日漫步");
   await page.getByRole("button", { name: "保存旅行草稿" }).click();
   await expect(page).toHaveURL(/\/trips$/);
 
@@ -158,7 +158,11 @@ test("响应式布局可读且无横向溢出", async ({ page }) => {
       fullPage: true,
     });
 
-    await page.getByRole("link", { name: "打开继续" }).first().click();
+    await page
+      .getByRole("article")
+      .filter({ hasText: "响应式布局专属两日漫步" })
+      .getByRole("link", { name: "打开继续" })
+      .click();
     await expect(page.locator("#trip-title")).toBeVisible();
     await page.screenshot({
       path: `${evidenceDirectory}/阶段-03-详情-${viewport.name}-${viewport.width}px.png`,

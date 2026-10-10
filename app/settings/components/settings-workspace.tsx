@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  BookOpenCheck,
   ExternalLink,
   Eye,
   EyeOff,
@@ -30,6 +31,10 @@ type ConfigurationSnapshot = {
   baseUrl: string;
   model: string;
   apiKey?: string;
+};
+type SearchConfigurationSnapshot = {
+  provider: string;
+  language: string;
 };
 
 const readApiError = async (response: Response, fallback: string) => {
@@ -74,6 +79,15 @@ export function SettingsWorkspace({
   const [promptFeedback, setPromptFeedback] = useState<Feedback | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isSavingConnection, setIsSavingConnection] = useState(false);
+  const [searchLanguage, setSearchLanguage] = useState(
+    initialSettings.search.language,
+  );
+  const [searchTestToken, setSearchTestToken] = useState<string | null>(null);
+  const [testedSearchSnapshot, setTestedSearchSnapshot] =
+    useState<SearchConfigurationSnapshot | null>(null);
+  const [searchFeedback, setSearchFeedback] = useState<Feedback | null>(null);
+  const [isTestingSearch, setIsTestingSearch] = useState(false);
+  const [isSavingSearch, setIsSavingSearch] = useState(false);
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -82,6 +96,10 @@ export function SettingsWorkspace({
     baseUrl: baseUrl.trim(),
     model: model.trim(),
     ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+  };
+  const currentSearchSnapshot: SearchConfigurationSnapshot = {
+    provider: "duckduckgo",
+    language: searchLanguage,
   };
 
   const providerHelp = provider === "openai-chat-completions"
@@ -275,6 +293,116 @@ export function SettingsWorkspace({
       });
     } finally {
       setIsSavingConnection(false);
+    }
+  };
+
+  const testSearchConnection = async () => {
+    if (isTestingSearch) {
+      return;
+    }
+
+    setIsTestingSearch(true);
+    setSearchFeedback({
+      tone: "info",
+      message: "正在连接搜索服务...",
+    });
+    try {
+      const response = await fetch("/api/settings/search/test", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-csrf-token": csrfToken,
+        },
+        body: JSON.stringify(currentSearchSnapshot),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        testToken?: string;
+        resultCount?: number;
+        error?: string;
+      };
+      if (!response.ok || !payload.ok || !payload.testToken) {
+        throw new Error(payload.error ?? "搜索服务连接失败。");
+      }
+
+      setSearchTestToken(payload.testToken);
+      setTestedSearchSnapshot(currentSearchSnapshot);
+      setSearchFeedback({
+        tone: "success",
+        message: `搜索服务连接通过，返回 ${payload.resultCount ?? 0} 个结果。`,
+      });
+    } catch (error) {
+      setSearchTestToken(null);
+      setTestedSearchSnapshot(null);
+      setSearchFeedback({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "搜索服务连接失败，原配置保持不变。",
+      });
+    } finally {
+      setIsTestingSearch(false);
+    }
+  };
+
+  const saveSearchSettings = async () => {
+    if (isSavingSearch) {
+      return;
+    }
+    if (
+      !searchTestToken ||
+      JSON.stringify(testedSearchSnapshot) !==
+        JSON.stringify(currentSearchSnapshot)
+    ) {
+      setSearchFeedback({
+        tone: "error",
+        message: "请先测试当前搜索配置。",
+      });
+      return;
+    }
+
+    setIsSavingSearch(true);
+    setSearchFeedback({
+      tone: "info",
+      message: "正在保存搜索配置...",
+    });
+    try {
+      const response = await fetch("/api/settings/search", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-csrf-token": csrfToken,
+        },
+        body: JSON.stringify({
+          ...currentSearchSnapshot,
+          testToken: searchTestToken,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, "保存搜索配置失败。"));
+      }
+
+      const savedSettings = (await response.json()) as SafeSettings;
+      setSettings(savedSettings);
+      setSearchLanguage(savedSettings.search.language);
+      setSearchTestToken(null);
+      setTestedSearchSnapshot(null);
+      setSearchFeedback({
+        tone: "success",
+        message: "搜索配置已保存，来源核验会使用服务端读取。",
+      });
+      router.refresh();
+    } catch (error) {
+      setSearchFeedback({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "保存搜索配置失败，原配置保持不变。",
+      });
+    } finally {
+      setIsSavingSearch(false);
     }
   };
 
@@ -533,6 +661,94 @@ export function SettingsWorkspace({
             }`}
           >
             {connectionFeedback.message}
+          </p>
+        ) : null}
+      </section>
+
+      <section className="rounded-lg border border-sand/80 bg-white p-5 shadow-[0_1px_2px_rgba(35,42,38,0.06)] sm:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-semibold text-charcoal">来源搜索</h2>
+          <span
+            className={`inline-flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
+              settings.search.status === "connected"
+                ? "bg-sage-soft text-sage"
+                : "bg-shell text-graphite"
+            }`}
+          >
+            <BookOpenCheck aria-hidden="true" className="size-4" />
+            {settings.search.status === "connected" ? "已连接" : "未测试"}
+          </span>
+        </div>
+
+        <div className="mt-5 grid gap-5 sm:grid-cols-2">
+          <label htmlFor="search-provider" className="block text-base font-semibold text-charcoal">
+            提供方
+            <select
+              id="search-provider"
+              value="duckduckgo"
+              disabled
+              className="mt-3 min-h-12 w-full rounded-md border border-sand bg-graphite/10 px-4 py-3 text-base leading-7 text-graphite"
+            >
+              <option value="duckduckgo">DuckDuckGo</option>
+            </select>
+          </label>
+          <label htmlFor="search-language" className="block text-base font-semibold text-charcoal">
+            搜索语言
+            <select
+              id="search-language"
+              value={searchLanguage}
+              onChange={(event) => {
+                setSearchLanguage(
+                  event.target.value === "zh-CN" ? "zh-CN" : "en",
+                );
+                setSearchTestToken(null);
+                setTestedSearchSnapshot(null);
+              }}
+              className="mt-3 min-h-12 w-full rounded-md border border-sand bg-cream px-4 py-3 text-base leading-7 text-charcoal focus:border-sage focus:outline-none"
+            >
+              <option value="en">English</option>
+              <option value="zh-CN">中文</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={testSearchConnection}
+            disabled={isTestingSearch}
+            className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-md border border-sage px-5 py-3 text-base font-semibold text-sage transition-colors hover:bg-sage-soft disabled:cursor-not-allowed disabled:border-sand disabled:text-graphite/70"
+          >
+            <PlugZap aria-hidden="true" className="size-5" />
+            {isTestingSearch ? "正在测试..." : "测试搜索"}
+          </button>
+          <button
+            type="button"
+            onClick={saveSearchSettings}
+            disabled={
+              isSavingSearch ||
+              !searchTestToken ||
+              JSON.stringify(testedSearchSnapshot) !==
+                JSON.stringify(currentSearchSnapshot)
+            }
+            className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-md bg-sage px-5 py-3 text-base font-semibold text-white transition-colors hover:bg-focus disabled:cursor-not-allowed disabled:bg-graphite/70"
+          >
+            <Save aria-hidden="true" className="size-5" />
+            {isSavingSearch ? "正在保存..." : "保存搜索配置"}
+          </button>
+        </div>
+        {searchFeedback ? (
+          <p
+            aria-live="polite"
+            className={`mt-4 rounded-md px-4 py-3 text-base leading-7 ${
+              searchFeedback.tone === "error"
+                ? "bg-clay-soft text-clay"
+                : searchFeedback.tone === "success"
+                  ? "bg-sage-soft text-sage"
+                  : "bg-shell text-graphite"
+            }`}
+          >
+            {searchFeedback.message}
           </p>
         ) : null}
       </section>

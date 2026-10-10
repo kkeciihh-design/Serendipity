@@ -4,6 +4,7 @@ import {
   ArrowDown,
   Banknote,
   CircleAlert,
+  BookOpenCheck,
   Lock,
   LockOpen,
   PencilLine,
@@ -25,6 +26,9 @@ import {
   type PlanEventStatus,
 } from "@/lib/plan";
 import type { PlanVersionClient } from "./plan-overview";
+import type { EvidenceFactClient, EvidenceField } from "@/lib/evidence";
+import { evidenceFieldLabels, evidenceStatusLabels } from "@/lib/evidence";
+import { EvidenceDrawer } from "./evidence-drawer";
 
 const eventTypeLabels: Record<PlanEvent["type"], string> = {
   departure_transport: "去程",
@@ -122,6 +126,10 @@ export function PlanTimeline({
   const [isSaving, setIsSaving] = useState(false);
   const [removeRequested, setRemoveRequested] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [evidenceFacts, setEvidenceFacts] = useState<EvidenceFactClient[]>(
+    plan.evidenceFacts ?? [],
+  );
+  const [drawerField, setDrawerField] = useState<EvidenceField | null>(null);
 
   const nextDayFirstEvent = useMemo(() => {
     const nextDayEvents = plan.events.filter(
@@ -142,6 +150,10 @@ export function PlanTimeline({
     setRemoveRequested(false);
   }, [plan, selectedEventId]);
 
+  useEffect(() => {
+    setEvidenceFacts(plan.evidenceFacts ?? []);
+  }, [plan.id, plan.evidenceFacts]);
+
   const selectedEvent = plan.events.find(
     (event) => event.id === selectedEventId,
   );
@@ -151,6 +163,10 @@ export function PlanTimeline({
     selectedEvent?.type === "departure_transport" ||
     selectedEvent?.type === "return_transport";
   const fieldsDisabled = !canEdit || isSaving || originalLocked;
+  const selectedFact = (field: EvidenceField) =>
+    evidenceFacts.find(
+      (fact) => fact.targetId === selectedEvent?.id && fact.field === field,
+    ) ?? null;
 
   const saveEdit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -209,6 +225,20 @@ export function PlanTimeline({
             day.events[index + 1] ??
             (index === day.events.length - 1 ? nextDayFirstEvent : undefined);
           const locked = event.locked ?? false;
+          const eventFacts = evidenceFacts.filter(
+            (fact) => fact.targetId === event.id,
+          );
+          const sourceStatus = eventFacts.some(
+            (fact) => fact.effectiveStatus === "verified",
+          )
+            ? "来源已核验"
+            : eventFacts.some(
+                (fact) =>
+                  fact.effectiveStatus === "conflict" ||
+                  fact.effectiveStatus === "stale",
+              )
+              ? "来源需复核"
+              : "来源待确认";
           return (
             <li key={event.id} className="space-y-2">
               <button
@@ -233,6 +263,7 @@ export function PlanTimeline({
                     <span>
                       {eventStatusLabels[event.status ?? "suggested"]}
                     </span>
+                    <span>{sourceStatus}</span>
                     {event.locationName ? <span>{event.locationName}</span> : null}
                     {event.note ? <span>{event.note}</span> : null}
                   </span>
@@ -280,6 +311,65 @@ export function PlanTimeline({
               </span>
             ) : null}
           </div>
+
+          <section
+            aria-labelledby="event-evidence-title"
+            className="mt-4 rounded-md border border-sand/80 bg-white p-4"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3
+                id="event-evidence-title"
+                className="flex min-w-0 items-center gap-2 text-base font-semibold text-charcoal"
+              >
+                <BookOpenCheck aria-hidden="true" className="size-5 shrink-0 text-sage" />
+                来源与可靠性
+              </h3>
+              <p className="text-sm text-graphite">
+                安排：
+                {selectedEvent.status === "confirmed" ? "用户已确认" : "AI建议"}
+                ｜费用：
+                {plan.costs.find((cost) => cost.linkedEventId === selectedEvent.id)
+                  ?.certainty === "user_confirmed"
+                  ? "用户已确认"
+                  : plan.costs.find((cost) => cost.linkedEventId === selectedEvent.id)
+                      ?.certainty === "estimated"
+                    ? "AI估算"
+                    : "待确认"}
+              </p>
+            </div>
+            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+              {(Object.keys(evidenceFieldLabels) as EvidenceField[]).map((field) => {
+                const fact = evidenceFacts.find(
+                  (item) => item.targetId === selectedEvent.id && item.field === field,
+                );
+                return (
+                  <li key={field}>
+                    <button
+                      type="button"
+                      onClick={() => setDrawerField(field)}
+                      className="flex min-h-12 w-full items-center justify-between gap-3 rounded-md border border-sand bg-cream px-4 py-3 text-left text-sm text-charcoal transition-colors hover:border-sage"
+                    >
+                      <span className="font-medium">{evidenceFieldLabels[field]}</span>
+                      <span
+                        className={`inline-flex min-h-9 items-center rounded-md px-2 text-sm font-medium ${
+                          fact?.effectiveStatus === "verified"
+                            ? "bg-sage-soft text-sage"
+                            : fact?.effectiveStatus === "conflict" ||
+                                fact?.effectiveStatus === "stale"
+                              ? "bg-clay-soft text-clay"
+                              : "bg-shell text-graphite"
+                        }`}
+                      >
+                        {fact
+                          ? evidenceStatusLabels[fact.effectiveStatus]
+                          : "建议确认"}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
 
           <form onSubmit={saveEdit} className="mt-4 grid gap-4 sm:grid-cols-2">
             <label className="block text-sm font-medium text-charcoal">
@@ -435,6 +525,28 @@ export function PlanTimeline({
           <LockOpen aria-hidden="true" className="size-4" />
           取消锁定会创建新版本，但不会同时改动时间、状态或备注
         </p>
+      ) : null}
+      {drawerField && selectedEvent ? (
+        <EvidenceDrawer
+          tripId={tripId}
+          plan={plan}
+          event={selectedEvent}
+          field={drawerField}
+          fact={selectedFact(drawerField)}
+          onClose={() => setDrawerField(null)}
+          onSaved={(fact) =>
+            setEvidenceFacts((facts) => [
+              ...facts.filter(
+                (item) =>
+                  !(
+                    item.targetId === fact.targetId &&
+                    item.field === fact.field
+                  ),
+              ),
+              fact,
+            ])
+          }
+        />
       ) : null}
     </div>
   );
