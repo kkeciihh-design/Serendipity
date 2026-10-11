@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { hasAppAccess, unauthorizedResponse } from "@/lib/access";
+import { appWriteAccessError } from "@/lib/access";
 import {
   PlanGenerationError,
   generatePlanVersion,
@@ -44,9 +44,8 @@ function generationErrorResponse(error: unknown) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
-  if (!hasAppAccess(request)) {
-    return unauthorizedResponse();
-  }
+  const accessError = appWriteAccessError(request);
+  if (accessError) return accessError;
 
   try {
     const { id } = await context.params;

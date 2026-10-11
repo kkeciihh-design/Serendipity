@@ -12,7 +12,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   formatMoneyAmount,
   formatPlanEventTimeRange,
@@ -21,13 +21,14 @@ import {
 import {
   planEventEnd,
   planEventStart,
+  planEventDurationSeconds,
   sortPlanEvents,
   type PlanEvent,
   type PlanEventStatus,
 } from "@/lib/plan";
 import type { PlanVersionClient } from "./plan-overview";
 import type { EvidenceFactClient, EvidenceField } from "@/lib/evidence";
-import { evidenceFieldLabels, evidenceStatusLabels } from "@/lib/evidence";
+import { effectiveEvidenceStatus, evidenceFieldLabels, evidenceStatusLabels, summarizeEventEvidence } from "@/lib/evidence";
 import { EvidenceDrawer } from "./evidence-drawer";
 
 const eventTypeLabels: Record<PlanEvent["type"], string> = {
@@ -58,6 +59,7 @@ type Draft = {
   note: string;
   locked: boolean;
   status: PlanEventStatus;
+  timeChanged: boolean;
 };
 
 type Feedback = {
@@ -70,11 +72,12 @@ function createDraft(event: PlanEvent): Draft {
     startTime: event.startTime,
     durationMinutes: Math.max(
       1,
-      Math.round(event.suggestedDurationSeconds / 60),
+      Math.round(planEventDurationSeconds(event) / 60),
     ),
     note: event.note ?? "",
     locked: event.locked ?? false,
     status: event.status ?? "suggested",
+    timeChanged: false,
   };
 }
 
@@ -130,6 +133,14 @@ export function PlanTimeline({
     plan.evidenceFacts ?? [],
   );
   const [drawerField, setDrawerField] = useState<EvidenceField | null>(null);
+  const scope = `${tripId}/${plan.id}`;
+  const activeScope = useRef<string | null>(scope);
+  useEffect(() => {
+    activeScope.current = scope;
+    return () => { activeScope.current = null; };
+  }, [scope]);
+  const currentFacts = evidenceFacts.filter((fact) => fact.planVersionId === plan.id)
+    .map((fact) => ({ ...fact, effectiveStatus: effectiveEvidenceStatus(fact) }));
 
   const nextDayFirstEvent = useMemo(() => {
     const nextDayEvents = plan.events.filter(
@@ -164,7 +175,7 @@ export function PlanTimeline({
     selectedEvent?.type === "return_transport";
   const fieldsDisabled = !canEdit || isSaving || originalLocked;
   const selectedFact = (field: EvidenceField) =>
-    evidenceFacts.find(
+    currentFacts.find(
       (fact) => fact.targetId === selectedEvent?.id && fact.field === field,
     ) ?? null;
 
@@ -187,6 +198,7 @@ export function PlanTimeline({
             eventId: selectedEvent.id,
             startTime: draft.startTime,
             durationMinutes: draft.durationMinutes,
+            timeEdit: draft.timeChanged ? "start_duration" : "preserve",
             note: draft.note.trim() ? draft.note : null,
             locked: draft.locked,
             status: draft.status,
@@ -225,20 +237,10 @@ export function PlanTimeline({
             day.events[index + 1] ??
             (index === day.events.length - 1 ? nextDayFirstEvent : undefined);
           const locked = event.locked ?? false;
-          const eventFacts = evidenceFacts.filter(
+          const eventFacts = currentFacts.filter(
             (fact) => fact.targetId === event.id,
           );
-          const sourceStatus = eventFacts.some(
-            (fact) => fact.effectiveStatus === "verified",
-          )
-            ? "来源已核验"
-            : eventFacts.some(
-                (fact) =>
-                  fact.effectiveStatus === "conflict" ||
-                  fact.effectiveStatus === "stale",
-              )
-              ? "来源需复核"
-              : "来源待确认";
+          const sourceStatus = summarizeEventEvidence(eventFacts).label;
           return (
             <li key={event.id} className="space-y-2">
               <button
@@ -339,7 +341,7 @@ export function PlanTimeline({
             </div>
             <ul className="mt-3 grid gap-2 sm:grid-cols-2">
               {(Object.keys(evidenceFieldLabels) as EvidenceField[]).map((field) => {
-                const fact = evidenceFacts.find(
+                const fact = currentFacts.find(
                   (item) => item.targetId === selectedEvent.id && item.field === field,
                 );
                 return (
@@ -379,7 +381,7 @@ export function PlanTimeline({
                 value={draft.startTime}
                 disabled={fieldsDisabled}
                 onChange={(event) =>
-                  setDraft({ ...draft, startTime: event.target.value })
+                  setDraft({ ...draft, startTime: event.target.value, timeChanged: true })
                 }
                 className="mt-2 min-h-12 w-full rounded-md border border-sand bg-white px-4 py-3 text-base text-charcoal focus:border-sage focus:outline-none disabled:bg-graphite/10"
               />
@@ -397,6 +399,7 @@ export function PlanTimeline({
                   setDraft({
                     ...draft,
                     durationMinutes: Number(event.target.value),
+                    timeChanged: true,
                   })
                 }
                 className="mt-2 min-h-12 w-full rounded-md border border-sand bg-white px-4 py-3 text-base text-charcoal focus:border-sage focus:outline-none disabled:bg-graphite/10"
@@ -528,13 +531,32 @@ export function PlanTimeline({
       ) : null}
       {drawerField && selectedEvent ? (
         <EvidenceDrawer
+          key={`${scope}/${selectedEvent.id}/${drawerField}`}
           tripId={tripId}
           plan={plan}
           event={selectedEvent}
           field={drawerField}
           fact={selectedFact(drawerField)}
           onClose={() => setDrawerField(null)}
-          onSaved={(fact) =>
+          onRefreshState={(status) => {
+            if (activeScope.current !== scope || !plan.isCurrent) return;
+            setEvidenceFacts((facts) => {
+              const existing = facts.find((fact) => fact.planVersionId === plan.id && fact.targetId === selectedEvent.id && fact.field === drawerField);
+              const pending: EvidenceFactClient = existing ?? {
+                id: `pending-${selectedEvent.id}-${drawerField}`, planVersionId: plan.id,
+                targetType: "event", targetId: selectedEvent.id, field: drawerField,
+                status: "unverified", effectiveStatus: "stale", sourceTitle: "", sourceUrl: "",
+                sourcePublisher: "", sourcePublishedAt: null, sourceDateStatus: "not_read",
+                extractedValue: "", searchProvider: "", searchQuery: "", retrievedAt: new Date().toISOString(),
+                applicableFrom: null, applicableUntil: null, lastRefreshAt: null, lastRefreshStatus: null,
+                lastRefreshError: null, contentQuote: "", conflictReason: null,
+              };
+              return [...facts.filter((fact) => fact !== existing), { ...pending, lastRefreshStatus: status }];
+            });
+          }}
+          onSaved={(fact) => {
+            if (activeScope.current !== scope || fact.planVersionId !== plan.id ||
+              fact.targetId !== selectedEvent.id || fact.field !== drawerField || !plan.isCurrent) return;
             setEvidenceFacts((facts) => [
               ...facts.filter(
                 (item) =>
@@ -544,8 +566,8 @@ export function PlanTimeline({
                   ),
               ),
               fact,
-            ])
-          }
+            ]);
+          }}
         />
       ) : null}
     </div>

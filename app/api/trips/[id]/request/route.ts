@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { hasAppAccess, unauthorizedResponse } from "@/lib/access";
+import { hasAppAccess, unauthorizedResponse, appWriteAccessError } from "@/lib/access";
 import {
   TripRequestConflictError,
   TripRequestValidationError,
@@ -46,9 +46,8 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  if (!hasAppAccess(request)) {
-    return unauthorizedResponse();
-  }
+  const accessError = appWriteAccessError(request);
+  if (accessError) return accessError;
 
   try {
     const { id } = await context.params;

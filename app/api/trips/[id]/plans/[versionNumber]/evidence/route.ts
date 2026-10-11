@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { hasAppAccess, unauthorizedResponse } from "@/lib/access";
+import { appWriteAccessError } from "@/lib/access";
 import {
   EvidenceConflictError,
   EvidenceSourceError,
@@ -23,9 +23,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request, context: RouteContext) {
-  if (!hasAppAccess(request)) {
-    return unauthorizedResponse();
-  }
+  const accessError = appWriteAccessError(request);
+  if (accessError) return accessError;
 
   try {
     const { id, versionNumber } = await context.params;

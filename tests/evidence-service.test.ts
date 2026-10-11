@@ -29,7 +29,10 @@ function collectedResult(input: {
     sourceUrl: "https://www.example.com/visit",
     sourcePublisher: "www.example.com",
     sourcePublishedAt: input.sourcePublishedAt ?? null,
-    sourceDateStatus: input.sourceDateStatus ?? "undated",
+    sourceDateStatus: input.sourceDateStatus ?? "applicable",
+    readStatus: input.status === "verified" ? "read" as const : "not_read" as const,
+    applicableFrom: new Date(`${futureDate(29)}T00:00:00+08:00`),
+    applicableUntil: new Date(`${futureDate(32)}T23:59:59+08:00`),
     extractedValue: input.extractedValue,
   };
   if (input.status === "verified") {
@@ -138,7 +141,7 @@ describe("evidence persistence and conflict handling", () => {
       suggestedDurationSeconds: 3600,
       costDraftCents: null,
       costStatus: "pending_confirmation",
-      note: null,
+      note: id === "museum" ? "Reservations are required." : null,
       status: "suggested",
       locked: false,
       endDate: date,
@@ -323,19 +326,18 @@ describe("evidence persistence and conflict handling", () => {
       facts.filter((fact) => fact.effectiveStatus === "verified"),
     ).toHaveLength(0);
 
-    await expect(
-      evidenceService.verifyEvidenceFact(
+    const firstFailure = await evidenceService.verifyEvidenceFact(
         { ...baseInput, field: "location", query: "Example Museum address" },
         {
           collectEvidence: async () => {
             throw new Error("网络失败");
           },
         },
-      ),
-    ).rejects.toMatchObject({ name: "EvidenceSourceError" });
+      );
+    expect(firstFailure).toMatchObject({ status: "unverified", effectiveStatus: "stale", lastRefreshStatus: "failed" });
 
     const noFakeFact = await evidenceService.listEvidenceFacts(trip.id);
-    expect(noFakeFact.some((fact) => fact.field === "location")).toBe(false);
+    expect(noFakeFact.find((fact) => fact.field === "location")).toMatchObject({ status: "unverified", sourceUrl: "", contentQuote: "" });
 
     const beforeCostEdit = await planService.getPlanVersion(trip.id, 1);
     expect(beforeCostEdit.costs).toHaveLength(1);
@@ -358,7 +360,7 @@ describe("evidence persistence and conflict handling", () => {
     });
     const inheritedFacts = await evidenceService.listEvidenceFacts(trip.id);
     expect(edited.versionNumber).toBe(2);
-    expect(inheritedFacts).toHaveLength(6);
+    expect(inheritedFacts).toHaveLength(8);
     expect(
       inheritedFacts.find(
         (fact) =>

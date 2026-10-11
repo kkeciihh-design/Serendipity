@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
-const evidenceDirectory = "docs/阶段验收/证据";
+const evidenceDirectory = "test-results/phase10r-responsive";
 
 test("旅行可保存、打开、修改并跨刷新保留", async ({ page }) => {
   const consoleErrors: string[] = [];

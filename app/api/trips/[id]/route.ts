@@ -7,7 +7,7 @@ import {
   getTrip,
   updateTrip,
 } from "@/lib/trips";
-import { hasAppAccess, unauthorizedResponse } from "@/lib/access";
+import { hasAppAccess, unauthorizedResponse, appWriteAccessError } from "@/lib/access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,9 +71,8 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  if (!hasAppAccess(request)) {
-    return unauthorizedResponse();
-  }
+  const accessError = appWriteAccessError(request);
+  if (accessError) return accessError;
 
   try {
     const { id } = await context.params;
@@ -92,9 +91,8 @@ export async function PATCH(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(request: Request, context: RouteContext) {
-  if (!hasAppAccess(request)) {
-    return unauthorizedResponse();
-  }
+  const accessError = appWriteAccessError(request);
+  if (accessError) return accessError;
 
   try {
     const { id } = await context.params;

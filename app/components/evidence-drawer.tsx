@@ -7,7 +7,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   evidenceFieldLabels,
   evidenceStatusLabels,
@@ -33,6 +33,7 @@ function formatDateTime(value: string | null) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    timeZone: "Asia/Shanghai",
   }).format(new Date(value));
 }
 
@@ -61,6 +62,7 @@ export function EvidenceDrawer({
   fact,
   onClose,
   onSaved,
+  onRefreshState,
 }: {
   tripId: string;
   plan: PlanVersionClient;
@@ -69,29 +71,45 @@ export function EvidenceDrawer({
   fact: EvidenceFactClient | null;
   onClose: () => void;
   onSaved: (fact: EvidenceFactClient) => void;
+  onRefreshState: (status: "refreshing" | "failed") => void;
 }) {
   const defaultQuery = `${event.title} ${event.locationName ?? ""} ${evidenceFieldLabels[field]}`.trim();
   const [query, setQuery] = useState(defaultQuery);
   const [officialHost, setOfficialHost] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const scope = `${tripId}/${plan.id}/${event.id}/${field}`;
+  const activeScope = useRef<string | null>(scope);
+  const requestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    activeScope.current = plan.isCurrent ? scope : null;
     setQuery(defaultQuery);
     setFeedback(null);
-  }, [defaultQuery, field]);
+    setIsVerifying(false);
+    return () => {
+      activeScope.current = null;
+      requestRef.current?.abort();
+    };
+  }, [scope, plan.isCurrent, defaultQuery]);
 
   const verify = async () => {
     if (isVerifying || !plan.isCurrent) {
       return;
     }
+    const controller = new AbortController();
+    requestRef.current?.abort();
+    requestRef.current = controller;
+    const isActive = () => activeScope.current === scope && requestRef.current === controller && !controller.signal.aborted;
     setIsVerifying(true);
+    onRefreshState("refreshing");
     setFeedback({ tone: "info", message: "正在搜索并读取官方来源..." });
     try {
       const response = await fetch(
         `/api/trips/${tripId}/plans/${plan.versionNumber}/evidence`,
         {
           method: "POST",
+          signal: controller.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             eventId: event.id,
@@ -105,16 +123,24 @@ export function EvidenceDrawer({
         throw new Error(await readApiError(response));
       }
       const payload = (await response.json()) as { fact: EvidenceFactClient };
+      if (!isActive()) return;
+      if (payload.fact.planVersionId !== plan.id || payload.fact.targetId !== event.id || payload.fact.field !== field) {
+        throw new Error("来源结果属于其他计划或字段，请重新核验当前安排。");
+      }
       onSaved(payload.fact);
       setFeedback({
         tone:
           payload.fact.effectiveStatus === "verified" ? "success" : "info",
         message:
           payload.fact.effectiveStatus === "verified"
-            ? "已读取官方页面并保存字段证据。"
-            : "已读取来源，但本字段仍需确认，没有错误升级为已核验。",
+            ? "官方来源支持本字段的当前值，并明确覆盖本次日程日期。"
+            : payload.fact.lastRefreshStatus === "failed"
+              ? "来源读取失败，已保留旧记录；本字段需要复核。"
+              : "本字段仍需确认，请查看字段值、适用日期和待复核原因。",
       });
     } catch (error) {
+      if (!isActive()) return;
+      onRefreshState("failed");
       setFeedback({
         tone: "error",
         message:
@@ -123,7 +149,10 @@ export function EvidenceDrawer({
             : "来源核验失败，当前计划保持不变。",
       });
     } finally {
-      setIsVerifying(false);
+      if (isActive()) {
+        requestRef.current = null;
+        setIsVerifying(false);
+      }
     }
   };
 
@@ -186,11 +215,17 @@ export function EvidenceDrawer({
                 来源记录
               </h3>
               <p className="mt-2 text-sm leading-6 text-graphite">
-                {fact.status === "verified"
-                  ? "已读取页面正文并匹配本字段内容。"
-                  : fact.status === "conflict"
+                {fact.effectiveStatus === "verified"
+                  ? "来源支持当前字段值，且适用日期覆盖本次安排；这不表示整份行程均已核验。"
+                  : fact.effectiveStatus === "conflict"
                     ? "已读取来源，但不同来源或新旧读取结果不一致。"
-                    : "该链接是搜索候选或读取尝试；没有获得可核验正文，不能视为已核验。"}
+                    : fact.lastRefreshStatus === "refreshing"
+                      ? plan.isCurrent ? "来源正在复核，完成前不显示为已核验。" : "这个历史版本保存时来源仍在复核，后续请求结果不会改写此记录。"
+                      : fact.lastRefreshStatus === "failed"
+                        ? "最近一次读取失败。下方保留此前的来源资料，不能据此确认当前安排。"
+                        : fact.lastRefreshStatus === "success"
+                          ? "已读取页面，但字段值、对象或日期适用性仍有未确认项。"
+                          : "当前来源需要确认；下方资料保留供复核，不代表已核验。"}
               </p>
               <dl className="mt-3 grid gap-3 text-sm leading-6 text-graphite sm:grid-cols-2">
                 <div>
@@ -210,8 +245,14 @@ export function EvidenceDrawer({
                   </dd>
                 </div>
                 <div>
-                  <dt className="font-medium text-charcoal">建议复核截止</dt>
-                  <dd className="mt-1">{formatDateTime(fact.applicableUntil)}</dd>
+                  <dt className="font-medium text-charcoal">来源适用日期</dt>
+                  <dd className="mt-1">{fact.sourceDateStatus === "applicable" || fact.sourceDateStatus === "outside_window"
+                    ? `${formatDateTime(fact.applicableFrom)} 至 ${formatDateTime(fact.applicableUntil)}`
+                    : "未能明确确认适用日期"}</dd>
+                </div>
+                <div className="sm:col-span-2">
+                  <dt className="font-medium text-charcoal">提取的字段值</dt>
+                  <dd className="mt-1 break-words">{fact.extractedValue || "未找到明确值"}</dd>
                 </div>
               </dl>
               {fact.sourceUrl ? (

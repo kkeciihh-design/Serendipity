@@ -4,7 +4,7 @@ import {
   costPaymentStatusSchema,
   costPricingUnitSchema,
 } from "@/lib/budget";
-import { hasAppAccess, unauthorizedResponse } from "@/lib/access";
+import { appWriteAccessError } from "@/lib/access";
 import {
   PlanConflictError,
   PlanNotFoundError,
@@ -13,6 +13,7 @@ import {
   savePlanEventEdit,
 } from "@/lib/plan-service";
 import { planEventStatusSchema } from "@/lib/plan";
+import { listEvidenceFacts } from "@/lib/evidence-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,8 +25,11 @@ type RouteContext = {
 const eventEditSchema = z.object({
   type: z.literal("event"),
   eventId: z.string().trim().min(1),
-  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "开始时间必须使用 HH:mm。"),
-  durationMinutes: z.number().int().min(1).max(1440),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "开始时间必须使用 HH:mm。").optional(),
+  durationMinutes: z.number().int().min(1).max(1440).optional(),
+  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "结束时间必须使用 HH:mm。").optional(),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  timeEdit: z.enum(["preserve", "start_duration", "start_end"]).optional(),
   note: z.string().trim().max(240).nullable(),
   locked: z.boolean(),
   status: planEventStatusSchema,
@@ -80,9 +84,8 @@ function editErrorResponse(error: unknown) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  if (!hasAppAccess(request)) {
-    return unauthorizedResponse();
-  }
+  const accessError = appWriteAccessError(request);
+  if (accessError) return accessError;
 
   try {
     const { id, versionNumber } = await context.params;
@@ -111,7 +114,8 @@ export async function PATCH(request: Request, context: RouteContext) {
             expectedPlanVersion: parsedVersion,
             edit: body.costEdit,
           });
-    return NextResponse.json({ plan });
+    const evidenceFacts = (await listEvidenceFacts(id)).filter((fact) => fact.planVersionId === plan.id);
+    return NextResponse.json({ plan: { ...plan, evidenceFacts } });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(

@@ -10,6 +10,7 @@ import {
 import { createCsrfToken, createSessionToken } from "@/lib/security";
 import {
   hasTrustedOrigin,
+  isJsonWrite,
   isLocalRequest,
   isSecureRequest,
 } from "@/lib/request-security";
@@ -42,7 +43,7 @@ function setSessionCookies(response: NextResponse, request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!hasTrustedOrigin(request)) {
+  if (!hasTrustedOrigin(request) || !isJsonWrite(request)) {
     return NextResponse.json(
       { error: "请求来源不可信。" },
       { status: 403 },
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (isLoginRateLimited(request)) {
+  if (isLoginRateLimited()) {
     return NextResponse.json(
       { error: "尝试次数过多，请 15 分钟后再试。" },
       { status: 429 },
@@ -66,14 +67,14 @@ export async function POST(request: Request) {
   try {
     const valid = await checkPassword(await request.json());
     if (!valid) {
-      recordFailedLogin(request);
+      recordFailedLogin();
       return NextResponse.json(
         { error: "个人密码不正确。" },
         { status: 401 },
       );
     }
 
-    clearFailedLogins(request);
+    clearFailedLogins();
     const response = NextResponse.json({ authenticated: true });
     setSessionCookies(response, request);
     return response;

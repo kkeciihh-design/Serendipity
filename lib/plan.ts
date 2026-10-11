@@ -28,7 +28,11 @@ export type PlanEventStatus = z.infer<typeof planEventStatusSchema>;
 
 const planDate = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "计划日期必须使用 YYYY-MM-DD。");
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "计划日期必须使用 YYYY-MM-DD。")
+  .refine((value) => {
+    const date = new Date(`${value}T00:00:00Z`);
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  }, "计划日期不存在。");
 
 const planTime = z
   .string()
@@ -78,11 +82,23 @@ export const planPendingItemSchema = z.object({
 
 export type PlanPendingItem = z.infer<typeof planPendingItemSchema>;
 
-export const aiPlanOutputSchema = z.object({
+export const planContentSchema = z.object({
   events: z.array(planEventSchema).min(1).max(64),
   pendingItems: z.array(planPendingItemSchema).min(1).max(24),
 });
 
+export type PlanContent = z.infer<typeof planContentSchema>;
+
+// The model DTO has no user confirmation, lock or payment authority. Unknown
+// fields (including event/root costs and payment fields) are stripped by Zod.
+const aiEventSchema = planEventSchema.omit({ status: true, locked: true, order: true }).extend({
+  costStatus: planCostStatusSchema.transform((status) =>
+    status === "user_confirmed" ? "pending_confirmation" as const : status),
+});
+export const aiPlanOutputSchema = z.object({
+  events: z.array(aiEventSchema).min(1).max(64),
+  pendingItems: z.array(planPendingItemSchema).min(1).max(24),
+});
 export type AIPlanOutput = z.infer<typeof aiPlanOutputSchema>;
 
 export const planValidationResultsSchema = z.object({
@@ -104,18 +120,17 @@ export type PlanCapture = {
 };
 
 function parseDate(value: string) {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day);
+  return parsePlanDateTime(value, "00:00");
 }
 
 function formatDate(date: Date) {
-  return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, "0")}-${`${date.getDate()}`.padStart(2, "0")}`;
+  return new Date(date.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function parsePlanDateTime(date: string, time: string) {
-  const [year, month, day] = date.split("-").map(Number);
-  const [hour, minute] = time.split(":").map(Number);
-  return new Date(year, month - 1, day, hour, minute, 0, 0);
+  // The current single-city MVP uses China local time (Asia/Shanghai),
+  // independent of the browser/server OS timezone. No cross-zone plans yet.
+  return new Date(`${date}T${time}:00+08:00`);
 }
 
 export function formatPlanDate(date: Date) {
@@ -124,7 +139,7 @@ export function formatPlanDate(date: Date) {
 
 export function nextPlanDate(date: string) {
   const next = parseDate(date);
-  next.setDate(next.getDate() + 1);
+  next.setTime(next.getTime() + 86_400_000);
   return formatDate(next);
 }
 
@@ -157,7 +172,11 @@ export function sortPlanEvents(events: PlanEvent[]) {
   });
 }
 
-export function preparePlanForStorage(plan: AIPlanOutput): AIPlanOutput {
+export function planEventDurationSeconds(event: PlanEvent) {
+  return (planEventEnd(event).getTime() - planEventStart(event).getTime()) / 1000;
+}
+
+export function preparePlanForStorage(plan: PlanContent): PlanContent {
   return {
     events: sortPlanEvents(plan.events).map((event, index) => {
       const end = planEventEnd(event);
@@ -167,6 +186,8 @@ export function preparePlanForStorage(plan: AIPlanOutput): AIPlanOutput {
         status: event.status ?? "suggested",
         locked: event.locked ?? false,
         endDate: formatPlanDate(end),
+        // Actual occupied time is authoritative; repair only the new snapshot.
+        suggestedDurationSeconds: planEventDurationSeconds(event),
       };
     }),
     pendingItems: plan.pendingItems,
@@ -184,7 +205,7 @@ export function tripDates(snapshot: RequestSnapshot) {
   const cursor = new Date(start);
   while (cursor <= end) {
     dates.push(formatDate(cursor));
-    cursor.setDate(cursor.getDate() + 1);
+    cursor.setTime(cursor.getTime() + 86_400_000);
   }
   return dates;
 }
@@ -208,7 +229,7 @@ function estimatedCostTotal(events: PlanEvent[]) {
 }
 
 export function validatePlan(
-  plan: AIPlanOutput,
+  plan: PlanContent,
   snapshot: RequestSnapshot,
 ): PlanValidationResults {
   const errors: string[] = [];
@@ -238,6 +259,9 @@ export function validatePlan(
     }
     if (!eventEndsAfterStart(event)) {
       errors.push(`${event.title} 的结束时刻必须晚于开始时刻。`);
+    }
+    if (planEventDurationSeconds(event) > 86_400) {
+      errors.push(`${event.title} 的时长不能超过 24 小时。`);
     }
     if (formatPlanDate(planEventEnd(event)) > dates[dates.length - 1]) {
       errors.push(`${event.title} 的结束日期超出行程日期范围。`);
@@ -348,16 +372,15 @@ export function validatePlan(
   };
 }
 
-export function normalizePlanOutput(output: AIPlanOutput): AIPlanOutput {
+export function normalizePlanOutput(output: PlanContent): PlanContent {
+  const parsed = aiPlanOutputSchema.parse(output);
   return preparePlanForStorage({
-    events: output.events.map((event) => ({
+    events: parsed.events.map((event) => ({
       ...event,
-      costStatus:
-        event.costStatus === "user_confirmed"
-          ? "pending_confirmation"
-          : event.costStatus,
+      status: "suggested",
+      locked: false,
     })),
-    pendingItems: output.pendingItems,
+    pendingItems: parsed.pendingItems,
   });
 }
 

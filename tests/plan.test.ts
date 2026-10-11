@@ -7,7 +7,7 @@ import {
 import {
   parseAIPlanOutput,
   validatePlan,
-  type AIPlanOutput,
+  type PlanContent,
   type PlanEvent,
 } from "../lib/plan";
 
@@ -64,7 +64,7 @@ function event(input: Partial<PlanEvent> & Pick<PlanEvent, "id" | "dayNumber" | 
   };
 }
 
-function completePlan(days: number): AIPlanOutput {
+function completePlan(days: number): PlanContent {
   const dates = futureDates(days).dates;
   const events: PlanEvent[] = [];
 
