@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createCsrfToken, createSessionToken } from "@/lib/security";
 import {
   hasTrustedOrigin,
+  isJsonWrite,
   isLocalRequest,
   isSecureRequest,
 } from "@/lib/request-security";
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
 
 export async function POST(request: Request) {
-  if (!hasTrustedOrigin(request)) {
+  if (!hasTrustedOrigin(request) || !isJsonWrite(request)) {
     return NextResponse.json(
       { error: "请求来源不可信。" },
       { status: 403 },

@@ -4,7 +4,7 @@ import {
   createTrip,
   listTrips,
 } from "@/lib/trips";
-import { hasAppAccess, unauthorizedResponse } from "@/lib/access";
+import { hasAppAccess, unauthorizedResponse, appWriteAccessError } from "@/lib/access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,9 +46,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!hasAppAccess(request)) {
-    return unauthorizedResponse();
-  }
+  const accessError = appWriteAccessError(request);
+  if (accessError) return accessError;
 
   try {
     const body = await request.json();

@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { PrismaClient } from "@prisma/client";
 import path from "node:path";
 
@@ -18,6 +19,7 @@ function futureDates() {
 
 async function createConfirmedTrip(page: Page) {
   const createResponse = await page.request.post("/api/trips", {
+    headers: { Origin: "http://127.0.0.1:3100" },
     data: { originalRequest: "阶段06浏览器验收：两天长沙基础行程。" },
   });
   expect(createResponse.status()).toBe(201);
@@ -26,6 +28,7 @@ async function createConfirmedTrip(page: Page) {
   };
   const dates = futureDates();
   const draftResponse = await page.request.patch(`/api/trips/${trip.id}/request`, {
+    headers: { Origin: "http://127.0.0.1:3100" },
     data: {
       expectedRequestRevision: 1,
       request: {
@@ -57,7 +60,7 @@ async function createConfirmedTrip(page: Page) {
   expect(draftResponse.status()).toBe(200);
   const confirmResponse = await page.request.post(
     `/api/trips/${trip.id}/request/confirm`,
-    { data: { expectedRequestRevision: 2 } },
+    { headers: { Origin: "http://127.0.0.1:3100" }, data: { expectedRequestRevision: 2 } },
   );
   expect(confirmResponse.status()).toBe(200);
   return trip.id;
@@ -637,6 +640,40 @@ test("timeline edits, locks, cancellation, and cross-midnight times persist", as
   }
 });
 
+test("legacy duration cannot move times on note or lock edits, and protected regeneration is visibly rejected", async ({ page }) => {
+  const tripId = await createConfirmedTrip(page);
+  await seedTimelinePlan(tripId);
+  const prisma = new PrismaClient({ datasources: { db: { url: e2eDatabaseUrl } } });
+  try {
+    const historyBefore = await prisma.planVersion.findFirstOrThrow({ where: { tripId, versionNumber: 1 } });
+    await page.goto(`/trips/${tripId}`);
+    await page.getByRole("button", { name: /住宿区域/ }).click();
+    await expect(page.getByLabel("时长（分钟）")).toHaveValue("120");
+    await page.getByLabel("备注").fill("只改备注，入住时间不变");
+    await page.getByRole("button", { name: "保存修改" }).click();
+    await expect(page.getByText("计划版本 2 已保存。")).toBeVisible();
+    await expect(page.getByText("20:00–22:00")).toBeVisible();
+    await page.getByLabel("已确认", { exact: true }).check();
+    await page.getByLabel("锁定这项安排").check();
+    await page.getByRole("button", { name: "保存修改" }).click();
+    await expect(page.getByText("计划版本 3 已保存。")).toBeVisible();
+    await page.getByRole("button", { name: "生成新计划版本 V4" }).click();
+    await expect(page.getByText(/重新生成可能覆盖这些事实，已保留当前计划/)).toBeVisible();
+    expect(await prisma.planVersion.count({ where: { tripId } })).toBe(3);
+    const current = await prisma.planVersion.findFirstOrThrow({ where: { tripId, versionNumber: 3 } });
+    expect(JSON.parse(current.events).find((event: { id: string }) => event.id === "d1-hotel")).toMatchObject({
+      startTime: "20:00", endTime: "22:00", suggestedDurationSeconds: 7200, status: "confirmed", locked: true,
+    });
+    expect((await prisma.planVersion.findUniqueOrThrow({ where: { id: historyBefore.id } })).events).toBe(historyBefore.events);
+    expect((await prisma.trip.findUniqueOrThrow({ where: { id: tripId } })).currentPlanVersionId).toBe(current.id);
+    await page.reload();
+    await expect(page.getByText("20:00–22:00")).toBeVisible();
+  } finally {
+    await prisma.trip.delete({ where: { id: tripId } });
+    await prisma.$disconnect();
+  }
+});
+
 async function seedBudgetPlan(tripId: string) {
   const dates = futureDates();
   const prisma = new PrismaClient({
@@ -788,6 +825,7 @@ test("budget tab shows totals from the plan snapshot and persists confirmed amou
     const draftResponse = await page.request.patch(
       `/api/trips/${tripId}/request`,
       {
+        headers: { Origin: "http://127.0.0.1:3100" },
         data: {
           expectedRequestRevision: 2,
           request: {

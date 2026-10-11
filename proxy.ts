@@ -1,17 +1,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import {
-  SESSION_COOKIE_NAME,
-  isLoopbackHost,
-} from "./lib/request-security";
+import { hasAppAccess } from "./lib/access";
 
 export function proxy(request: NextRequest) {
-  if (isLoopbackHost(request.nextUrl.host)) {
-    return NextResponse.next();
-  }
-
-  const hasSessionCookie = Boolean(request.cookies.get(SESSION_COOKIE_NAME));
-  if (hasSessionCookie) {
+  if (hasAppAccess(request)) {
     return NextResponse.next();
   }
 
@@ -38,5 +30,6 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: "/((?!_next/static|_next/image|favicon.ico|icon.svg).*)",
+  // Public sample artwork must also work in Next's internal image optimizer.
+  matcher: "/((?!_next/static|_next/image|images/|favicon.ico|icon.svg).*)",
 };

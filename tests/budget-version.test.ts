@@ -332,7 +332,7 @@ describe("budget version inheritance and snapshot recalculation", () => {
       });
   });
 
-  it("recalculates from the new snapshot only after phase 06 commits a new version", async () => {
+  it("blocks regeneration of confirmed amounts and keeps pending requirements out of budget facts", async () => {
     const original = "阶段09验收：T29预算快照切换。";
     const trip = await trips.createTrip({ originalRequest: original });
     const snapshot = snapshotWith();
@@ -396,25 +396,24 @@ describe("budget version inheritance and snapshot recalculation", () => {
     expect(staleSummary.factors.travelerCount).toBe(2);
     expect(staleSummary.budgetTargetCents).toBe(150000);
 
-    const newCapture = await planService.getPlanGenerationContext(
-      trip.id,
-      changedConfirmed.requestRevision,
-    );
-    const regenerated = await saveCurrentPlan(newCapture);
-    expect(regenerated.versionNumber).toBe(3);
-    expect(regenerated.requestSnapshot.travelerCount).toBe(4);
-    expect(regenerated.requestSnapshot.budgetAmountCents).toBe(300000);
+    // A confirmed amount is now a protected user fact. An ordinary generation
+    // must not replace it; suggestion-only snapshot switching is covered in
+    // plan-reliability.test.ts through the same generation/save entry points.
+    await expect(planService.getPlanGenerationContext(
+      trip.id, changedConfirmed.requestRevision,
+    )).rejects.toThrow(/已保留当前计划/);
+    expect((await planService.listPlanVersions(trip.id))[0].costs).toEqual(oldEdited.costs);
 
     const newEdited = await planService.savePlanCostEdit({
       tripId: trip.id,
-      expectedPlanVersion: regenerated.versionNumber,
+      expectedPlanVersion: oldEdited.versionNumber,
       edit: {
         costId: "cost-departure",
         unit: "per_person",
         unitAmountCents: 10000,
         unitAmountMaxCents: null,
         quantity: null,
-        paymentStatus: "not_paid",
+        paymentStatus: "paid",
       },
     });
     const newSummary = calculateBudgetSummary(
@@ -422,11 +421,13 @@ describe("budget version inheritance and snapshot recalculation", () => {
       newEdited.requestSnapshot,
     );
     expect(newSummary.factors).toEqual({
-      travelerCount: 4,
-      roomCount: 2,
+      travelerCount: 2,
+      roomCount: 1,
       nightCount: 1,
     });
-    expect(newSummary.budgetTargetCents).toBe(300000);
+    expect(newSummary.budgetTargetCents).toBe(150000);
+    expect(newSummary.paidMinCents).toBe(20000);
+    expect(newEdited.requirementUpToDate).toBe(false);
 
     const history = await planService.listPlanVersions(trip.id);
     const stillOld = calculateBudgetSummary(

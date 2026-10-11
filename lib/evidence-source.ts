@@ -1,15 +1,19 @@
-import dns from "node:dns/promises";
-import net from "node:net";
+import {
+  fetchPinned, lookupPublicHost, resolvePublicAddress, validateExternalUrl,
+  type FetchLike, type LookupLike,
+} from "./source-http";
+export { validateExternalUrl } from "./source-http";
 import {
   extractEvidence,
   extractPageTitle,
   extractSourcePublishedAt,
   htmlToPlainText,
   isOfficialUrl,
+  normalizeOfficialHost,
   parseDuckDuckGoResults,
-  sourceDateStatus,
   type EvidenceField,
 } from "./evidence";
+import { evaluateEvidenceField, sourceApplicability, type EvidenceTarget } from "./evidence-evaluation";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 3;
@@ -24,103 +28,39 @@ export type EvidenceCandidate = {
   sourcePublisher: string;
   sourcePublishedAt: Date | null;
   sourceDateStatus: string;
+  readStatus: "read" | "failed" | "not_read";
+  applicableFrom: Date | null;
+  applicableUntil: Date | null;
   contentQuote: string;
   extractedValue: string;
   conflictReason: string | null;
 };
 
-type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
-type LookupLike = (
-  hostname: string,
-) => Promise<{ address: string; family: number }[]>;
-
-function isPrivateIPv4(address: string) {
-  const parts = address.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) {
-    return true;
-  }
-  const [a, b] = parts;
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168)
-  );
-}
-
-function isPrivateAddress(address: string, family: number) {
-  if (family === 4) {
-    return isPrivateIPv4(address);
-  }
-  const value = address.toLowerCase();
-  return (
-    value === "::1" ||
-    value === "::" ||
-    value.startsWith("fc") ||
-    value.startsWith("fd") ||
-    value.startsWith("fe8") ||
-    value.startsWith("fe9") ||
-    value.startsWith("fea") ||
-    value.startsWith("feb") ||
-    value.startsWith("::ffff:127.") ||
-    value.startsWith("::ffff:10.") ||
-    value.startsWith("::ffff:192.168.")
-  );
-}
-
-export function validateExternalUrl(rawUrl: string) {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    throw new Error("来源链接格式不正确。");
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new Error("只支持 HTTPS 或 HTTP 来源。");
-  }
-  if (url.username || url.password) {
-    throw new Error("来源链接不能包含登录信息。");
-  }
-  if (url.port && url.port !== "80" && url.port !== "443") {
-    throw new Error("来源链接使用不支持的端口。");
-  }
-  if (
-    url.hostname === "localhost" ||
-    url.hostname.endsWith(".localhost") ||
-    url.hostname.endsWith(".local") ||
-    url.hostname.endsWith(".internal")
-  ) {
-    throw new Error("不能访问本机或内网地址。");
-  }
-  if (net.isIP(url.hostname) === 4 && isPrivateIPv4(url.hostname)) {
-    throw new Error("不能访问本机或内网地址。");
-  }
-  return url;
-}
-
-async function assertPublicHost(url: URL, lookup: LookupLike) {
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(url.hostname) && isPrivateIPv4(url.hostname)) {
-    throw new Error("不能访问本机或内网地址。");
-  }
-  const records = await lookup(url.hostname);
-  if (records.length === 0 || records.some((record) => isPrivateAddress(record.address, record.family))) {
-    throw new Error("来源域名解析到本机或内网地址，已停止读取。");
-  }
-}
-
 async function readBodyWithLimit(response: Response) {
   const contentLength = Number(response.headers.get("content-length") ?? 0);
   if (contentLength > MAX_BODY_BYTES) {
+    await response.body?.cancel();
     throw new Error("来源页面过大，已停止读取。");
   }
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (buffer.byteLength > MAX_BODY_BYTES) {
-    throw new Error("来源页面过大，已停止读取。");
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_BODY_BYTES) {
+        await reader.cancel();
+        throw new Error("来源页面过大，已停止读取。");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
   }
-  return buffer.toString("utf8");
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 export async function readSourcePage(
@@ -128,24 +68,37 @@ export async function readSourcePage(
   options: {
     fetchImpl?: FetchLike;
     lookupImpl?: LookupLike;
+    officialHost?: string;
   } = {},
 ) {
-  const fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
-  const lookup = options.lookupImpl ??
-    (async (hostname: string) => dns.lookup(hostname, { all: true }));
+  const lookup = options.lookupImpl ?? lookupPublicHost;
+  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   let current = validateExternalUrl(rawUrl);
+  const visited = new Set<string>();
 
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
-    await assertPublicHost(current, lookup);
-    const response = await fetchImpl(current.toString(), {
+    if (options.officialHost && !isOfficialUrl(current, options.officialHost)) {
+      throw new Error("来源跳转到非官方域名，已停止读取。");
+    }
+    if (visited.has(current.href)) throw new Error("来源页面出现重定向循环。");
+    visited.add(current.href);
+    const address = await resolvePublicAddress(current, lookup, signal);
+    // Injected fetch is only for controlled tests. Production always uses the
+    // native connector pinned to the checked DNS address, never default fetch.
+    const response = options.fetchImpl ? await options.fetchImpl(current.toString(), {
       redirect: "manual",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal,
       headers: {
         "User-Agent": "Serendipity/0.1 evidence-reader",
         Accept: "text/html,text/plain;q=0.9,*/*;q=0.5",
       },
-    });
+    }) : await fetchPinned(current, address, signal);
+    if (response.redirected || (response.url && response.url !== current.href)) {
+      await response.body?.cancel();
+      throw new Error("来源连接未经允许改变了目标，已停止读取。");
+    }
     if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel();
       const location = response.headers.get("location");
       if (!location) {
         throw new Error("来源页面重定向地址缺失。");
@@ -157,10 +110,12 @@ export async function readSourcePage(
       continue;
     }
     if (!response.ok) {
+      await response.body?.cancel();
       throw new Error(`来源页面读取失败（HTTP ${response.status}）。`);
     }
     const contentType = response.headers.get("content-type") ?? "";
-    if (!/^text\/(?:html|plain)/i.test(contentType)) {
+    if (!/^text\/(?:html|plain)(?:\s*;|$)/i.test(contentType)) {
+      await response.body?.cancel();
       throw new Error("来源不是可读取的网页正文。");
     }
     const html = await readBodyWithLimit(response);
@@ -177,23 +132,14 @@ export async function readSourcePage(
 
 export async function searchDuckDuckGo(
   query: string,
-  options: { fetchImpl?: FetchLike; language?: SearchLanguage } = {},
+  options: { fetchImpl?: FetchLike; lookupImpl?: LookupLike; language?: SearchLanguage } = {},
 ) {
-  const fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=${
     options.language === "zh-CN" ? "cn-zh" : "us-en"
   }`;
-  const response = await fetchImpl(url, {
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    headers: {
-      "User-Agent": "Serendipity/0.1 evidence-reader",
-      Accept: "text/html",
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`搜索服务不可用（HTTP ${response.status}）。`);
-  }
-  const html = await readBodyWithLimit(response);
+  const { html } = await readSourcePage(url, {
+    ...options, officialHost: "duckduckgo.com",
+  }).catch(() => { throw new Error("搜索服务不可用，请稍后重试。"); });
   const results = parseDuckDuckGoResults(html);
   if (results.length === 0) {
     throw new Error("搜索没有返回可用结果。");
@@ -206,17 +152,20 @@ export async function collectEvidence(input: {
   query: string;
   officialHost: string;
   eventDate: string;
+  target?: EvidenceTarget;
   language?: SearchLanguage;
   fetchImpl?: FetchLike;
   lookupImpl?: LookupLike;
-}) {
+}): Promise<EvidenceCandidate> {
+  const officialHost = normalizeOfficialHost(input.officialHost);
   const results = await searchDuckDuckGo(input.query, {
     fetchImpl: input.fetchImpl,
+    lookupImpl: input.lookupImpl,
     language: input.language,
   });
   const officialResults = results.filter((result) => {
     try {
-      return isOfficialUrl(new URL(result.url), input.officialHost);
+      return isOfficialUrl(new URL(result.url), officialHost);
     } catch {
       return false;
     }
@@ -229,6 +178,9 @@ export async function collectEvidence(input: {
       sourcePublisher: results[0] ? new URL(results[0].url).hostname : "",
       sourcePublishedAt: null,
       sourceDateStatus: "no_official_result",
+      readStatus: "not_read",
+      applicableFrom: null,
+      applicableUntil: null,
       contentQuote: "",
       extractedValue: "",
       conflictReason: "搜索结果中没有匹配官方域名的页面；搜索摘要不能作为核验依据。",
@@ -236,51 +188,44 @@ export async function collectEvidence(input: {
   }
 
   const errors: string[] = [];
-  const verifiedCandidates: EvidenceCandidate[] = [];
-  const dateInvalidCandidates: EvidenceCandidate[] = [];
+  const candidates: EvidenceCandidate[] = [];
   for (const result of officialResults) {
     try {
       const page = await readSourcePage(result.url, {
         fetchImpl: input.fetchImpl,
         lookupImpl: input.lookupImpl,
+        officialHost,
       });
       const publishedAt = extractSourcePublishedAt(page.html);
-      const dateStatus = sourceDateStatus(publishedAt, input.eventDate);
       const evidence = extractEvidence(input.field, page.text);
-      const candidate = {
-          status: "unverified" as const,
-          sourceTitle: page.title || result.title,
-          sourceUrl: page.url,
-          sourcePublisher: new URL(page.url).hostname,
-          sourcePublishedAt: publishedAt,
-          sourceDateStatus: dateStatus,
-          contentQuote: evidence.quote,
-          extractedValue: evidence.value,
-          conflictReason:
-            dateStatus === "outdated_for_trip"
-              ? "来源发布日期早于行程日期超过一年，内容可能已过期。"
-              : "来源发布日期晚于行程日期，内容不适用于本次出行。",
-      };
-      if (dateStatus === "outdated_for_trip" || dateStatus === "published_after_trip") {
-        dateInvalidCandidates.push(candidate);
-        continue;
-      }
-      if (!evidence.matched) {
-        errors.push(`已读取 ${new URL(page.url).hostname}，但没有找到可核验的字段内容。`);
-        continue;
-      }
-      verifiedCandidates.push({
-        ...candidate,
-        status: "verified" as const,
-        contentQuote: evidence.quote,
+      const applicability = sourceApplicability(input.field, page.text, input.target);
+      const heading = page.html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+      const evaluation = evaluateEvidenceField({ field: input.field, target: input.target,
+        text: page.text, subject: page.title || (heading ? htmlToPlainText(heading) : ""), extracted: evidence });
+      const publishedAfterTrip = publishedAt && publishedAt.getTime() > new Date(`${input.eventDate}T23:59:59+08:00`).getTime();
+      candidates.push({
+        status: publishedAfterTrip || applicability.status !== "applicable" ? "unverified" : evaluation.status,
+        sourceTitle: page.title || result.title,
+        sourceUrl: page.url,
+        sourcePublisher: new URL(page.url).hostname,
+        sourcePublishedAt: publishedAt,
+        sourceDateStatus: publishedAfterTrip ? "published_after_trip" : applicability.status,
+        readStatus: "read",
+        applicableFrom: applicability.from,
+        applicableUntil: applicability.until,
+        contentQuote: evidence.quote || page.text.slice(0, 600),
         extractedValue: evidence.value,
-        conflictReason: null,
+        conflictReason: publishedAfterTrip ? "来源发布日期晚于出行日期，不能确认本次安排。" :
+          applicability.reason ?? evaluation.reason,
       });
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "来源页面读取失败。");
     }
   }
 
+  const conflictCandidate = candidates.find((candidate) => candidate.status === "conflict");
+  if (conflictCandidate) return conflictCandidate;
+  const verifiedCandidates = candidates.filter((candidate) => candidate.status === "verified");
   if (verifiedCandidates.length > 0) {
     const values = [
       ...new Set(
@@ -296,10 +241,13 @@ export async function collectEvidence(input: {
         conflictReason: `同一官方域名下多个页面内容不一致：${values.join("；")}。`,
       };
     }
-    return verifiedCandidates[0];
   }
-  if (dateInvalidCandidates.length > 0) {
-    return dateInvalidCandidates[0];
+  // A successful field/page must not conceal another unresolved applicable
+  // candidate. Keep the unresolved record and its trace for explicit review.
+  const unresolved = candidates.find((candidate) => candidate.status === "unverified");
+  if (unresolved) return unresolved;
+  if (verifiedCandidates.length > 0) {
+    return errors.length ? { ...verifiedCandidates[0], status: "unverified", conflictReason: `其他候选页面读取失败，仍需复核：${errors[0]}` } : verifiedCandidates[0];
   }
 
   return {
@@ -311,6 +259,9 @@ export async function collectEvidence(input: {
       : "",
     sourcePublishedAt: null,
     sourceDateStatus: "unreadable",
+    readStatus: "failed",
+    applicableFrom: null,
+    applicableUntil: null,
     contentQuote: "",
     extractedValue: "",
     conflictReason:

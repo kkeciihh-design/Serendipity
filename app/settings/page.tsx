@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft, Settings } from "lucide-react";
 import { cookies, headers } from "next/headers";
-import { isLoopbackHost } from "@/lib/request-security";
+import { isLocalHeaders } from "@/lib/request-security";
 import { verifySessionToken } from "@/lib/security";
 import { getSafeSettings, isPasswordConfigured } from "@/lib/settings";
 import { PasswordSetupForm } from "./components/password-setup-form";
@@ -16,7 +16,7 @@ export default async function SettingsPage() {
     headers(),
   ]);
   const passwordConfigured = await isPasswordConfigured();
-  const isLocal = isLoopbackHost(headerStore.get("host"));
+  const isLocal = isLocalHeaders(headerStore);
   const sessionToken = cookieStore.get("serendipity_session")?.value;
   const authenticated = verifySessionToken(sessionToken);
   const csrfToken = cookieStore.get("serendipity_csrf")?.value ?? "";

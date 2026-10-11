@@ -38,6 +38,7 @@ export type EvidenceFactClient = {
   sourcePublisher: string;
   sourcePublishedAt: string | null;
   sourceDateStatus: string | null;
+  extractedValue: string;
   searchProvider: string;
   searchQuery: string;
   retrievedAt: string;
@@ -61,22 +62,23 @@ export const evidenceStatusLabels: Record<EvidenceEffectiveStatus, string> = {
   verified: "已核验",
   pending: "建议确认",
   conflict: "来源冲突",
-  stale: "已过期",
+  stale: "需复核",
 };
 
 export function effectiveEvidenceStatus(
   fact: Pick<
     EvidenceFactClient,
     "status" | "applicableUntil" | "lastRefreshStatus"
-  >,
+  > & Partial<Pick<EvidenceFactClient, "applicableFrom" | "sourceDateStatus" | "extractedValue" | "contentQuote" | "sourceUrl">>,
   now = new Date(),
 ): EvidenceEffectiveStatus {
   if (fact.status === "conflict") {
     return "conflict";
   }
-  if (fact.lastRefreshStatus === "failed") {
+  if (["failed", "refreshing", "needs_review"].includes(fact.lastRefreshStatus ?? "")) {
     return "stale";
   }
+  if (["outside_window", "outdated_for_trip", "published_after_trip"].includes(fact.sourceDateStatus ?? "")) return "stale";
   if (
     fact.status === "verified" &&
     fact.applicableUntil &&
@@ -84,20 +86,44 @@ export function effectiveEvidenceStatus(
   ) {
     return "stale";
   }
-  return fact.status === "verified" ? "verified" : "pending";
+  // Old records that only proved a page was read do not acquire the stronger
+  // meaning retroactively. Downgrade on read without rewriting history.
+  if (fact.status !== "verified" || fact.sourceDateStatus !== "applicable" ||
+    !fact.extractedValue?.trim() || !fact.contentQuote?.trim() || !fact.sourceUrl ||
+    !fact.applicableFrom || !fact.applicableUntil ||
+    !Number.isFinite(new Date(fact.applicableFrom).getTime()) ||
+    !Number.isFinite(new Date(fact.applicableUntil).getTime()) ||
+    new Date(fact.applicableFrom).getTime() > new Date(fact.applicableUntil).getTime()) return "pending";
+  return "verified";
+}
+
+export function summarizeEventEvidence(facts: EvidenceFactClient[]) {
+  const statuses = evidenceFieldSchema.options.map((field) => {
+    const fact = facts.find((item) => item.field === field);
+    return fact ? effectiveEvidenceStatus(fact) : "pending";
+  });
+  const verifiedCount = statuses.filter((status) => status === "verified").length;
+  if (statuses.includes("conflict")) return { status: "conflict" as const, label: "来源有冲突", verifiedCount };
+  if (statuses.includes("stale")) return { status: "stale" as const, label: "来源需复核", verifiedCount };
+  if (verifiedCount === statuses.length) return { status: "verified" as const, label: "4 项来源字段已核验", verifiedCount };
+  return { status: "pending" as const, label: verifiedCount ? `${verifiedCount}/4 项字段已核验，其余待确认` : "来源待确认", verifiedCount };
 }
 
 export function normalizeOfficialHost(input: string) {
-  const value = input
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/\/.*$/, "")
-    .replace(/:\d+$/, "");
-  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(value)) {
+  let url: URL;
+  try {
+    if (/[\\\s]/.test(input.trim())) throw new Error();
+    url = new URL(input.includes("://") ? input.trim() : `https://${input.trim()}`);
+  } catch {
     throw new Error("官方域名格式不正确。");
   }
-  return value;
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password ||
+    url.port || url.pathname !== "/" || url.search || url.hash ||
+    !/\.[a-z]{2,}$/.test(url.hostname) ||
+    url.hostname.split(".").some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) {
+    throw new Error("官方域名格式不正确。");
+  }
+  return url.hostname;
 }
 
 export function isOfficialUrl(url: URL, officialHost: string) {
@@ -135,9 +161,12 @@ export function htmlToPlainText(input: string) {
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+      .replace(/<\/?(?:p|div|h[1-6]|li|tr|section|article|br)\b[^>]*>/gi, "\n")
       .replace(/<[^>]+>/g, " "),
   )
-    .replace(/\s+/g, " ")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n+/g, "\n")
     .trim();
 }
 
@@ -148,9 +177,8 @@ export function extractPageTitle(html: string) {
 
 export function extractSourcePublishedAt(html: string) {
   const patterns = [
-    /<meta[^>]+(?:property|name)=["'](?:article:published_time|og:updated_time)["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+(?:property|name)=["']article:published_time["'][^>]+content=["']([^"']+)["']/i,
     /"datePublished"\s*:\s*"([^"]+)"/i,
-    /<time[^>]+datetime=["']([^"']+)["']/i,
   ];
   for (const pattern of patterns) {
     const match = html.match(pattern);
@@ -165,43 +193,73 @@ export function extractSourcePublishedAt(html: string) {
   return null;
 }
 
+export function reservationRequirement(text: string): "required" | "not_required" | null {
+  if (/\b(?:may|might|usually|sometimes|except|only|unless|if|when|not always|not true|not necessarily|no longer|never)\b|视情况|可能|通常|除外|除非|仅|只有|并非|不一定|节假日|[?？]/i.test(text)) return null;
+  // Accept direct assertions, not a keyword substring inside a negated claim,
+  // a question, a condition, or an unrelated booking instruction.
+  const clauses = text.split(/[\n.;。；]+/).map((part) => part.trim())
+    .filter((part) => /\breservations?\b|\bbookings?\b|\b(?:book|reserve)\b|预约|预订/i.test(part))
+    .filter((part) => !/^(?:reservations?|bookings?)(?:\s+(?:policy|requirements?))?[:：]?$|^预约(?:规则|要求)?[:：]?$/i.test(part))
+    .filter((part) => !/^reservation policy\s+(?:valid|effective)\s+from\s+20\d{2}-\d{1,2}-\d{1,2}\s+(?:to|through|until)\s+20\d{2}-\d{1,2}-\d{1,2}$/i.test(part))
+    .map((part) => part.replace(/^(?:reservation (?:policy|requirements?)|预约规则|预约要求)\s*[:：]\s*/i, ""));
+  if (!clauses.length) return null;
+  const rules = clauses.map((part) => {
+    if (/^(?:reservations?|bookings?)\s+(?:are|is)\s+not\s+required$|^no\s+(?:reservations?|bookings?)\s+(?:(?:is|are)\s+)?(?:required|needed)$|^(?:无需|不需要|不必)(?:提前)?(?:预约|预订)$/i.test(part)) return "not_required" as const;
+    if (/^(?:reservations?|bookings?)\s+(?:are|is)\s+required(?:\s+in advance)?$|^(?:you\s+)?must\s+(?:book|reserve)(?:\s+in advance)?$|^(?:需要|必须|须)(?:提前)?(?:预约|预订)$|^(?:预约|预订)(?:是)?必须$/i.test(part)) return "required" as const;
+    return null;
+  });
+  return rules.every((rule) => rule === rules[0]) ? rules[0] : null;
+}
+
+export type ExtractedEvidence = {
+  matched: boolean; value: string; quote: string;
+  hours?: { start: number; end: number };
+  price?: { cents: number; unit: "per_person" | "per_ticket" | "one_time" | null };
+};
+
 export function extractEvidence(
   field: EvidenceField,
   text: string,
-): { matched: boolean; value: string; quote: string } {
+): ExtractedEvidence {
   const patterns: Record<EvidenceField, RegExp> = {
-    opening_hours:
-      /(?:open(?:ing)? hours|opening times|hours|开放时间|营业时间)([\s\S]{0,500})/i,
-    reservation: /(?:reservation|booking|reserve|预约|预订)([\s\S]{0,500})/i,
-    price: /(?:free admission|admission fee|ticket price|price|门票|票价|免费)([\s\S]{0,500})/i,
-    location: /(?:address|location|地址|位置)([\s\S]{0,500})/i,
+    opening_hours: /open(?:ing)? hours|opening times|not open|last entry|last admission|no entry|开放时间|营业时间|closed|闭馆|不开放|停止入馆|停止入场/i,
+    reservation: /reservation|booking|reserve|预约|预订/i,
+    price: /free admission|admission fee|ticket price|price|门票|票价|免费/i,
+    location: /\baddress\b|\blocation\b|地址|位置/i,
   };
-  const match = text.match(patterns[field]);
-  if (!match) {
-    return { matched: false, value: "", quote: "" };
-  }
-
-  const quote = match[0].replace(/\s+/g, " ").trim().slice(0, 600);
-  let value: string;
+  const relevant = text.split(/\n+/).filter((line) => patterns[field].test(line)).join("\n");
+  const quote = relevant.trim().slice(0, 600);
+  const missing = { matched: false, value: "", quote };
+  if (!relevant || relevant.length > 600 || /\b(?:may|might|subject to|seasonal|depending)\b|暂定|以现场为准|视情况/i.test(relevant)) return missing;
   if (field === "opening_hours") {
-    const time = quote.match(
-      /(?:[01]?\d|2[0-3]):[0-5]\d\s*(?:—|–|-|to|至)\s*(?:[01]?\d|2[0-3]):[0-5]\d/i,
-    );
-    value = time?.[0] ?? "";
-  } else if (field === "price") {
-    const price = quote.match(/(?:免费|free|￥\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:元|CNY|RMB))/i);
-    value = price?.[0] ?? "";
-  } else if (field === "reservation") {
-    const requirement = quote.match(/(?:required|must|advance|需要|必须|提前)/i);
-    value = requirement?.[0] ?? "";
-  } else {
-    const address = quote.match(/(?:No\.|Road|Street|路|街|号|区)/i);
-    value = address?.[0] ?? "";
+    const ranges = [...relevant.matchAll(/(?<!\d)((?:[01]?\d|2[0-3]):[0-5]\d)\s*(?:—|–|-|to|至)\s*((?:[01]?\d|2[0-3]):[0-5]\d)(?!\d)/gi)];
+    const unique = [...new Map(ranges.map((match) => [`${match[1]}-${match[2]}`, match])).values()];
+    if (unique.length !== 1) return missing;
+    const [match] = unique;
+    const minutes = (value: string) => { const [h, m] = value.split(":").map(Number); return h * 60 + m; };
+    return { matched: true, value: match[0], quote, hours: { start: minutes(match[1]), end: minutes(match[2]) } };
   }
-
-  const matched =
-    field === "opening_hours" ? Boolean(value) : field === "price" || field === "reservation" ? Boolean(value) : true;
-  return { matched, value, quote };
+  if (field === "reservation") {
+    const requirement = reservationRequirement(relevant);
+    return requirement ? { matched: true, value: requirement, quote } : missing;
+  }
+  if (field === "price") {
+    if (/\b(?:children|students|groups?|discount|not|except|only|deposit|refund|up to)\b|\b(?:from|starting)\s*(?:[¥￥]|CNY|RMB|\d)|儿童|学生|团体|优惠|起价|不免费|非免费|押金|退款|起|仅/i.test(relevant)) return missing;
+    const free = /\bfree admission\b|免费(?:入场|开放|参观)?/i.test(relevant);
+    const amounts = [...relevant.matchAll(/(?:￥|¥|CNY|RMB)\s*(\d+(?:\.\d{1,2})?)(?![\d.])|(\d+(?:\.\d{1,2})?)\s*(?:元|CNY|RMB)/gi)]
+      .map((match) => Math.round(Number(match[1] ?? match[2]) * 100));
+    if (free) amounts.push(0);
+    const distinct = [...new Set(amounts)];
+    if (distinct.length !== 1) return missing;
+    const unit = /per person|每人|\/人/i.test(relevant) ? "per_person" :
+      /per ticket|每票|每张票/i.test(relevant) ? "per_ticket" : /\btotal\b|一次性|总价/i.test(relevant) ? "one_time" : null;
+    return { matched: true, value: `${distinct[0] / 100} 元${unit === "per_person" ? "/人" : unit === "per_ticket" ? "/票" : unit === "one_time" ? "（一次性）" : "（口径未标注）"}`, quote, price: { cents: distinct[0], unit } };
+  }
+  const values = [...relevant.matchAll(/(?:\baddress\b|\blocation\b|地址|位置)[^\S\n]*[:：][^\S\n]*([^\n;；]+)/gi)]
+    .map((match) => match[1].trim().replace(/[。.]$/, ""))
+    .filter((value) => value.length >= 3 && !/^(?:unknown|tbd|n\/?a|待定|暂无|未知|待确认)$/i.test(value));
+  if (new Set(values).size !== 1) return missing;
+  return { matched: true, value: values[0], quote };
 }
 
 export function sourceDateStatus(

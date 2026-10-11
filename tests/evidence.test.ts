@@ -11,6 +11,10 @@ import {
   searchDuckDuckGo,
   validateExternalUrl,
 } from "../lib/evidence-source";
+import type { EvidenceTarget } from "../lib/evidence-evaluation";
+
+const target: EvidenceTarget = { event: { id: "museum", title: "Example Museum", locationName: "Example Museum",
+  date: "2026-11-01", endDate: "2026-11-01", startTime: "11:00", endTime: "12:00", note: null }, price: null };
 
 const searchHtml = `
   <a rel="nofollow" class="result__a"
@@ -115,6 +119,7 @@ describe("evidence reliability", () => {
   it("reports search rate limiting without creating evidence", async () => {
     await expect(
       searchDuckDuckGo("Example Museum", {
+        lookupImpl: publicLookup,
         fetchImpl: async () =>
           new Response("Too many requests", {
             status: 429,
@@ -131,6 +136,7 @@ describe("evidence reliability", () => {
       }
       return response(`
         <title>Example Museum Visit</title>
+        <p>Valid from 2026-10-01 to 2026-11-30</p>
         <p>Open Hours From Tuesday to Sunday, 9:00—17:00 (last entry at 16:00).</p>
       `);
     };
@@ -139,6 +145,7 @@ describe("evidence reliability", () => {
       query: "Example Museum open hours",
       officialHost: "example.com",
       eventDate: "2026-11-01",
+      target,
       fetchImpl,
       lookupImpl: publicLookup,
     });
@@ -174,13 +181,14 @@ describe("evidence reliability", () => {
         return response(conflictingSearchHtml);
       }
       const hours = url.endsWith("/a") ? "9:00—17:00" : "10:00—18:00";
-      return response(`<p>Open Hours ${hours}</p>`);
+      return response(`<title>Example Museum</title><p>Valid from 2026-10-01 to 2026-11-30</p><p>Open Hours daily ${hours}</p>`);
     };
     const result = await collectEvidence({
       field: "opening_hours",
       query: "Example Museum open hours",
       officialHost: "example.com",
       eventDate: "2026-11-01",
+      target,
       fetchImpl,
       lookupImpl: publicLookup,
     });

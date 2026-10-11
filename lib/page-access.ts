@@ -2,7 +2,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import {
   SESSION_COOKIE_NAME,
-  isLoopbackHost,
+  isLocalHeaders,
 } from "./request-security";
 import { verifySessionToken } from "./security";
 
@@ -12,7 +12,7 @@ export async function requirePageAppAccess() {
     headers(),
   ]);
 
-  if (isLoopbackHost(headerStore.get("host"))) {
+  if (isLocalHeaders(headerStore)) {
     return;
   }
 

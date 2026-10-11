@@ -10,13 +10,16 @@ import {
   type PlanCostItem,
 } from "./budget";
 import { getDatabaseUrl } from "./data-directory";
+import { evidenceFieldSchema } from "./evidence";
+import { evidenceTarget, evidenceTargetSignature } from "./evidence-evaluation";
 import {
   planEventSchema,
   planPendingItemSchema,
   planValidationResultsSchema,
   preparePlanForStorage,
+  normalizePlanOutput,
   validatePlan,
-  type AIPlanOutput,
+  type PlanContent,
   type PlanCapture,
   type PlanEvent,
   type PlanPendingItem,
@@ -27,6 +30,7 @@ import {
   planEventEditHasChanges,
   PlanEventFixedError,
   PlanEventLockedError,
+  PlanEventEditValidationError,
   type PlanEventEditInput,
 } from "./plan-edit";
 import { requestSnapshotSchema, type RequestSnapshot } from "./trip-request";
@@ -198,6 +202,7 @@ export async function getPlanGenerationContext(
   ) {
     throw new PlanConflictError("只有当前已确认的需求修订才能生成计划。");
   }
+  assertRegenerationPreservesFacts(trip.currentPlanVersion);
 
   return {
     tripId,
@@ -208,9 +213,22 @@ export async function getPlanGenerationContext(
   };
 }
 
+function assertRegenerationPreservesFacts(current: { events: string; costs: string } | null) {
+  if (!current) return;
+  const events = z.array(planEventSchema).parse(JSON.parse(current.events));
+  const costs = parseStoredCosts(current.costs, events);
+  const protectedEvents = events.filter((event) => event.locked || event.status === "confirmed" || event.costStatus === "user_confirmed");
+  const protectedCosts = costs.filter((cost) => cost.certainty === "user_confirmed" || cost.source === "user_confirmed" || cost.paymentStatus !== "not_paid");
+  if (protectedEvents.length || protectedCosts.length) {
+    throw new PlanConflictError(
+      `当前计划包含 ${protectedEvents.length} 项锁定或已确认安排、${protectedCosts.length} 项已确认金额或支付／退款事实。重新生成可能覆盖这些事实，已保留当前计划。请在日程或预算中逐项修改；误锁定的安排可先解锁。`,
+    );
+  }
+}
+
 export async function savePlanVersion(input: {
   capture: PlanCapture;
-  plan: AIPlanOutput;
+  plan: PlanContent;
   validationResults: PlanValidationResults;
   abortSignal?: AbortSignal;
 }) {
@@ -222,7 +240,10 @@ export async function savePlanVersion(input: {
   }
 
   const { capture } = input;
-  const plan = preparePlanForStorage(input.plan);
+  // Generations cross the model boundary; human edits use separate entry points.
+  const plan = normalizePlanOutput(input.plan);
+  const validation = validatePlan(plan, capture.requestSnapshot);
+  if (validation.errors.length) throw new PlanValidationError(validation.errors[0]);
   const costs = derivePlanCosts(plan.events);
   const costErrors = validatePlanCosts(costs, plan.events);
   if (costErrors.length > 0) {
@@ -259,6 +280,7 @@ export async function savePlanVersion(input: {
           "当前计划版本已经变化，旧生成结果不能提交。",
         );
       }
+      assertRegenerationPreservesFacts(trip.currentPlanVersion);
 
       const versionNumber = (capture.expectedPlanVersion ?? 0) + 1;
       const created = await transaction.planVersion.create({
@@ -270,7 +292,7 @@ export async function savePlanVersion(input: {
           events: JSON.stringify(plan.events),
           costs: JSON.stringify(costs),
           pendingItems: JSON.stringify(plan.pendingItems),
-          validationResults: JSON.stringify(input.validationResults),
+          validationResults: JSON.stringify(validation),
           requirementUpToDate: true,
         },
       });
@@ -280,7 +302,7 @@ export async function savePlanVersion(input: {
         data: {
           currentPlanVersionId: created.id,
           status:
-            input.validationResults.warnings.length > 0
+            validation.warnings.length > 0
               ? "plan_needs_review"
               : "planned",
         },
@@ -312,21 +334,36 @@ async function copyEvidenceFacts(
   transaction: Prisma.TransactionClient,
   sourcePlanVersionId: string,
   destinationPlanVersionId: string,
-  validEventIds: Set<string>,
+  source: { events: PlanEvent[]; costs: PlanCostItem[] },
+  destination: { events: PlanEvent[]; costs: PlanCostItem[] },
 ) {
   const facts = await transaction.evidenceFact.findMany({
     where: { planVersionId: sourcePlanVersionId },
   });
   const copies = facts
-    .filter((fact) => validEventIds.has(fact.targetId))
+    .filter((fact) => destination.events.some((event) => event.id === fact.targetId))
     .map((fact) => {
       const { id, createdAt, updatedAt, ...payload } = fact;
       void id;
       void createdAt;
       void updatedAt;
+      const field = evidenceFieldSchema.safeParse(fact.field);
+      const before = source.events.find((event) => event.id === fact.targetId);
+      const after = destination.events.find((event) => event.id === fact.targetId)!;
+      const targetChanged = !before || !field.success ||
+        evidenceTargetSignature(evidenceTarget(before, source.costs), field.data) !==
+        evidenceTargetSignature(evidenceTarget(after, destination.costs), field.data);
+      const needsReview = targetChanged || fact.lastRefreshStatus === "refreshing";
       return {
         ...payload,
         planVersionId: destinationPlanVersionId,
+        ...(needsReview ? {
+          lastRefreshStatus: "needs_review",
+          lastRefreshError: null,
+          conflictReason: [fact.conflictReason, targetChanged
+            ? "当前安排或对应费用已变化，继承的来源必须重新核验。"
+            : "创建本版本时旧来源仍在复核；旧请求的结果不适用于本版本，请重新核验。"].filter(Boolean).join(" "),
+        } : {}),
       };
     });
   if (copies.length > 0) {
@@ -358,7 +395,7 @@ export async function savePlanEventEdit(input: {
       }
 
       const currentPlan = serializePlan(row);
-      const sourcePlan: AIPlanOutput = {
+      const sourcePlan: PlanContent = {
         events: currentPlan.events,
         pendingItems: currentPlan.pendingItems,
       };
@@ -404,7 +441,8 @@ export async function savePlanEventEdit(input: {
         transaction,
         row.id,
         created.id,
-        new Set(editedPlan.events.map((event) => event.id)),
+        currentPlan,
+        { events: editedPlan.events, costs: editedCosts },
       );
 
       await transaction.trip.update({
@@ -443,6 +481,7 @@ export async function savePlanEventEdit(input: {
     ) {
       throw new PlanConflictError(error.message);
     }
+    if (error instanceof PlanEventEditValidationError) throw new PlanValidationError(error.message);
     throw error;
   }
 }
@@ -488,10 +527,10 @@ export async function savePlanCostEdit(input: {
         throw new PlanValidationError(costErrors[0]);
       }
 
-      const sourcePlan: AIPlanOutput = {
+      const sourcePlan: PlanContent = preparePlanForStorage({
         events: currentPlan.events,
         pendingItems: currentPlan.pendingItems,
-      };
+      });
       const validationResults = validatePlan(
         sourcePlan,
         currentPlan.requestSnapshot,
@@ -506,7 +545,7 @@ export async function savePlanCostEdit(input: {
           versionNumber: row.versionNumber + 1,
           requestRevision: row.requestRevision,
           requestSnapshot: row.requestSnapshot,
-          events: row.events,
+          events: JSON.stringify(sourcePlan.events),
           costs: JSON.stringify(editedCosts),
           pendingItems: row.pendingItems,
           validationResults: JSON.stringify(validationResults),
@@ -518,7 +557,8 @@ export async function savePlanCostEdit(input: {
         transaction,
         row.id,
         created.id,
-        new Set(currentPlan.events.map((event) => event.id)),
+        currentPlan,
+        { events: sourcePlan.events, costs: editedCosts },
       );
 
       await transaction.trip.update({
