@@ -34,6 +34,7 @@ import {
   type PlanEventEditInput,
 } from "./plan-edit";
 import { requestSnapshotSchema, type RequestSnapshot } from "./trip-request";
+import { placeSchema, placeIdentity, validatePlaceReferences, type Place, type PlaceCandidate } from "./places";
 
 export class PlanValidationError extends Error {
   constructor(message: string) {
@@ -66,6 +67,7 @@ export type PlanVersionRecord = {
   requestSnapshot: RequestSnapshot;
   events: PlanEvent[];
   costs: PlanCostItem[];
+  places: Place[];
   pendingItems: PlanPendingItem[];
   validationResults: PlanValidationResults;
   requirementUpToDate: boolean;
@@ -128,6 +130,8 @@ function parseStoredCosts(value: string, events: PlanEvent[]): PlanCostItem[] {
 function serializePlan(record: PlanVersionRow): PlanVersionRecord {
   try {
     const events = z.array(planEventSchema).parse(JSON.parse(record.events));
+    const places = z.array(placeSchema).parse(JSON.parse(record.places));
+    validatePlaceReferences(events, places);
     return {
       id: record.id,
       tripId: record.tripId,
@@ -135,6 +139,7 @@ function serializePlan(record: PlanVersionRow): PlanVersionRecord {
       requestRevision: record.requestRevision,
       requestSnapshot: parseSnapshot(record.requestSnapshot),
       events,
+      places,
       costs: parseStoredCosts(record.costs, events),
       pendingItems: z
         .array(planPendingItemSchema)
@@ -219,9 +224,9 @@ function assertRegenerationPreservesFacts(current: { events: string; costs: stri
   const costs = parseStoredCosts(current.costs, events);
   const protectedEvents = events.filter((event) => event.locked || event.status === "confirmed" || event.costStatus === "user_confirmed");
   const protectedCosts = costs.filter((cost) => cost.certainty === "user_confirmed" || cost.source === "user_confirmed" || cost.paymentStatus !== "not_paid");
-  if (protectedEvents.length || protectedCosts.length) {
+  if (protectedEvents.length || protectedCosts.length || events.some((event) => event.placeId)) {
     throw new PlanConflictError(
-      `当前计划包含 ${protectedEvents.length} 项锁定或已确认安排、${protectedCosts.length} 项已确认金额或支付／退款事实。重新生成可能覆盖这些事实，已保留当前计划。请在日程或预算中逐项修改；误锁定的安排可先解锁。`,
+      `当前计划包含锁定、已确认安排／地点或金额及支付事实。重新生成可能覆盖这些事实，已保留当前计划。请在日程、地图或预算中逐项修改；误锁定的安排可先解锁。`,
     );
   }
 }
@@ -350,7 +355,7 @@ async function copyEvidenceFacts(
       const field = evidenceFieldSchema.safeParse(fact.field);
       const before = source.events.find((event) => event.id === fact.targetId);
       const after = destination.events.find((event) => event.id === fact.targetId)!;
-      const targetChanged = !before || !field.success ||
+      const targetChanged = !before || before.placeId !== after.placeId || !field.success ||
         evidenceTargetSignature(evidenceTarget(before, source.costs), field.data) !==
         evidenceTargetSignature(evidenceTarget(after, destination.costs), field.data);
       const needsReview = targetChanged || fact.lastRefreshStatus === "refreshing";
@@ -431,6 +436,7 @@ export async function savePlanEventEdit(input: {
           requestSnapshot: row.requestSnapshot,
           events: JSON.stringify(editedPlan.events),
           costs: JSON.stringify(editedCosts),
+          places: JSON.stringify(currentPlan.places.filter((place) => editedPlan.events.some((event) => event.placeId === place.id))),
           pendingItems: JSON.stringify(editedPlan.pendingItems),
           validationResults: JSON.stringify(validationResults),
           requirementUpToDate: row.requirementUpToDate,
@@ -547,6 +553,7 @@ export async function savePlanCostEdit(input: {
           requestSnapshot: row.requestSnapshot,
           events: JSON.stringify(sourcePlan.events),
           costs: JSON.stringify(editedCosts),
+          places: JSON.stringify(currentPlan.places),
           pendingItems: row.pendingItems,
           validationResults: JSON.stringify(validationResults),
           requirementUpToDate: row.requirementUpToDate,
@@ -591,6 +598,58 @@ export async function savePlanCostEdit(input: {
         "当前计划版本已经变化，本次费用修改不能提交，请刷新后重试。",
       );
     }
+    throw error;
+  }
+}
+
+export async function savePlanPlaceEdit(input: {
+  tripId: string; expectedPlanVersion: number; eventId: string;
+  candidate: PlaceCandidate | null; precision: Place["precision"];
+  abortSignal?: AbortSignal;
+}) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      if (input.abortSignal?.aborted) throw new PlanConflictError("本次定位已取消。");
+      const row = await transaction.planVersion.findUnique({
+        where: { tripId_versionNumber: { tripId: input.tripId, versionNumber: input.expectedPlanVersion } },
+        include: { trip: { select: { currentPlanVersionId: true } } },
+      });
+      if (!row) throw new PlanNotFoundError();
+      if (row.trip.currentPlanVersionId !== row.id) throw new PlanConflictError("计划版本已变化，请刷新后重新搜索；历史版本保持只读。");
+      const current = serializePlan(row);
+      const event = current.events.find((item) => item.id === input.eventId);
+      if (!event) throw new PlanValidationError("没有找到对应日程。");
+      if (event.locked || event.status === "confirmed") throw new PlanConflictError("这项安排已锁定或确认，请先在时间轴解除后再修改地点。");
+      const candidate = input.candidate;
+      const precision = input.precision;
+      const place = candidate ? placeSchema.parse({ ...candidate,
+        id: placeIdentity(candidate, precision), precision, confirmation: "user_confirmed",
+        confirmedAt: new Date().toISOString(), source: candidate.provider === "amap" ? "高德地图地点搜索" : "OpenStreetMap / Nominatim",
+      }) : null;
+      if ((event.placeId ?? null) === (place?.id ?? null)) throw new PlanValidationError("这项安排的地点没有变化。");
+      const events = current.events.map((item) => item.id === event.id ? {
+        ...item, placeId: place?.id ?? null,
+        locationName: place ? `${place.name.slice(0, 150)}${place.precision === "area_reference" ? "（区域参考点）" : ""}` : item.locationName,
+      } : item);
+      const places = current.places.filter((item) => events.some((event) => event.placeId === item.id));
+      if (place && !places.some((item) => item.id === place.id)) places.push(place);
+      validatePlaceReferences(events, places);
+      const created = await transaction.planVersion.create({ data: {
+        tripId: row.tripId, versionNumber: row.versionNumber + 1,
+        requestRevision: row.requestRevision, requestSnapshot: row.requestSnapshot,
+        events: JSON.stringify(events), places: JSON.stringify(places), costs: row.costs,
+        pendingItems: row.pendingItems, validationResults: row.validationResults,
+        requirementUpToDate: row.requirementUpToDate,
+      } });
+      await copyEvidenceFacts(transaction, row.id, created.id, current, { events, costs: current.costs });
+      if (input.abortSignal?.aborted) throw new PlanConflictError("本次定位已取消。");
+      await transaction.trip.update({ where: { id: row.tripId }, data: { currentPlanVersionId: created.id } });
+      const saved = await transaction.planVersion.findUnique({ where: { id: created.id }, include: { trip: { select: { currentPlanVersionId: true } } } });
+      if (!saved) throw new PlanConflictError();
+      return serializePlan(saved);
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new PlanConflictError("计划已变化，请刷新后重试。");
     throw error;
   }
 }

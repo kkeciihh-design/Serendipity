@@ -8,6 +8,7 @@ test("real Next HTTP rejects all trip mutations without an Origin", async ({ req
     ["PATCH", "/api/trips/missing/request"], ["POST", "/api/trips/missing/request/confirm"],
     ["POST", "/api/trips/missing/request/extract"], ["POST", "/api/trips/missing/plans/generate"],
     ["PATCH", "/api/trips/missing/plans/1"], ["POST", "/api/trips/missing/plans/1/evidence"],
+    ["POST", "/api/trips/missing/plans/1/places"], ["PATCH", "/api/trips/missing/plans/1/places"],
   ];
   for (const [method, url] of writes) {
     expect((await request.fetch(url, { method, data: {} })).status(), `${method} ${url}`).toBe(403);

@@ -16,6 +16,7 @@ import {
   Undo2,
 } from "lucide-react";
 import type { SafeSettings } from "@/lib/settings";
+import { MapSettings } from "./map-settings";
 import {
   DEFAULT_BASE_PROMPT,
   DEFAULT_SYSTEM_PROMPT,
@@ -478,6 +479,7 @@ export function SettingsWorkspace({
 
   return (
     <div className="space-y-6">
+      <MapSettings csrfToken={csrfToken} />
       <section className="rounded-lg border border-sand/80 bg-white p-5 shadow-[0_1px_2px_rgba(35,42,38,0.06)] sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-semibold text-charcoal">AI 基本连接</h2>

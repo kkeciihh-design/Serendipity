@@ -48,6 +48,7 @@ export const planEventSchema = z.object({
   type: planEventTypeSchema,
   title: z.string().trim().min(1).max(120),
   locationName: z.string().trim().max(160).nullable(),
+  placeId: z.string().min(1).max(120).nullable().optional(),
   order: z.number().int().min(1).nullable().optional(),
   status: planEventStatusSchema.optional(),
   locked: z.boolean().optional(),
@@ -91,7 +92,7 @@ export type PlanContent = z.infer<typeof planContentSchema>;
 
 // The model DTO has no user confirmation, lock or payment authority. Unknown
 // fields (including event/root costs and payment fields) are stripped by Zod.
-const aiEventSchema = planEventSchema.omit({ status: true, locked: true, order: true }).extend({
+const aiEventSchema = planEventSchema.omit({ status: true, locked: true, order: true, placeId: true }).extend({
   costStatus: planCostStatusSchema.transform((status) =>
     status === "user_confirmed" ? "pending_confirmation" as const : status),
 });
