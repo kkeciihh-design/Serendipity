@@ -29,6 +29,8 @@ import {
 } from "@/lib/plan-overview";
 import { PlanBudget } from "./plan-budget";
 import { PlanTimeline } from "./plan-timeline";
+import { PlanMap } from "./plan-map";
+import type { Place } from "@/lib/places";
 import type {
   PlanEvent,
   PlanPendingItem,
@@ -45,6 +47,7 @@ export type PlanVersionClient = {
   requestSnapshot: RequestSnapshot;
   events: PlanEvent[];
   costs: PlanCostItem[];
+  places?: Place[];
   pendingItems: PlanPendingItem[];
   validationResults: PlanValidationResults;
   requirementUpToDate: boolean;
@@ -100,7 +103,7 @@ export function PlanOverview({
     selectedPlan,
   );
   const [selectedDayNumber, setSelectedDayNumber] = useState(1);
-  const [activeTab, setActiveTab] = useState<"timeline" | "budget">("timeline");
+  const [activeTab, setActiveTab] = useState<"timeline" | "budget" | "map">("timeline");
   const [isGenerating, setIsGenerating] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -108,7 +111,6 @@ export function PlanOverview({
 
   useEffect(() => {
     setPreviewPlan(selectedPlan);
-    setSelectedDayNumber(1);
   }, [selectedPlan]);
 
   useEffect(() => {
@@ -462,6 +464,8 @@ export function PlanOverview({
                 >
                   预算
                 </button>
+                <button type="button" role="tab" aria-selected={activeTab === "map"} onClick={() => setActiveTab("map")}
+                  className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "map" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>地图</button>
               </div>
               <p className="text-sm text-graphite">
                 共 {days.length} 天｜{displayPlan.events.length} 个日程｜
@@ -509,6 +513,8 @@ export function PlanOverview({
                   </>
                 ) : null}
               </>
+            ) : activeTab === "map" ? (
+              <PlanMap key={displayPlan.id} tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} selectedDayNumber={selectedDayNumber} onDayChange={setSelectedDayNumber} />
             ) : (
               <PlanBudget
                 tripId={tripId}

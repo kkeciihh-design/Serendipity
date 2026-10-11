@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { backupBeforeMigration } from "./database-backup.mjs";
 
 const projectRoot = process.cwd();
 const dataDirectory = process.env.SERENDIPITY_DATA_DIR
@@ -16,6 +17,7 @@ const databaseUrl = `file:${databasePath.replaceAll("\\", "/")}`;
 const prismaCli = path.join(projectRoot, "node_modules", "prisma", "build", "index.js");
 
 fs.mkdirSync(databaseDirectory, { recursive: true });
+backupBeforeMigration(databasePath, path.join(projectRoot, "prisma", "migrations"));
 
 let migration;
 
@@ -28,7 +30,9 @@ for (let attempt = 1; attempt <= 5; attempt += 1) {
       env: {
         ...process.env,
         DATABASE_URL: databaseUrl,
-        RUST_LOG: process.env.RUST_LOG ?? "info",
+        // Prisma 6's Windows migration engine fails under the host's inherited
+        // RUST_LOG=warn; keep migration diagnostics at its working level.
+        RUST_LOG: "info",
       },
       stdio: "inherit",
     },

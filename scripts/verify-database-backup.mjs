@@ -1,0 +1,24 @@
+import { DatabaseSync } from "node:sqlite";
+import fs from "node:fs";
+import path from "node:path";
+import assert from "node:assert/strict";
+import { backupBeforeMigration } from "./database-backup.mjs";
+
+const directory = fs.mkdtempSync(path.resolve("test-data/phase11-backup-"));
+fs.mkdirSync(path.join(directory, "data"));
+const filename = path.join(directory, "data/serendipity.db");
+const writer = new DatabaseSync(filename);
+writer.exec('PRAGMA journal_mode=WAL; CREATE TABLE "Trip" (id TEXT PRIMARY KEY, title TEXT); INSERT INTO "Trip" VALUES (\'fixture\', \'backup fixture\');');
+const backup = backupBeforeMigration(filename, path.resolve("prisma/migrations"));
+assert(backup);
+writer.exec('UPDATE "Trip" SET title = \'later change\';');
+const restore = path.join(directory, "restored.db");
+fs.copyFileSync(backup, restore);
+const reader = new DatabaseSync(restore, { readOnly: true });
+assert.equal(reader.prepare('SELECT title FROM "Trip"').get().title, "backup fixture");
+assert.equal(Object.values(reader.prepare("PRAGMA integrity_check").get())[0], "ok");
+assert.equal(writer.prepare('SELECT title FROM "Trip"').get().title, "later change");
+reader.close(); writer.close();
+fs.mkdirSync("test-data/phase11-evidence", { recursive: true });
+fs.writeFileSync("test-data/phase11-evidence/backup-restore.json", JSON.stringify({ status: "passed", database: filename, backup, restore, checks: ["committed WAL included", "backup readable", "restored snapshot integrity ok", "later source changes isolated"] }, null, 2));
+console.log("PASS: consistent WAL backup, integrity check and restore to isolated copy.");

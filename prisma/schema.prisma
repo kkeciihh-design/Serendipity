@@ -51,6 +51,7 @@ model PlanVersion {
   requestSnapshot     String
   events              String
   costs               String         @default("[]")
+  places              String         @default("[]")
   pendingItems        String
   validationResults   String
   requirementUpToDate Boolean        @default(true)
@@ -119,6 +120,10 @@ model AppSettings {
   searchStatus        String?   @default("not_tested")
   searchCheckedAt     DateTime?
   searchError         String?
+  mapConfigurationCiphertext String?
+  mapCheckedAt        DateTime?
+  mapCapabilities     String?
+  mapProvider         String          @default("osm")
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
