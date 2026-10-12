@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import {
@@ -35,6 +36,7 @@ import {
 } from "./plan-edit";
 import { requestSnapshotSchema, type RequestSnapshot } from "./trip-request";
 import { placeSchema, placeIdentity, validatePlaceReferences, type Place, type PlaceCandidate } from "./places";
+import { routeConflict, routeCostPricingUnit, routeLegSchema, routeModeLabels, type RouteLeg } from "./routes";
 
 export class PlanValidationError extends Error {
   constructor(message: string) {
@@ -68,6 +70,7 @@ export type PlanVersionRecord = {
   events: PlanEvent[];
   costs: PlanCostItem[];
   places: Place[];
+  routeLegs: RouteLeg[];
   pendingItems: PlanPendingItem[];
   validationResults: PlanValidationResults;
   requirementUpToDate: boolean;
@@ -131,6 +134,7 @@ function serializePlan(record: PlanVersionRow): PlanVersionRecord {
   try {
     const events = z.array(planEventSchema).parse(JSON.parse(record.events));
     const places = z.array(placeSchema).parse(JSON.parse(record.places));
+    const routeLegs = z.array(routeLegSchema).parse(JSON.parse(record.routeLegs ?? "[]"));
     validatePlaceReferences(events, places);
     return {
       id: record.id,
@@ -140,6 +144,7 @@ function serializePlan(record: PlanVersionRow): PlanVersionRecord {
       requestSnapshot: parseSnapshot(record.requestSnapshot),
       events,
       places,
+      routeLegs,
       costs: parseStoredCosts(record.costs, events),
       pendingItems: z
         .array(planPendingItemSchema)
@@ -296,6 +301,7 @@ export async function savePlanVersion(input: {
           requestSnapshot: JSON.stringify(capture.requestSnapshot),
           events: JSON.stringify(plan.events),
           costs: JSON.stringify(costs),
+          routeLegs: "[]",
           pendingItems: JSON.stringify(plan.pendingItems),
           validationResults: JSON.stringify(validation),
           requirementUpToDate: true,
@@ -437,6 +443,13 @@ export async function savePlanEventEdit(input: {
           events: JSON.stringify(editedPlan.events),
           costs: JSON.stringify(editedCosts),
           places: JSON.stringify(currentPlan.places.filter((place) => editedPlan.events.some((event) => event.placeId === place.id))),
+          routeLegs: JSON.stringify(currentPlan.routeLegs.filter((leg) =>
+            editedPlan.events.some((event) => event.id === leg.fromEventId) &&
+            editedPlan.events.some((event) => event.id === leg.toEventId) &&
+            (!input.edit.remove || (input.edit.eventId !== leg.fromEventId && input.edit.eventId !== leg.toEventId))
+          ).map((leg) => input.edit.eventId === leg.fromEventId || input.edit.eventId === leg.toEventId
+            ? { ...leg, status: "pending_confirmation" as const, scheduleBasis: `${leg.scheduleBasis}；日程时间或内容已修改，需按新时刻复核。` }
+            : leg)),
           pendingItems: JSON.stringify(editedPlan.pendingItems),
           validationResults: JSON.stringify(validationResults),
           requirementUpToDate: row.requirementUpToDate,
@@ -554,6 +567,7 @@ export async function savePlanCostEdit(input: {
           events: JSON.stringify(sourcePlan.events),
           costs: JSON.stringify(editedCosts),
           places: JSON.stringify(currentPlan.places),
+          routeLegs: JSON.stringify(currentPlan.routeLegs),
           pendingItems: row.pendingItems,
           validationResults: JSON.stringify(validationResults),
           requirementUpToDate: row.requirementUpToDate,
@@ -638,11 +652,109 @@ export async function savePlanPlaceEdit(input: {
         tripId: row.tripId, versionNumber: row.versionNumber + 1,
         requestRevision: row.requestRevision, requestSnapshot: row.requestSnapshot,
         events: JSON.stringify(events), places: JSON.stringify(places), costs: row.costs,
+        routeLegs: JSON.stringify(current.routeLegs.filter((leg) => leg.fromEventId !== event.id && leg.toEventId !== event.id)),
         pendingItems: row.pendingItems, validationResults: row.validationResults,
         requirementUpToDate: row.requirementUpToDate,
       } });
       await copyEvidenceFacts(transaction, row.id, created.id, current, { events, costs: current.costs });
       if (input.abortSignal?.aborted) throw new PlanConflictError("本次定位已取消。");
+      await transaction.trip.update({ where: { id: row.tripId }, data: { currentPlanVersionId: created.id } });
+      const saved = await transaction.planVersion.findUnique({ where: { id: created.id }, include: { trip: { select: { currentPlanVersionId: true } } } });
+      if (!saved) throw new PlanConflictError();
+      return serializePlan(saved);
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new PlanConflictError("计划已变化，请刷新后重试。");
+    throw error;
+  }
+}
+
+function routeCostId(fromEventId: string, toEventId: string) {
+  return `route-${crypto.createHash("sha256").update(`${fromEventId}\n${toEventId}`).digest("hex").slice(0, 24)}`;
+}
+
+export function applyRouteCost(route: RouteLeg, events: PlanEvent[], costs: PlanCostItem[]): PlanCostItem[] {
+  const id = routeCostId(route.fromEventId, route.toEventId);
+  const from = events.find((event) => event.id === route.fromEventId);
+  const to = events.find((event) => event.id === route.toEventId);
+  const base = costs.filter((cost) => cost.id !== id);
+  if (
+    route.mode === "walking" ||
+    route.status === "unavailable" ||
+    from?.type === "local_transport" ||
+    to?.type === "local_transport"
+  ) return base;
+
+  const existing = costs.find((cost) => cost.id === id);
+  if (existing && (existing.source === "user_confirmed" || existing.paymentStatus !== "not_paid")) return base;
+  const amountKnown = route.cost.minCents !== null;
+  return [...base, planCostItemSchema.parse({
+    id,
+    linkedEventId: route.toEventId,
+    category: "local_transport",
+    currency: "CNY",
+    unit: routeCostPricingUnit(route.mode),
+    unitAmountCents: route.cost.minCents,
+    unitAmountMaxCents: route.cost.maxCents,
+    quantity: null,
+    certainty: amountKnown && route.status !== "pending_confirmation" ? "estimated" : "pending_confirmation",
+    paymentStatus: "not_paid",
+    source: "ai_draft",
+    eventRemoved: false,
+    note: `${routeModeLabels[route.mode]}：${route.cost.basis}`,
+  })];
+}
+
+export async function savePlanRouteEdit(input: {
+  tripId: string;
+  expectedPlanVersion: number;
+  route: RouteLeg;
+  abortSignal?: AbortSignal;
+}) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      if (input.abortSignal?.aborted) throw new PlanConflictError("本次路线查询已取消。");
+      const row = await transaction.planVersion.findUnique({
+        where: { tripId_versionNumber: { tripId: input.tripId, versionNumber: input.expectedPlanVersion } },
+        include: { trip: { select: { currentPlanVersionId: true } } },
+      });
+      if (!row) throw new PlanNotFoundError();
+      if (row.trip.currentPlanVersionId !== row.id) throw new PlanConflictError("计划已变化，请刷新后重新查询路线；历史版本保持只读。");
+      const current = serializePlan(row);
+      const from = current.events.find((event) => event.id === input.route.fromEventId);
+      const to = current.events.find((event) => event.id === input.route.toEventId);
+      if (!from || !to) throw new PlanValidationError("路线关联的日程不存在，请刷新后重试。");
+      if (from.date !== input.route.date || to.date !== input.route.date) throw new PlanValidationError("城市路线只能连接同一天的两个地点。");
+      if (from.endTime > input.route.departureTime) throw new PlanValidationError("出发时刻不能早于上一项结束时间。");
+
+      const route = { ...input.route, conflict: routeConflict({
+        route: input.route,
+        earliestDate: to.date,
+        earliestStartTime: to.startTime,
+      }) };
+      const routeLegs = [
+        ...current.routeLegs.filter((leg) => leg.fromEventId !== route.fromEventId || leg.toEventId !== route.toEventId),
+        routeLegSchema.parse(route),
+      ];
+      const costs = applyRouteCost(routeLegSchema.parse(route), current.events, current.costs);
+      const costErrors = validatePlanCosts(costs, current.events);
+      if (costErrors.length > 0) throw new PlanValidationError(costErrors[0]);
+
+      const created = await transaction.planVersion.create({ data: {
+        tripId: row.tripId,
+        versionNumber: row.versionNumber + 1,
+        requestRevision: row.requestRevision,
+        requestSnapshot: row.requestSnapshot,
+        events: row.events,
+        costs: JSON.stringify(costs),
+        places: row.places,
+        routeLegs: JSON.stringify(routeLegs),
+        pendingItems: row.pendingItems,
+        validationResults: row.validationResults,
+        requirementUpToDate: row.requirementUpToDate,
+      } });
+      if (input.abortSignal?.aborted) throw new PlanConflictError("本次路线查询已取消。");
+      await copyEvidenceFacts(transaction, row.id, created.id, current, { events: current.events, costs });
       await transaction.trip.update({ where: { id: row.tripId }, data: { currentPlanVersionId: created.id } });
       const saved = await transaction.planVersion.findUnique({ where: { id: created.id }, include: { trip: { select: { currentPlanVersionId: true } } } });
       if (!saved) throw new PlanConflictError();

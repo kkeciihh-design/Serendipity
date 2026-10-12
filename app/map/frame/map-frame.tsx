@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
-import { placeSchema, toGcj02, toWgs84, type Place } from "@/lib/places";
+import { mapMarkerSchema, mapRouteSchema, markerLabel, type MapMarker, type MapRoute } from "@/lib/map-link";
+import { toGcj02, toWgs84 } from "@/lib/places";
 import { z } from "zod";
 
 type AMapInstance = {
@@ -11,8 +12,45 @@ type AMapInstance = {
   setFitView: (markers: unknown[], immediately: boolean, padding: number[], maxZoom: number) => void;
   destroy: () => void;
 };
-type AMapApi = { Map: new (element: HTMLElement, options: object) => AMapInstance; Marker: new (options: object) => unknown };
+type AMapApi = {
+  Map: new (element: HTMLElement, options: object) => AMapInstance;
+  Marker: new (options: object) => unknown;
+  Polyline: new (options: object) => unknown;
+};
 declare global { interface Window { AMap?: AMapApi; _AMapSecurityConfig?: { serviceHost: string } } }
+
+function createPopup(marker: MapMarker, selectEvent: (eventId: string) => void) {
+  const popup = document.createElement("div");
+  popup.className = "serendipity-map-popup";
+  const title = document.createElement("strong");
+  title.textContent = `${marker.name}${marker.precision === "area_reference" ? " · 区域参考点" : ""}`;
+  popup.append(title);
+  for (const event of marker.events) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "serendipity-map-popup-event";
+    button.textContent = `${event.visitNumber}. ${event.timeRange}｜${event.title}`;
+    button.addEventListener("click", () => selectEvent(event.id));
+    popup.append(button);
+  }
+  return popup;
+}
+
+function routeColor(route: MapRoute) {
+  if (route.mode === "walking") return "#3f6212";
+  if (route.mode === "public_transit") return "#1d4ed8";
+  return "#9a3412";
+}
+
+function routeBearing(points: { latitude: number; longitude: number }[]) {
+  const index = Math.max(0, Math.floor(points.length / 2) - 1);
+  const from = points[index];
+  const to = points[Math.min(index + 1, points.length - 1)];
+  const y = Math.sin((to.longitude - from.longitude) * Math.PI / 180) * Math.cos(to.latitude * Math.PI / 180);
+  const x = Math.cos(from.latitude * Math.PI / 180) * Math.sin(to.latitude * Math.PI / 180) -
+    Math.sin(from.latitude * Math.PI / 180) * Math.cos(to.latitude * Math.PI / 180) * Math.cos((to.longitude - from.longitude) * Math.PI / 180);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
 
 export function MapFrame() {
   const container = useRef<HTMLDivElement>(null);
@@ -20,8 +58,8 @@ export function MapFrame() {
   useEffect(() => {
     const controller = new AbortController();
     let disposeMap: (() => void) | undefined;
-    let updatePlaces: ((places: Place[]) => void) | undefined;
-    let pending: Place[] = [];
+    let updateMarkers: ((markers: MapMarker[], routes: MapRoute[], focusEventId: string | null) => void) | undefined;
+    let pending: { markers: MapMarker[]; routes: MapRoute[]; focusEventId: string | null } = { markers: [], routes: [], focusEventId: null };
     let script: HTMLScriptElement | undefined;
     const preview = new URLSearchParams(window.location.search).get("preview") === "1";
     const send = (state: "ready" | "error" | "loading", error?: string) => {
@@ -29,14 +67,22 @@ export function MapFrame() {
       setMessage(error ?? "");
       window.parent.postMessage({ type: "serendipity-map", state, preview, error }, window.location.origin);
     };
+    const selectEvent = (eventId: string) => {
+      if (controller.signal.aborted) return;
+      window.parent.postMessage({ type: "serendipity-map", state: "event-selected", preview, eventId }, window.location.origin);
+    };
     let timer = window.setTimeout(() => send("error", "地图加载超时，文字地点仍可查看。请重试。"), 18000);
     const ready = () => { window.clearTimeout(timer); send("ready"); };
     const receive = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin || event.source !== window.parent || event.data?.type !== "serendipity-places") return;
-      const result = z.array(placeSchema).max(64).safeParse(event.data.places);
+      if (event.origin !== window.location.origin || event.source !== window.parent || event.data?.type !== "serendipity-markers") return;
+      const result = z.object({
+        markers: z.array(mapMarkerSchema).max(64),
+        routes: z.array(mapRouteSchema).max(64),
+        focusEventId: z.string().nullable(),
+      }).safeParse(event.data);
       if (!result.success) return;
-      pending = result.data;
-      updatePlaces?.(pending);
+      pending = { markers: result.data.markers, routes: result.data.routes, focusEventId: result.data.focusEventId };
+      updateMarkers?.(pending.markers, pending.routes, pending.focusEventId);
     };
     window.addEventListener("message", receive);
     const start = async () => {
@@ -65,26 +111,75 @@ export function MapFrame() {
         tiles.on("tileerror", () => { failed++; send("error", "部分地图未加载，请检查网络后重试。地点文字仍可查看。"); });
         tiles.on("load", () => { if (loaded > 0 && failed === 0) ready(); });
         tiles.addTo(map);
-        const markers = L.layerGroup().addTo(map);
-        updatePlaces = (places) => {
-          markers.clearLayers();
+        const markerLayer = L.layerGroup().addTo(map);
+        const routeLayer = L.layerGroup().addTo(map);
+        updateMarkers = (mapMarkers, mapRoutes, focusEventId) => {
+          markerLayer.clearLayers();
+          routeLayer.clearLayers();
+          for (const route of mapRoutes) {
+            const points = route.polyline
+              .map((point) => toWgs84(point, route.coordinateSystem))
+              .map((point) => [point.latitude, point.longitude] as [number, number]);
+            if (points.length < 2) continue;
+            L.polyline(points, {
+              color: routeColor(route),
+              weight: 5,
+              opacity: route.status === "verified" ? 0.9 : 0.65,
+              dashArray: route.status === "verified" ? undefined : "8 7",
+            }).addTo(routeLayer);
+            L.marker(points[Math.floor(points.length / 2)], {
+              interactive: false,
+              keyboard: false,
+              icon: L.divIcon({
+                className: "serendipity-map-route-arrow",
+                html: `<span style="transform: rotate(${routeBearing(route.polyline)}deg)">➤</span>`,
+                iconSize: [20, 20],
+                iconAnchor: [10, 10],
+              }),
+            }).addTo(routeLayer);
+          }
           const coordinates: [number, number][] = [];
-          for (const place of places) {
-            const position = toWgs84(place, place.coordinateSystem);
+          const createdMarkers: L.Marker[] = [];
+          for (const markerData of mapMarkers) {
+            const position = toWgs84(markerData, markerData.coordinateSystem);
             const point: [number, number] = [position.latitude, position.longitude];
             coordinates.push(point);
-            const popup = document.createElement("div");
-            popup.textContent = `${place.name}${place.precision === "area_reference" ? " · 区域参考点" : ""}｜${place.city}｜${place.address}`;
-            const marker = L.marker(point, { title: place.name, keyboard: true,
-              icon: L.divIcon({ className: "serendipity-map-pin", html: place.precision === "area_reference" ? "◎" : "●", iconSize: [30, 30], iconAnchor: [15, 15] }),
-            }).bindPopup(popup).addTo(markers);
-            if (place.precision === "area_reference") marker.setOpacity(0.7);
+            const marker = L.marker(point, {
+              title: markerData.name,
+              keyboard: true,
+              icon: L.divIcon({
+                className: `serendipity-map-pin${markerData.precision === "area_reference" ? " serendipity-map-pin-area" : ""}`,
+                html: markerData.precision === "area_reference" ? "◎" : markerLabel(markerData),
+                iconSize: markerData.events.length > 1 ? [42, 30] : [30, 30],
+                iconAnchor: [markerData.events.length > 1 ? 21 : 15, 15],
+              }),
+            }).bindPopup(createPopup(markerData, selectEvent)).addTo(markerLayer);
+            createdMarkers.push(marker);
+            if (markerData.precision === "area_reference") marker.setOpacity(0.7);
           }
-          if (coordinates.length) map.fitBounds(coordinates, { padding: [35, 35], maxZoom: 15, animate: false });
+          if (coordinates.length) {
+            if (focusEventId) {
+              const focusIndex = mapMarkers.findIndex((item) => item.events.some((event) => event.id === focusEventId));
+              if (focusIndex >= 0) {
+                const focus = createdMarkers[focusIndex];
+                if (focus) {
+                  map.setView(coordinates[focusIndex], Math.max(map.getZoom(), 15), { animate: true });
+                  focus.openPopup();
+                }
+              }
+            } else {
+              const bounds = L.latLngBounds(createdMarkers.map((marker) => marker.getLatLng()));
+              if (createdMarkers.length === 1) {
+                map.setView(bounds.getCenter(), 15, { animate: false });
+              } else {
+                map.fitBounds(bounds, { padding: [35, 35], maxZoom: 15, animate: false });
+              }
+            }
+          }
         };
-        updatePlaces(pending);
+        updateMarkers(pending.markers, pending.routes, pending.focusEventId);
         // Orientation/viewport changes must keep the selected day's points in view.
-        map.on("resize", () => updatePlaces?.(pending));
+        map.on("resize", () => updateMarkers?.(pending.markers, pending.routes, pending.focusEventId));
         // Tiles may already be loaded before the parent receives the frame event.
         window.parent.postMessage({ type: "serendipity-map", state: "initialized", preview }, window.location.origin);
       } else {
@@ -100,19 +195,46 @@ export function MapFrame() {
         disposeMap = () => map.destroy();
         map.on("complete", ready);
         let markers: unknown[] = [];
-        updatePlaces = (places) => {
+        updateMarkers = (mapMarkers, mapRoutes, focusEventId) => {
           map.remove(markers);
-          markers = places.map((place) => {
-            const coordinate = toGcj02(place, place.coordinateSystem);
+          markers = [];
+          for (const route of mapRoutes) {
+            const points = route.polyline
+              .map((point) => toGcj02(point, route.coordinateSystem))
+              .map((point) => [point.longitude, point.latitude]);
+            if (points.length < 2) continue;
+            markers.push(new sdk.Polyline({
+              path: points,
+              strokeColor: routeColor(route),
+              strokeWeight: 5,
+              strokeOpacity: route.status === "verified" ? 0.9 : 0.65,
+              strokeStyle: route.status === "verified" ? "solid" : "dashed",
+            }));
+            const arrow = toGcj02(route.polyline[Math.floor(route.polyline.length / 2)], route.coordinateSystem);
             const pin = document.createElement("div");
-            pin.className = "serendipity-map-pin";
-            pin.textContent = place.precision === "area_reference" ? "◎" : "●";
-            return new sdk.Marker({ position: [coordinate.longitude, coordinate.latitude], title: `${place.name} · ${place.city}`, content: pin });
-          });
+            pin.className = "serendipity-map-route-arrow";
+            pin.innerHTML = `<span style="transform: rotate(${routeBearing(route.polyline)}deg)">➤</span>`;
+            markers.push(new sdk.Marker({ position: [arrow.longitude, arrow.latitude], content: pin }));
+          }
+          markers = [...markers, ...mapMarkers.map((markerData) => {
+            const coordinate = toGcj02(markerData, markerData.coordinateSystem);
+            const pin = document.createElement("div");
+            pin.className = `serendipity-map-pin${markerData.precision === "area_reference" ? " serendipity-map-pin-area" : ""}`;
+            pin.textContent = markerData.precision === "area_reference" ? "◎" : markerLabel(markerData);
+            for (const event of markerData.events) {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = "serendipity-map-popup-event serendipity-map-popup-event-inline";
+              button.textContent = `${event.visitNumber}. ${event.title}`;
+              button.addEventListener("click", () => selectEvent(event.id));
+              pin.append(button);
+            }
+            return new sdk.Marker({ position: [coordinate.longitude, coordinate.latitude], title: markerData.name, content: pin });
+          })];
           map.add(markers);
-          if (markers.length) map.setFitView(markers, true, [35, 35, 35, 35], 15);
+          if (markers.length && !focusEventId) map.setFitView(markers, true, [35, 35, 35, 35], 15);
         };
-        updatePlaces(pending);
+        updateMarkers(pending.markers, pending.routes, pending.focusEventId);
         window.parent.postMessage({ type: "serendipity-map", state: "initialized", preview }, window.location.origin);
       }
     };

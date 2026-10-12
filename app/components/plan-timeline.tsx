@@ -7,6 +7,7 @@ import {
   BookOpenCheck,
   Lock,
   LockOpen,
+  MapPin,
   PencilLine,
   Save,
   Trash2,
@@ -29,7 +30,10 @@ import {
 import type { PlanVersionClient } from "./plan-overview";
 import type { EvidenceFactClient, EvidenceField } from "@/lib/evidence";
 import { effectiveEvidenceStatus, evidenceFieldLabels, evidenceStatusLabels, summarizeEventEvidence } from "@/lib/evidence";
+import { numberPlanEvents } from "@/lib/map-link";
+import type { RouteLeg } from "@/lib/routes";
 import { EvidenceDrawer } from "./evidence-drawer";
+import type { MapLinkTarget } from "./plan-map";
 
 const eventTypeLabels: Record<PlanEvent["type"], string> = {
   departure_transport: "去程",
@@ -51,6 +55,21 @@ const costStatusLabels: Record<PlanEvent["costStatus"], string> = {
 const eventStatusLabels: Record<PlanEventStatus, string> = {
   suggested: "AI建议",
   confirmed: "已确认",
+};
+const routeModeLabels: Record<RouteLeg["mode"], string> = {
+  walking: "步行",
+  public_transit: "地铁/公交",
+  driving: "驾车/打车",
+};
+const routeStatusLabels: Record<RouteLeg["status"], string> = {
+  verified: "已核实",
+  estimated: "估算",
+  pending_confirmation: "待确认",
+  unavailable: "暂无可用路线",
+};
+const formatRouteDuration = (seconds: number) => {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return minutes < 60 ? `${minutes} 分钟` : `${Math.floor(minutes / 60)} 小时 ${minutes % 60 ? `${minutes % 60} 分钟` : ""}`.trim();
 };
 
 type Draft = {
@@ -118,13 +137,16 @@ export function PlanTimeline({
   plan,
   day,
   onSaved,
+  selectedEventId,
+  onEventSelect,
 }: {
   tripId: string;
   plan: PlanVersionClient;
   day: PlanOverviewDay;
   onSaved: (plan: PlanVersionClient) => void;
+  selectedEventId: string | null;
+  onEventSelect: (eventId: string, target: MapLinkTarget, dayNumber: number) => void;
 }) {
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [removeRequested, setRemoveRequested] = useState(false);
@@ -141,6 +163,7 @@ export function PlanTimeline({
   }, [scope]);
   const currentFacts = evidenceFacts.filter((fact) => fact.planVersionId === plan.id)
     .map((fact) => ({ ...fact, effectiveStatus: effectiveEvidenceStatus(fact) }));
+  const numberedEvents = useMemo(() => numberPlanEvents(day.events), [day.events]);
 
   const nextDayFirstEvent = useMemo(() => {
     const nextDayEvents = plan.events.filter(
@@ -152,14 +175,13 @@ export function PlanTimeline({
   useEffect(() => {
     const event = plan.events.find((item) => item.id === selectedEventId);
     if (!event) {
-      setSelectedEventId(null);
       setDraft(null);
       setRemoveRequested(false);
       return;
     }
     setDraft(createDraft(event));
     setRemoveRequested(false);
-  }, [plan, selectedEventId]);
+  }, [plan.id, selectedEventId]);
 
   useEffect(() => {
     setEvidenceFacts(plan.evidenceFacts ?? []);
@@ -232,21 +254,25 @@ export function PlanTimeline({
   return (
     <div>
       <ol className="mt-3 space-y-3">
-        {day.events.map((event, index) => {
+        {numberedEvents.map(({ event, visitLabel }, index) => {
           const next =
-            day.events[index + 1] ??
-            (index === day.events.length - 1 ? nextDayFirstEvent : undefined);
+            numberedEvents[index + 1]?.event ??
+            (index === numberedEvents.length - 1 ? nextDayFirstEvent : undefined);
           const locked = event.locked ?? false;
           const eventFacts = currentFacts.filter(
             (fact) => fact.targetId === event.id,
           );
           const sourceStatus = summarizeEventEvidence(eventFacts).label;
+          const route = next
+            ? plan.routeLegs?.find((item) => item.fromEventId === event.id && item.toEventId === next.id)
+            : undefined;
           return (
-            <li key={event.id} className="space-y-2">
+            <li key={event.id} id={`timeline-event-${event.id}`} className="space-y-2">
               <button
                 type="button"
-                onClick={() => setSelectedEventId(event.id)}
+                onClick={() => onEventSelect(event.id, "timeline", day.dayNumber)}
                 aria-expanded={selectedEventId === event.id}
+                aria-label={`第 ${index + 1} 项：${event.title}`}
                 className={`grid w-full gap-2 rounded-md border p-4 text-left transition-colors sm:grid-cols-[130px_1fr_auto] sm:items-start ${
                   selectedEventId === event.id
                     ? "border-sage bg-sage-soft"
@@ -254,6 +280,7 @@ export function PlanTimeline({
                 }`}
               >
                 <span className="text-sm font-semibold text-sage">
+                  <span aria-hidden="true" className="mr-2">{visitLabel}</span>
                   {formatPlanEventTimeRange(event)}
                 </span>
                 <span className="min-w-0">
@@ -282,8 +309,25 @@ export function PlanTimeline({
                   </span>
                 ) : null}
               </button>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => onEventSelect(event.id, "map", day.dayNumber)}
+                  aria-label={`定位地图：${visitLabel}${event.title}`}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-md border border-sand bg-cream px-3 text-sm font-medium text-graphite transition-colors hover:border-sage hover:text-sage"
+                >
+                  <MapPin aria-hidden="true" className="size-4" />
+                  定位地图
+                </button>
+              </div>
               {next ? (
-                <p className="flex items-center gap-2 pl-4 text-sm text-graphite">
+            route ? <div className="ml-4 rounded-md bg-cream p-3 text-sm leading-6">
+              <p className="font-semibold text-charcoal">{routeModeLabels[route.mode]}｜{routeStatusLabels[route.status]}｜{formatRouteDuration(route.durationSeconds)}｜{route.date} {route.departureTime} 出发</p>
+              <p className="text-graphite">{route.scheduleBasis}｜费用：{route.cost.minCents === null ? "待确认" : `${Math.round(route.cost.minCents / 100)} 元`}</p>
+              {route.conflict ? <p className="font-medium text-clay">{route.conflict}</p> : null}
+              {route.steps.length ? <details className="mt-1"><summary className="cursor-pointer text-sage">查看路线步骤</summary><ol className="mt-1 space-y-1 text-graphite">{route.steps.map((step, index) => <li key={`${route.id}-${index}`}>{index + 1}. {step.instruction}</li>)}</ol></details> : null}
+            </div> :
+            <p className="flex items-center gap-2 pl-4 text-sm text-graphite">
                   <ArrowDown aria-hidden="true" className="size-4 shrink-0 text-sage" />
                   {connectionLabel(event, next)}
                 </p>

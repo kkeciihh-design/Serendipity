@@ -9,12 +9,36 @@ process.env.SERENDIPITY_DATA_DIR = path.resolve("test-data/e2e");
 const prisma = new PrismaClient({ datasources: { db: { url: `file:${path.resolve("test-data/e2e/data/serendipity.db").replaceAll("\\", "/")}` } } });
 test.afterAll(async () => prisma.$disconnect());
 
-async function seed(request: APIRequestContext) {
+async function seed(request: APIRequestContext, linked = false) {
   const response = await request.post("/api/trips", { data: { originalRequest: "地图浏览器测试：深圳站和深圳北站" } });
   const { trip } = await response.json();
   const snapshot = requestFixture(2, { destination: "深圳" });
   const content = planFixture(snapshot);
-  const row = await prisma.planVersion.create({ data: { tripId: trip.id, versionNumber: 1, requestRevision: 1, requestSnapshot: JSON.stringify(snapshot), events: JSON.stringify(content.events), costs: JSON.stringify(derivePlanCosts(content.events)), pendingItems: JSON.stringify(content.pendingItems), validationResults: JSON.stringify({ status: "valid", errors: [], warnings: [] }) } });
+  const places = linked ? [
+    {
+      id: "museum", provider: "osm", poiId: "node:museum", name: "Example Museum", city: "深圳市", district: "福田区",
+      address: "深圳市福田区Example Museum", adcode: "", category: "museum", coordinateSystem: "WGS84", latitude: 22.54, longitude: 114.06,
+      precision: "poi", confirmation: "user_confirmed", confirmedAt: new Date().toISOString(), retrievedAt: new Date().toISOString(), source: "OpenStreetMap / Nominatim",
+    },
+    {
+      id: "hotel", provider: "osm", poiId: "node:hotel", name: "Example Hotel", city: "深圳市", district: "罗湖区",
+    address: "深圳市罗湖区Example Hotel", adcode: "", category: "hotel", coordinateSystem: "WGS84", latitude: 22.53, longitude: 114.11,
+    precision: "poi", confirmation: "user_confirmed", confirmedAt: new Date().toISOString(), retrievedAt: new Date().toISOString(), source: "OpenStreetMap / Nominatim",
+  }] : [];
+  if (linked) {
+    const activity = content.events.find((item) => item.id === "d1-activity");
+    if (activity) activity.placeId = "museum";
+    for (const eventId of ["d1-breakfast", "d1-hotel", "d2-breakfast"]) {
+      const event = content.events.find((item) => item.id === eventId);
+      if (event) event.placeId = "hotel";
+    }
+    content.events.push({
+      id: "d2-extra", type: "local_transport", dayNumber: 2, date: content.events.find((item) => item.id === "return")?.date ?? content.events.at(-1)!.date,
+      startTime: "15:00", endTime: "15:45", title: "可选加项", locationName: "Example Hotel", placeId: "hotel",
+      suggestedDurationSeconds: 2700, costDraftCents: 0, costStatus: "estimated", status: "suggested", locked: false, note: null,
+    });
+  }
+  const row = await prisma.planVersion.create({ data: { tripId: trip.id, versionNumber: 1, requestRevision: 1, requestSnapshot: JSON.stringify(snapshot), events: JSON.stringify(content.events), costs: JSON.stringify(derivePlanCosts(content.events)), pendingItems: JSON.stringify(content.pendingItems), places: JSON.stringify(places), validationResults: JSON.stringify({ status: "valid", errors: [], warnings: [] }) } });
   await prisma.trip.update({ where: { id: trip.id }, data: { currentPlanVersionId: row.id, status: "planned" } });
   return trip as { id: string };
 }
@@ -96,4 +120,103 @@ test("map network failure leaves the itinerary and retry controls usable", async
   await page.getByRole("tab", { name: "每日时间轴", exact: true }).click();
   await expect(page.getByRole("button", { name: /Example Museum/ }).first()).toBeVisible();
   expect(await prisma.planVersion.count({ where: { tripId: trip.id } })).toBe(1);
+});
+
+test("map loading timeout keeps the itinerary readable", async ({ page, request }) => {
+  const trip = await seed(request);
+  await page.route("https://tile.openstreetmap.org/**", (route) => new Promise<void>(() => {
+    void route;
+  }));
+  await page.goto(`/trips/${trip.id}`);
+  await page.getByRole("tab", { name: "地图", exact: true }).click();
+  await expect(page.getByText("地图加载超时，文字地点仍可查看。请重试。")).toBeVisible({ timeout: 25_000 });
+  await expect(page.getByRole("button", { name: "重试地图" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "定位：Example Museum", exact: true })).toBeVisible();
+  expect(await prisma.planVersion.count({ where: { tripId: trip.id } })).toBe(1);
+});
+
+test("map numbers and timeline selections stay linked across edits and days", async ({ page, request }) => {
+  const trip = await seed(request, true);
+  await controlledMap(page, trip.id);
+  await page.goto(`/trips/${trip.id}`);
+  await page.getByRole("tab", { name: "地图", exact: true }).click();
+  const mapFrame = page.frameLocator('iframe[title="行程地点地图"]');
+  const hotelPin = mapFrame.locator(".serendipity-map-pin").filter({ hasText: "③⑦" });
+  await expect(hotelPin).toBeVisible();
+  await page.locator('iframe[title="行程地点地图"]').scrollIntoViewIfNeeded();
+  await hotelPin.click();
+  const breakfastPopupButton = mapFrame.getByRole("button", { name: /3\. 08:00–08:30｜早餐/ });
+  await expect(breakfastPopupButton).toBeVisible();
+  await breakfastPopupButton.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: /第 1 天/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /编辑：早餐/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "第 3 项：早餐" })).toBeVisible();
+
+  await page.getByRole("button", { name: "定位地图：④Example Museum" }).click();
+  await expect(mapFrame.locator(".serendipity-map-popup strong")).toHaveText("Example Museum");
+  await page.getByRole("tab", { name: "每日时间轴", exact: true }).click();
+  await page.getByLabel("开始时间").fill("14:30");
+  await page.getByLabel("时长（分钟）").fill("120");
+  await page.getByRole("button", { name: "保存修改" }).click();
+  await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
+  await page.getByRole("tab", { name: "地图", exact: true }).click();
+  await expect(page.getByRole("button", { name: "查看日程：⑥Example Museum" })).toBeVisible();
+
+  await page.getByLabel("地图日期", { exact: true }).selectOption("2");
+  const crossDayPin = mapFrame.locator(".serendipity-map-pin").filter({ hasText: "②⑥" });
+  await expect(crossDayPin).toBeVisible();
+  await page.locator('iframe[title="行程地点地图"]').scrollIntoViewIfNeeded();
+  await crossDayPin.click();
+  const optionalPopupButton = mapFrame.getByRole("button", { name: /6\. 15:00–15:45｜可选加项/ });
+  await expect(optionalPopupButton).toBeVisible();
+  await optionalPopupButton.click();
+  await expect(page.getByRole("heading", { name: /第 2 天/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /编辑：可选加项/ })).toBeVisible();
+  await page.getByRole("button", { name: "移除安排" }).click();
+  await page.getByRole("button", { name: "保存修改" }).click();
+  await expect(page.getByRole("heading", { name: /计划版本 3/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /编辑：可选加项/ })).toHaveCount(0);
+  await expect(page.getByText("尚未选择日程。", { exact: true })).toBeVisible();
+
+  await page.getByRole("tab", { name: "地图", exact: true }).click();
+  await page.getByLabel("地图日期", { exact: true }).selectOption("1");
+  await page.getByRole("button", { name: "查看日程：⑦住宿区域" }).click();
+  await expect(page.getByRole("heading", { name: /编辑：住宿区域/ })).toBeVisible();
+  await page.getByRole("button", { name: "定位地图：⑦住宿区域" }).click();
+  await expect(page.getByRole("tab", { name: "地图", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("button", { name: "查看日程：⑦住宿区域" }).click();
+  await expect(page.getByRole("heading", { name: /编辑：住宿区域/ })).toBeVisible();
+  expect(await prisma.planVersion.count({ where: { tripId: trip.id } })).toBe(3);
+});
+
+test("mobile map summary jumps to the matching day and event", async ({ page, request }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const trip = await seed(request, true);
+  await page.goto(`/trips/${trip.id}`);
+  await page.getByRole("tab", { name: "地图", exact: true }).click();
+  await page.getByRole("button", { name: "查看日程：③早餐" }).click();
+  await expect(page.getByRole("heading", { name: /第 1 天/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /编辑：早餐/ })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("public transit without a provider degrades instead of drawing a fake road", async ({ page, request }) => {
+  const trip = await seed(request, true);
+  await controlledMap(page, trip.id);
+  await page.goto(`/trips/${trip.id}`);
+  await page.getByRole("tab", { name: "地图", exact: true }).click();
+  const routeCard = page.locator("article").filter({ hasText: "③早餐 → ④Example Museum" });
+  await routeCard.getByLabel("交通方式").selectOption("public_transit");
+  await routeCard.getByRole("button", { name: "查询并保存" }).click();
+  await expect(routeCard.getByText("暂无可用路线", { exact: false })).toBeVisible();
+  await expect(routeCard.getByText("当前免费地图方案没有公共交通路线服务", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
+  const mapFrame = page.frameLocator('iframe[title="行程地点地图"]');
+  await expect(mapFrame.locator(".serendipity-map-route-arrow")).toHaveCount(0);
+  await expect(mapFrame.locator("path.leaflet-interactive")).toHaveCount(0);
+  await page.reload();
+  await page.getByRole("tab", { name: "地图", exact: true }).click();
+  await expect(page.locator("article").filter({ hasText: "③早餐 → ④Example Museum" }).getByText("暂无可用路线", { exact: false })).toBeVisible();
+  expect(await prisma.planVersion.count({ where: { tripId: trip.id } })).toBe(2);
 });
