@@ -407,8 +407,17 @@ export function validatePlanCosts(
   const errors: string[] = [];
   const eventIds = new Set(events.map((event) => event.id));
   const linkedEventIds = new Set<string>();
+  const routeLinkedEventIds = new Set<string>();
 
   for (const cost of costs) {
+    const routeCost = cost.id.startsWith("route-");
+    if (routeCost) {
+      if (routeLinkedEventIds.has(cost.linkedEventId)) {
+        errors.push(`费用 ${cost.id} 与事件 ${cost.linkedEventId} 重复关联。`);
+      }
+      routeLinkedEventIds.add(cost.linkedEventId);
+      continue;
+    }
     if (linkedEventIds.has(cost.linkedEventId)) {
       errors.push(`费用 ${cost.id} 与事件 ${cost.linkedEventId} 重复关联。`);
     }

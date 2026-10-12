@@ -573,7 +573,7 @@ test("timeline edits, locks, cancellation, and cross-midnight times persist", as
   try {
     await page.goto(`/trips/${tripId}`);
     const activityButton = page.getByRole("button", {
-      name: /城市公园散步/,
+      name: /^第 \d+ 项：城市公园散步$/,
     });
     await activityButton.focus();
     await page.keyboard.press("Enter");
@@ -606,7 +606,7 @@ test("timeline edits, locks, cancellation, and cross-midnight times persist", as
     await expect(page.getByText("23:00–次日 01:00")).toBeVisible();
     await expect(page.getByText("夜间抵达后活动")).toBeVisible();
 
-    await page.getByRole("button", { name: /城市公园散步/ }).click();
+    await page.getByRole("button", { name: /^第 \d+ 项：城市公园散步$/ }).click();
     await expect(page.locator('input[type="time"]')).toBeDisabled();
     await expect(page.getByRole("button", { name: "移除安排" })).toBeDisabled();
 
@@ -614,7 +614,7 @@ test("timeline edits, locks, cancellation, and cross-midnight times persist", as
     await page.getByRole("button", { name: "保存修改" }).click();
     await expect(page.getByText("计划版本 3 已保存。")).toBeVisible();
 
-    await page.getByRole("button", { name: /可选城市展览/ }).click();
+    await page.getByRole("button", { name: /^第 \d+ 项：可选城市展览$/ }).click();
     await page.locator('input[type="time"]').fill("16:30");
     await page.getByRole("button", { name: "取消修改" }).click();
     await expect(page.locator('input[type="time"]')).toHaveValue("15:00");
@@ -647,7 +647,7 @@ test("legacy duration cannot move times on note or lock edits, and protected reg
   try {
     const historyBefore = await prisma.planVersion.findFirstOrThrow({ where: { tripId, versionNumber: 1 } });
     await page.goto(`/trips/${tripId}`);
-    await page.getByRole("button", { name: /住宿区域/ }).click();
+    await page.getByRole("button", { name: /^第 \d+ 项：住宿区域$/ }).click();
     await expect(page.getByLabel("时长（分钟）")).toHaveValue("120");
     await page.getByLabel("备注").fill("只改备注，入住时间不变");
     await page.getByRole("button", { name: "保存修改" }).click();

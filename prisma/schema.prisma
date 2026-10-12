@@ -52,6 +52,7 @@ model PlanVersion {
   events              String
   costs               String         @default("[]")
   places              String         @default("[]")
+  routeLegs           String         @default("[]")
   pendingItems        String
   validationResults   String
   requirementUpToDate Boolean        @default(true)

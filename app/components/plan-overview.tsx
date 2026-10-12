@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   calculateBudgetSummary,
   overspendStatusLabels,
@@ -29,8 +29,9 @@ import {
 } from "@/lib/plan-overview";
 import { PlanBudget } from "./plan-budget";
 import { PlanTimeline } from "./plan-timeline";
-import { PlanMap } from "./plan-map";
+import { PlanMap, type MapLinkTarget } from "./plan-map";
 import type { Place } from "@/lib/places";
+import type { RouteLeg } from "@/lib/routes";
 import type {
   PlanEvent,
   PlanPendingItem,
@@ -48,6 +49,7 @@ export type PlanVersionClient = {
   events: PlanEvent[];
   costs: PlanCostItem[];
   places?: Place[];
+  routeLegs?: RouteLeg[];
   pendingItems: PlanPendingItem[];
   validationResults: PlanValidationResults;
   requirementUpToDate: boolean;
@@ -103,6 +105,8 @@ export function PlanOverview({
     selectedPlan,
   );
   const [selectedDayNumber, setSelectedDayNumber] = useState(1);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [pendingTimelineScrollEventId, setPendingTimelineScrollEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"timeline" | "budget" | "map">("timeline");
   const [isGenerating, setIsGenerating] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -245,6 +249,46 @@ export function PlanOverview({
     router.refresh();
   };
 
+  const handleEventSelect = useCallback((
+    eventId: string,
+    target: MapLinkTarget,
+    dayNumber: number,
+  ) => {
+    setSelectedEventId(eventId);
+    setSelectedDayNumber(dayNumber);
+    setActiveTab(target);
+    setPendingTimelineScrollEventId(target === "timeline" ? eventId : null);
+  }, []);
+
+  const handleDayChange = useCallback((dayNumber: number) => {
+    setSelectedDayNumber(dayNumber);
+    setSelectedEventId((current) => {
+      const event = displayPlan?.events.find((item) => item.id === current);
+      return event?.dayNumber === dayNumber ? current : null;
+    });
+  }, [displayPlan]);
+
+  useEffect(() => {
+    if (
+      selectedEventId &&
+      (!displayPlan || !displayPlan.events.some((event) => event.id === selectedEventId))
+    ) {
+      setSelectedEventId(null);
+      setPendingTimelineScrollEventId(null);
+    }
+  }, [displayPlan, selectedEventId]);
+
+  useEffect(() => {
+    if (!pendingTimelineScrollEventId || activeTab !== "timeline") return;
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .getElementById(`timeline-event-${pendingTimelineScrollEventId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setPendingTimelineScrollEventId(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab, pendingTimelineScrollEventId]);
+
   return (
     <section
       aria-labelledby="plan-overview-title"
@@ -271,7 +315,7 @@ export function PlanOverview({
             </p>
           ) : null}
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
+        <div className="flex max-w-full shrink-0 flex-col items-end gap-2">
           <span
             className={`inline-flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
               !displayPlan || (!displayPlan.isCurrent && !requiresUpdate)
@@ -290,7 +334,7 @@ export function PlanOverview({
             </span>
           ) : null}
           {plans.length > 1 ? (
-            <span className="inline-flex items-center gap-2 text-sm text-graphite">
+            <span className="inline-flex max-w-full flex-wrap items-center justify-end gap-2 text-sm text-graphite">
               <History aria-hidden="true" className="size-4" />
               历史版本：
               {plans.map((plan) => (
@@ -480,7 +524,7 @@ export function PlanOverview({
                     <button
                       key={day.dayNumber}
                       type="button"
-                      onClick={() => setSelectedDayNumber(day.dayNumber)}
+                      onClick={() => handleDayChange(day.dayNumber)}
                       aria-pressed={day.dayNumber === selectedDay?.dayNumber}
                       className={`min-h-16 min-w-40 max-w-72 shrink-0 rounded-md border px-3 py-2 text-left transition-colors ${
                         day.dayNumber === selectedDay?.dayNumber
@@ -509,12 +553,14 @@ export function PlanOverview({
                       plan={displayPlan}
                       day={selectedDay}
                       onSaved={handlePlanSaved}
+                      selectedEventId={selectedEventId}
+                      onEventSelect={handleEventSelect}
                     />
                   </>
                 ) : null}
               </>
             ) : activeTab === "map" ? (
-              <PlanMap key={displayPlan.id} tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} selectedDayNumber={selectedDayNumber} onDayChange={setSelectedDayNumber} />
+              <PlanMap tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} selectedDayNumber={selectedDayNumber} onDayChange={handleDayChange} selectedEventId={selectedEventId} onEventSelect={handleEventSelect} />
             ) : (
               <PlanBudget
                 tripId={tripId}

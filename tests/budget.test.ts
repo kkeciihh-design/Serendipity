@@ -338,6 +338,12 @@ describe("cost items and edits", () => {
       validatePlanCosts(duplicate, [event("event-a")]).join(""),
     ).toContain("重复关联");
 
+    const routePlusEventCost = [
+      cost({ id: "cost-a", linkedEventId: "event-a", category: "meal" }),
+      cost({ id: "route-a", linkedEventId: "event-a", category: "local_transport", unitAmountCents: 300 }),
+    ];
+    expect(validatePlanCosts(routePlusEventCost, [event("event-a")])).toEqual([]);
+
     const missingEvent = [
       cost({ id: "cost-a", linkedEventId: "event-a", category: "meal" }),
     ];

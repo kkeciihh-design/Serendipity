@@ -4,7 +4,7 @@ import type { SafeMapSettings } from "@/lib/map-settings";
 import { MapCanvas } from "@/app/components/map-canvas";
 
 const fields = [ ["browserKey", "浏览器 Key（Web 端 JS API）"], ["webServiceKey", "Web 服务 Key"], ["securityCode", "JS API 安全密钥"] ] as const;
-const emptyPlaces: [] = [];
+const emptyMarkers: [] = [];
 export function MapSettings({ csrfToken }: { csrfToken: string }) {
   const [settings, setSettings] = useState<SafeMapSettings | null>(null);
   const [keys, setKeys] = useState({ browserKey: "", webServiceKey: "", securityCode: "" });
@@ -46,13 +46,13 @@ export function MapSettings({ csrfToken }: { csrfToken: string }) {
     <div className="mt-4 flex flex-wrap gap-3">
       {settings?.provider === "amap" ? <button disabled={busy} onClick={() => void save(true)} className={button}>切回免费地图</button> : <button disabled={busy || !settings} className={button} onClick={() => { setTestToken(""); setReady(false); setFreePreview(true); setPreviewId((value) => value + 1); }}>测试免费地图加载</button>}
     </div>
-    {freePreview ? <div className="mt-4"><MapCanvas key={previewId} places={emptyPlaces} onReady={setReady} /><p role="status" className="mt-2 text-sm">{ready ? "免费地图已加载，可拖动、缩放。地点搜索在旅行详情中按需使用。" : "等待地图加载…"}</p></div> : null}
+    {freePreview ? <div className="mt-4"><MapCanvas key={previewId} markers={emptyMarkers} focusEventId={null} onReady={setReady} /><p role="status" className="mt-2 text-sm">{ready ? "免费地图已加载，可拖动、缩放。地点搜索在旅行详情中按需使用。" : "等待地图加载…"}</p></div> : null}
     <details className="mt-5 border-t border-sand pt-4"><summary className="min-h-11 cursor-pointer py-2 text-base font-semibold text-charcoal">可选：以后接入高德地图</summary>
       <p className="mt-2 text-sm leading-6 text-graphite">当前免费方案无需填写。高德需自行取得对应类型的 Key，并核对账号额度、域名和用途权限。已保存项可留空沿用；服务端密钥不会发送给地图页面。</p>
       <a href="https://console.amap.com/dev/key/app" target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm text-sage underline">高德控制台</a>
       <div className="mt-3 grid gap-3">{fields.map(([name, label]) => <label key={name} className="text-sm font-medium text-charcoal">{label}<input type="password" autoComplete="new-password" value={keys[name]} disabled={busy} maxLength={160} className="mt-1 min-h-12 w-full rounded-md border border-sand bg-cream px-3" onChange={(event) => { setKeys({ ...keys, [name]: event.target.value }); setTestToken(""); setReady(false); }} /></label>)}</div>
       <div className="mt-4 flex flex-wrap gap-3"><button type="button" className={button} disabled={busy} onClick={() => void test()}>{busy ? "处理中…" : "测试高德配置"}</button><button type="button" className={button} disabled={busy || !ready || !testToken} onClick={() => void save()}>保存并使用高德</button></div>
-      {testToken ? <div className="mt-4"><MapCanvas key={previewId} places={emptyPlaces} preview onReady={setReady} /><p className="mt-2 text-sm">{ready ? "浏览器地图已加载，可以保存。" : "等待浏览器地图测试；失败时不会覆盖当前配置。"}</p></div> : null}
+      {testToken ? <div className="mt-4"><MapCanvas key={previewId} markers={emptyMarkers} focusEventId={null} preview onReady={setReady} /><p className="mt-2 text-sm">{ready ? "浏览器地图已加载，可以保存。" : "等待浏览器地图测试；失败时不会覆盖当前配置。"}</p></div> : null}
     </details>
     {feedback ? <p role="status" className="mt-4 rounded bg-shell p-3 text-sm leading-6 text-graphite">{feedback}</p> : null}
   </section>;
