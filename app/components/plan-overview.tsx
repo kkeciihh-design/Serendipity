@@ -108,6 +108,8 @@ export function PlanOverview({
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [pendingTimelineScrollEventId, setPendingTimelineScrollEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"timeline" | "budget" | "map">("timeline");
+  const [hasOpenedMap, setHasOpenedMap] = useState(false);
+  const [hasOpenedBudget, setHasOpenedBudget] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -116,6 +118,11 @@ export function PlanOverview({
   useEffect(() => {
     setPreviewPlan(selectedPlan);
   }, [selectedPlan]);
+
+  useEffect(() => {
+    if (activeTab === "map") setHasOpenedMap(true);
+    if (activeTab === "budget") setHasOpenedBudget(true);
+  }, [activeTab]);
 
   useEffect(() => {
     if (!isGenerating) {
@@ -207,7 +214,7 @@ export function PlanOverview({
       const payload = (await response.json()) as {
         plan: PlanVersionClient;
       };
-      setPreviewPlan(payload.plan);
+      handlePlanSaved(payload.plan);
       setSelectedDayNumber(1);
       setFeedback({
         tone: payload.plan.validationResults.warnings.length > 0
@@ -218,7 +225,6 @@ export function PlanOverview({
             ? `计划版本 ${payload.plan.versionNumber} 已保存，但存在 ${payload.plan.validationResults.warnings.length} 条需要注意的提醒。`
             : `计划版本 ${payload.plan.versionNumber} 已保存。`,
       });
-      router.refresh();
     } catch (error) {
       if (controller.signal.aborted) {
         setFeedback({
@@ -246,7 +252,14 @@ export function PlanOverview({
 
   const handlePlanSaved = (savedPlan: PlanVersionClient) => {
     setPreviewPlan(savedPlan);
-    router.refresh();
+    // A URL pinned to the old current version must not select that now-historic
+    // version again after a successful save. Navigation fetches the new current
+    // version; the unpinned route only needs its server data refreshed.
+    if (selectedVersionNumber !== null) {
+      router.replace(`/trips/${tripId}`, { scroll: false });
+    } else {
+      router.refresh();
+    }
   };
 
   const handleEventSelect = useCallback((
@@ -517,8 +530,7 @@ export function PlanOverview({
               </p>
             </div>
 
-            {activeTab === "timeline" ? (
-              <>
+            <div hidden={activeTab !== "timeline"} role="tabpanel" aria-label="每日时间轴">
                 <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                   {days.map((day) => (
                     <button
@@ -558,16 +570,21 @@ export function PlanOverview({
                     />
                   </>
                 ) : null}
-              </>
-            ) : activeTab === "map" ? (
+            </div>
+            <div hidden={activeTab !== "map"} role="tabpanel" aria-label="地图">
+              {hasOpenedMap || activeTab === "map" ? (
               <PlanMap tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} selectedDayNumber={selectedDayNumber} onDayChange={handleDayChange} selectedEventId={selectedEventId} onEventSelect={handleEventSelect} />
-            ) : (
+              ) : null}
+            </div>
+            <div hidden={activeTab !== "budget"} role="tabpanel" aria-label="预算">
+              {hasOpenedBudget || activeTab === "budget" ? (
               <PlanBudget
                 tripId={tripId}
                 plan={displayPlan}
                 onSaved={handlePlanSaved}
               />
-            )}
+              ) : null}
+            </div>
           </div>
 
           <div className="mt-6 rounded-md bg-shell p-4">

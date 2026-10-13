@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import { Buffer } from 'node:buffer';
+import { requireExternalVerification } from './verification-safety.mjs';
 /* global AbortSignal */
+requireExternalVerification({ dataDirectories: ['test-data/phase11-evidence'] });
 const urls = [
   'https://operations.osmfoundation.org/policies/tiles/',
   'https://operations.osmfoundation.org/policies/nominatim/',

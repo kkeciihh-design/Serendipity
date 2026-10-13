@@ -92,8 +92,10 @@ export function buildMapMarkers(events: PlanEvent[], places: Place[]): MapMarker
   }));
 }
 
-export function buildMapRoutes(routes: RouteLeg[]): MapRoute[] {
+export function buildMapRoutes(routes: RouteLeg[], visibleMarkers?: MapMarker[]): MapRoute[] {
+  const visibleEvents = visibleMarkers ? new Set(visibleMarkers.flatMap((marker) => marker.events.map((event) => event.id))) : null;
   return routes
+    .filter((route) => !visibleEvents || (visibleEvents.has(route.fromEventId) && visibleEvents.has(route.toEventId)))
     .filter((route) => route.status !== "unavailable" && route.polyline.length > 1)
     .map((route) => ({
       id: route.id,
@@ -104,6 +106,19 @@ export function buildMapRoutes(routes: RouteLeg[]): MapRoute[] {
       coordinateSystem: route.coordinateSystem,
       polyline: route.polyline,
     }));
+}
+
+/** CSS rotation for the right-pointing arrow glyph used by both map providers. */
+export function routeArrowRotation(points: { latitude: number; longitude: number }[]) {
+  if (points.length < 2) return 0;
+  const index = Math.max(0, Math.floor(points.length / 2) - 1);
+  const from = points[index];
+  const to = points[index + 1];
+  const y = Math.sin((to.longitude - from.longitude) * Math.PI / 180) * Math.cos(to.latitude * Math.PI / 180);
+  const x = Math.cos(from.latitude * Math.PI / 180) * Math.sin(to.latitude * Math.PI / 180) -
+    Math.sin(from.latitude * Math.PI / 180) * Math.cos(to.latitude * Math.PI / 180) * Math.cos((to.longitude - from.longitude) * Math.PI / 180);
+  // Bearings start at north; the glyph starts at east, 90 degrees clockwise.
+  return (Math.atan2(y, x) * 180 / Math.PI + 270) % 360;
 }
 
 export function markerLabel(marker: Pick<MapMarker, "events">) {

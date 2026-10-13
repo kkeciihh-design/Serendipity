@@ -12,9 +12,11 @@ next-env.d.ts
 *.log
 npm-debug.log*
 
-# local project documentation
-docs/
-PROJECT_STATUS.md
+# Version text requirements and handoffs; keep large/local verification output out.
+docs/**
+!docs/**/
+!docs/**/*.md
+docs/阶段验收/证据/
 
 # local data and browser test output
 data/

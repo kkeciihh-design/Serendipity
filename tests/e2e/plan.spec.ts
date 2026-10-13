@@ -612,7 +612,12 @@ test("timeline edits, locks, cancellation, and cross-midnight times persist", as
 
     await page.getByLabel("锁定这项安排").uncheck();
     await page.getByRole("button", { name: "保存修改" }).click();
-    await expect(page.getByText("计划版本 3 已保存。")).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^计划版本 3｜/ })).toBeVisible();
+    await expect(page.getByLabel("锁定这项安排")).not.toBeChecked();
+    await expect(page.locator('input[type="time"]')).toBeEnabled();
+    await expect(page.locator('input[type="time"]')).toHaveValue("23:00");
+    await expect(page.getByLabel("时长（分钟）")).toHaveValue("120");
+    await expect(page.getByLabel("备注")).toHaveValue("夜间抵达后活动");
 
     await page.getByRole("button", { name: /^第 \d+ 项：可选城市展览$/ }).click();
     await page.locator('input[type="time"]').fill("16:30");

@@ -625,7 +625,7 @@ export function SettingsWorkspace({
             </div>
             <p className="mt-2 text-sm leading-6 text-graphite">
               {settings.ai.keyConfigured
-                ? `${settings.ai.keyMasked}；留空表示继续使用它。`
+                ? `${settings.ai.keyMasked}；同一站点可留空沿用。更换服务站点时，请填写新站点的 API Key。`
                 : "尚未保存 API Key。"}
             </p>
           </div>

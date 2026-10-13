@@ -5,35 +5,15 @@ import { CalendarClock, MapPin, Route, Search } from "lucide-react";
 import type { Place, SignedPlaceCandidate } from "@/lib/places";
 import { buildPlanOverviewDays } from "@/lib/plan-overview";
 import { buildMapMarkers, buildMapRoutes, numberPlanEvents } from "@/lib/map-link";
-import type { RouteLeg, RouteMode } from "@/lib/routes";
+import type { RouteMode } from "@/lib/routes";
+import { buildAmapTransitLink } from "@/lib/transit-reference";
 import type { PlanVersionClient } from "./plan-overview";
 import { MapCanvas } from "./map-canvas";
+import { ManualTransitForm } from "./manual-transit-form";
+import { RouteSummary, routeModeLabels } from "./route-summary";
 
-const inputStyle = "mt-1 min-h-12 w-full rounded-md border border-sand bg-cream px-3 py-2 text-base text-charcoal";
+const inputStyle = "mt-1 min-h-12 min-w-0 w-full rounded-md border border-sand bg-cream px-3 py-2 text-base text-charcoal";
 const actionStyle = "min-h-12 rounded-md border border-sage px-4 py-2 text-sm font-semibold text-sage disabled:opacity-50";
-const routeModeLabels: Record<RouteMode, string> = {
-  walking: "步行",
-  public_transit: "地铁/公交",
-  driving: "驾车/打车",
-};
-const routeStatusLabels: Record<RouteLeg["status"], string> = {
-  verified: "已核实",
-  estimated: "估算",
-  pending_confirmation: "待确认",
-  unavailable: "暂无可用路线",
-};
-const formatRouteDuration = (seconds: number) => {
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  return minutes < 60 ? `${minutes} 分钟` : `${Math.floor(minutes / 60)} 小时 ${minutes % 60 ? `${minutes % 60} 分钟` : ""}`.trim();
-};
-const formatRouteDistance = (meters: number) =>
-  meters >= 1_000 ? `${(meters / 1_000).toFixed(meters >= 10_000 ? 0 : 1)} 公里` : `${meters} 米`;
-const formatRouteCost = (route: RouteLeg) =>
-  route.cost.minCents === null || route.cost.maxCents === null
-    ? "费用待确认"
-    : route.cost.minCents === route.cost.maxCents
-      ? `${Math.round(route.cost.minCents / 100)} 元`
-      : `${Math.round(route.cost.minCents / 100)}–${Math.round(route.cost.maxCents / 100)} 元`;
 
 export type MapLinkTarget = "map" | "timeline";
 
@@ -73,7 +53,10 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
     events.map((item) => item.event),
     (plan.places ?? []).filter((place) => !filter || place.city === filter),
   ), [events, plan.places, filter]);
-  const mapRoutes = useMemo(() => buildMapRoutes(plan.routeLegs ?? []), [plan.routeLegs]);
+  const mapRoutes = useMemo(() => buildMapRoutes((plan.routeLegs ?? []).filter((route) => {
+    const key = `${route.fromEventId}->${route.toEventId}`;
+    return (!routeModes[key] || routeModes[key] === route.mode) && (!routeDepartures[key] || routeDepartures[key] === route.departureTime);
+  }), markers), [plan.routeLegs, routeModes, routeDepartures, markers]);
   const placedEvents = events.filter((item) => item.event.placeId);
   const routePairs = placedEvents.slice(0, -1).map((item, index) => ({
     from: item,
@@ -113,7 +96,8 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
     } catch (error) { if (!active.signal.aborted) setFeedback(error instanceof Error ? error.message : "保存失败，原计划已保留。"); }
     finally { if (!active.signal.aborted) { setBusy(false); setSaving(false); } }
   };
-  const queryRoute = async (fromId: string, toId: string) => {
+  const queryRoute = async (fromId: string, toId: string, mode: RouteMode, departureTime: string) => {
+    if (!plan.isCurrent || mode === "public_transit") return;
     const key = `${fromId}->${toId}`;
     setRouteBusyKey(key);
     setRouteFeedback((current) => ({ ...current, [key]: "正在查询适用时刻的路线…" }));
@@ -124,8 +108,8 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
         body: JSON.stringify({
           fromEventId: fromId,
           toEventId: toId,
-          mode: routeModes[key] ?? "walking",
-          departureTime: routeDepartures[key] ?? plan.events.find((event) => event.id === fromId)?.endTime,
+          mode,
+          departureTime,
         }),
       });
       const data = await response.json();
@@ -161,25 +145,34 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
         {routePairs.map(({ from, to, key }) => {
           const route = (plan.routeLegs ?? []).find((item) => item.fromEventId === from.event.id && item.toEventId === to.event.id);
           const mode = routeModes[key] ?? route?.mode ?? "walking";
-          const departureTime = routeDepartures[key] ?? route?.departureTime ?? from.event.endTime;
+          const date = from.event.date;
+          const sameDayConnection = (!from.event.endDate || from.event.endDate === date) && to.event.date === date;
+          const departureTime = routeDepartures[key] ?? (route?.manualReference?.requiresReconfirmation ? from.event.endTime : route?.departureTime) ?? from.event.endTime;
           const busyRoute = routeBusyKey === key;
-          return <article key={key} className="rounded-md border border-sand bg-white p-4">
+          const selectionChanged = Boolean(route && (route.mode !== mode || route.departureTime !== departureTime || route.date !== date));
+          const fromPlace = plan.places?.find((place) => place.id === from.event.placeId);
+          const toPlace = plan.places?.find((place) => place.id === to.event.placeId);
+          const externalLink = fromPlace && toPlace ? buildAmapTransitLink(fromPlace, toPlace) : null;
+          return <article key={key} className="min-w-0 rounded-md border border-sand bg-white p-4">
             <h5 className="text-sm font-semibold text-charcoal">{from.visitLabel}{from.event.title} → {to.visitLabel}{to.event.title}</h5>
-            <form className="mt-3 grid gap-3 sm:grid-cols-[150px_150px_auto]" onSubmit={(event) => { event.preventDefault(); void queryRoute(from.event.id, to.event.id); }}>
-              <label className="text-sm font-medium">交通方式<select value={mode} disabled={busyRoute} className={inputStyle} onChange={(event) => setRouteModes((current) => ({ ...current, [key]: event.target.value as RouteMode }))}>
+            <form className="mt-3 grid min-w-0 gap-3 sm:grid-cols-[minmax(0,150px)_minmax(0,150px)_minmax(0,1fr)]" onSubmit={(event) => { event.preventDefault(); void queryRoute(from.event.id, to.event.id, mode, departureTime); }}>
+              <label className="min-w-0 text-sm font-medium">交通方式<select value={mode} disabled={busyRoute || !plan.isCurrent} className={inputStyle} onChange={(event) => { setRouteModes((current) => ({ ...current, [key]: event.target.value as RouteMode })); setRouteFeedback((current) => ({ ...current, [key]: "" })); }}>
                 {(Object.keys(routeModeLabels) as RouteMode[]).map((item) => <option key={item} value={item}>{routeModeLabels[item]}</option>)}
               </select></label>
-              <label className="text-sm font-medium">出发时刻<input type="time" value={departureTime} min={from.event.endTime} disabled={busyRoute} className={inputStyle} onChange={(event) => setRouteDepartures((current) => ({ ...current, [key]: event.target.value }))} /></label>
-              <button type="submit" disabled={busyRoute || !plan.isCurrent} className={`${actionStyle} self-end bg-sage text-white`}>{busyRoute ? "查询中…" : "查询并保存"}</button>
+              <label className="min-w-0 text-sm font-medium">出发时刻<input required type="time" value={departureTime} min={from.event.endTime} disabled={busyRoute || !plan.isCurrent} className={inputStyle} onChange={(event) => { setRouteDepartures((current) => ({ ...current, [key]: event.target.value })); setRouteFeedback((current) => ({ ...current, [key]: "" })); }} /></label>
+              {mode !== "public_transit" ? <button type="submit" disabled={busyRoute || !plan.isCurrent || !sameDayConnection} className={`${actionStyle} self-end bg-sage text-white`}>{busyRoute ? "查询中…" : "查询并保存"}</button> : null}
             </form>
-            {route ? <div className="mt-3 rounded-md bg-cream p-3 text-sm leading-6">
-              <p className="font-semibold text-charcoal">{routeModeLabels[route.mode]}｜{routeStatusLabels[route.status]}｜{formatRouteDuration(route.durationSeconds)}｜{formatRouteDistance(route.distanceMeters)}</p>
-              <p className="text-graphite">{route.date} {route.departureTime} 出发｜适用时刻 {route.validFromTime}–{route.validUntilTime}｜预计 {route.arrivalDate === route.date ? route.arrivalTime : `次日 ${route.arrivalTime}`} 到达｜{formatRouteCost(route)}</p>
-              <p className="text-graphite">{route.scheduleBasis}｜{route.futureQueryCapability ? "支持按未来时刻查询" : "缺少未来时刻能力，结果仅适用于本次出发时刻"}｜来源：{route.source}</p>
-              <p className="text-graphite">候选复核：{route.candidateRecheck.status === "not_applicable" ? "不适用" : `${route.candidateRecheck.attempts} 轮`}｜{route.candidateRecheck.reason}</p>
-              {route.conflict ? <p className="font-medium text-clay">{route.conflict}</p> : null}
-              {route.steps.length ? <details className="mt-2"><summary className="cursor-pointer text-sage">查看步骤</summary><ol className="mt-2 space-y-1 text-graphite">{route.steps.map((step, index) => <li key={`${route.id}-${index}`}>{index + 1}. {step.instruction}{step.durationSeconds ? `｜${formatRouteDuration(step.durationSeconds)}` : ""}{step.line ? `｜${step.line}` : ""}{step.departureTime ? `｜${step.departureTime} 上车` : ""}{step.arrivalTime ? `｜${step.arrivalTime} 下车` : ""}</li>)}</ol></details> : <p className="mt-2 text-graphite">没有可用步骤。</p>}
+            {!sameDayConnection ? <p className="mt-2 text-sm leading-6 text-clay">上一项跨日结束或下一项不在同一天；当前城市路线仅支持同日衔接，请在同一天的地点之间记录路线。</p> : null}
+            {!departureTime || departureTime < from.event.endTime ? <p className="mt-2 text-sm leading-6 text-clay">请填写有效出发时刻，不能早于上一项结束时间 {from.event.endTime}。</p> : null}
+            {mode === "public_transit" ? <div className="mt-3 rounded-md bg-sage-soft/50 p-3 text-sm leading-6">
+              <p className="font-medium text-charcoal">公交／地铁通过外部地图查阅，再手动保存参考。</p>
+              {externalLink ? <a href={externalLink} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex min-h-11 items-center rounded-md border border-sage bg-white px-3 py-2 font-semibold text-sage">在高德查看公交路线</a> : null}
+              <p className="mt-2 text-graphite">打开后请核对起终点，并自行选择 {date} {departureTime}（北京时间）；链接只传入地点，不会自动设置日期和时刻，查询结果也不会自动回传。</p>
+              <p className="mt-1 text-graphite">点击后会将这两个地点交给高德地图查询，无需配置 API Key。本站不会自动查询公交班次，也不会依据人工记录绘制路线折线。</p>
             </div> : null}
+            {selectionChanged ? <p className="mt-3 rounded-md bg-clay-soft p-3 text-sm leading-6 text-clay" role="status">当前选择已变化，下面保留的是原记录，不适用于当前选择。请按新时刻重新核实并保存。</p> : null}
+            {route ? <RouteSummary route={route} selectionChanged={selectionChanged} /> : null}
+            {mode === "public_transit" ? <ManualTransitForm key={`${plan.id}/${key}/${date}`} tripId={tripId} plan={plan} fromEventId={from.event.id} toEventId={to.event.id} date={date} departureTime={departureTime} route={route} disabled={!plan.isCurrent || busyRoute || !sameDayConnection || !departureTime || departureTime < from.event.endTime} onSaved={onSaved} /> : null}
             {routeFeedback[key] ? <p className="mt-2 text-sm text-graphite" role="status">{routeFeedback[key]}</p> : null}
           </article>;
         })}

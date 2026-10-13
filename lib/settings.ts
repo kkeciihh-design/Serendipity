@@ -284,7 +284,7 @@ export async function getSafeSettings(): Promise<SafeSettings> {
 export async function effectiveModelConfiguration(input: unknown) {
   const parsed = parseOrThrow(aiBaseConfigurationSchema, input);
   const record = await getSettingsRecord();
-  const apiKey = parsed.apiKey?.trim() || (await existingApiKey(record));
+  const apiKey = await configurationApiKey(record, parsed.baseUrl, parsed.apiKey);
   if (!apiKey) {
     throw new SettingsValidationError("API Key 不能为空。");
   }
@@ -307,6 +307,23 @@ async function existingApiKey(record: Awaited<ReturnType<typeof ensureSettingsRe
   }
 }
 
+async function configurationApiKey(
+  record: Awaited<ReturnType<typeof ensureSettingsRecord>>,
+  baseUrl: string,
+  providedKey: string | undefined,
+) {
+  if (providedKey?.trim()) return providedKey.trim();
+  if (!record?.apiKeyCiphertext) return null;
+  let sameOrigin = false;
+  try {
+    sameOrigin = record.baseUrl ? new URL(record.baseUrl).origin === new URL(baseUrl).origin : false;
+  } catch { /* An invalid or unknown previous destination cannot reuse a key. */ }
+  if (!sameOrigin) {
+    throw new SettingsValidationError("服务地址已更换站点，请填写新站点的 API Key；留空仅可沿用同一站点的密钥。");
+  }
+  return existingApiKey(record);
+}
+
 function fingerprintConfiguration(input: {
   provider: string;
   baseUrl: string;
@@ -325,7 +342,7 @@ function fingerprintConfiguration(input: {
 export async function effectiveConfiguration(input: unknown) {
   const parsed = parseOrThrow(aiConfigurationSchema, input);
   const record = await getSettingsRecord();
-  const apiKey = parsed.apiKey?.trim() || (await existingApiKey(record));
+  const apiKey = await configurationApiKey(record, parsed.baseUrl, parsed.apiKey);
   if (!apiKey) {
     throw new SettingsValidationError("API Key 不能为空。");
   }

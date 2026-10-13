@@ -5,14 +5,17 @@ import { chromium } from "@playwright/test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
 import { Buffer } from "node:buffer";
+import { requireExternalVerification } from "./verification-safety.mjs";
+import { openVerifiedIsolatedDatabase } from "./verify-isolated-server.mjs";
 /* global window */
 
 const base = "http://127.0.0.1:3111";
+requireExternalVerification({ base, dataDirectories: ["test-data/e2e", "test-data/phase11-live", "test-data/phase11-evidence"] });
 const output = path.resolve("test-data/phase11-evidence");
 fs.mkdirSync(output, { recursive: true });
 const db = (directory) => new PrismaClient({ datasources: { db: { url: `file:${path.resolve(directory, "data/serendipity.db").replaceAll("\\", "/")}` } } });
 const source = db("test-data/e2e");
-const target = db("test-data/phase11-live");
+const target = await openVerifiedIsolatedDatabase(base, "test-data/phase11-live");
 const results = { checkedAt: new Date().toISOString(), provider: "OpenStreetMap / Nominatim", queries: [], screens: [] };
 let browser;
 try {

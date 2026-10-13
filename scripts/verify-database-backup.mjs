@@ -3,8 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { backupBeforeMigration } from "./database-backup.mjs";
+import { assertTestDataPath, assertTestDataTree } from "./test-data-safety.mjs";
 
-const directory = fs.mkdtempSync(path.resolve("test-data/phase11-backup-"));
+const prefix = assertTestDataPath(path.resolve("test-data/phase11-backup-"));
+const evidenceDirectory = assertTestDataTree(path.resolve("test-data/phase11-evidence"));
+fs.mkdirSync(path.dirname(prefix), { recursive: true });
+const directory = fs.mkdtempSync(prefix);
 fs.mkdirSync(path.join(directory, "data"));
 const filename = path.join(directory, "data/serendipity.db");
 const writer = new DatabaseSync(filename);
@@ -19,6 +23,6 @@ assert.equal(reader.prepare('SELECT title FROM "Trip"').get().title, "backup fix
 assert.equal(Object.values(reader.prepare("PRAGMA integrity_check").get())[0], "ok");
 assert.equal(writer.prepare('SELECT title FROM "Trip"').get().title, "later change");
 reader.close(); writer.close();
-fs.mkdirSync("test-data/phase11-evidence", { recursive: true });
-fs.writeFileSync("test-data/phase11-evidence/backup-restore.json", JSON.stringify({ status: "passed", database: filename, backup, restore, checks: ["committed WAL included", "backup readable", "restored snapshot integrity ok", "later source changes isolated"] }, null, 2));
+fs.mkdirSync(evidenceDirectory, { recursive: true });
+fs.writeFileSync(path.join(evidenceDirectory, "backup-restore.json"), JSON.stringify({ status: "passed", database: filename, backup, restore, checks: ["committed WAL included", "backup readable", "restored snapshot integrity ok", "later source changes isolated"] }, null, 2));
 console.log("PASS: consistent WAL backup, integrity check and restore to isolated copy.");

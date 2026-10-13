@@ -4,7 +4,10 @@ import { z } from "zod";
 import {
   applyPlanCostEdit,
   CostEditValidationError,
+  budgetWarnings,
   derivePlanCosts,
+  formatMoneyRange,
+  hasProtectedCostFact,
   planCostItemSchema,
   validatePlanCosts,
   type PlanCostEditInput,
@@ -18,6 +21,8 @@ import {
   planPendingItemSchema,
   planValidationResultsSchema,
   preparePlanForStorage,
+  planEventEnd,
+  sortPlanEvents,
   normalizePlanOutput,
   validatePlan,
   type PlanContent,
@@ -36,7 +41,7 @@ import {
 } from "./plan-edit";
 import { requestSnapshotSchema, type RequestSnapshot } from "./trip-request";
 import { placeSchema, placeIdentity, validatePlaceReferences, type Place, type PlaceCandidate } from "./places";
-import { routeConflict, routeCostPricingUnit, routeLegSchema, routeModeLabels, type RouteLeg } from "./routes";
+import { invalidateRouteReference, routeConflict, routeCostPricingUnit, routeLegSchema, routeModeLabels, type RouteLeg } from "./routes";
 
 export class PlanValidationError extends Error {
   constructor(message: string) {
@@ -135,25 +140,40 @@ function serializePlan(record: PlanVersionRow): PlanVersionRecord {
     const events = z.array(planEventSchema).parse(JSON.parse(record.events));
     const places = z.array(placeSchema).parse(JSON.parse(record.places));
     const routeLegs = z.array(routeLegSchema).parse(JSON.parse(record.routeLegs ?? "[]"));
+    const isCurrent = record.trip.currentPlanVersionId === record.id;
+    const costs = parseStoredCosts(record.costs, events).filter((cost) =>
+      !isCurrent || !cost.eventRemoved || hasProtectedCostFact(cost),
+    );
+    const requestSnapshot = parseSnapshot(record.requestSnapshot);
+    const storedValidation = planValidationResultsSchema.parse(JSON.parse(record.validationResults));
+    // Derived display metadata may be refreshed without rewriting historical
+    // snapshots. Preserve any non-budget findings from the stored validation.
+    const warnings = [
+      ...storedValidation.warnings.filter((warning) => !/^(当前费用(?:草稿合计|合计|区间)|确认预算非常低)/.test(warning)),
+      ...budgetWarnings(costs, requestSnapshot),
+    ];
+    const validationResults: PlanValidationResults = {
+      ...storedValidation,
+      warnings,
+      status: storedValidation.errors.length > 0 ? "invalid" : warnings.length > 0 ? "needs_review" : "valid",
+    };
     validatePlaceReferences(events, places);
     return {
       id: record.id,
       tripId: record.tripId,
       versionNumber: record.versionNumber,
       requestRevision: record.requestRevision,
-      requestSnapshot: parseSnapshot(record.requestSnapshot),
+      requestSnapshot,
       events,
       places,
       routeLegs,
-      costs: parseStoredCosts(record.costs, events),
+      costs,
       pendingItems: z
         .array(planPendingItemSchema)
         .parse(JSON.parse(record.pendingItems)),
-      validationResults: planValidationResultsSchema.parse(
-        JSON.parse(record.validationResults),
-      ),
+      validationResults,
       requirementUpToDate: record.requirementUpToDate,
-      isCurrent: record.trip.currentPlanVersionId === record.id,
+      isCurrent,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     };
@@ -417,10 +437,16 @@ export async function savePlanEventEdit(input: {
       const editedPlan = preparePlanForStorage(
         applyPlanEventEdit(sourcePlan, input.edit),
       );
-      const editedCosts = currentPlan.costs.map((cost) =>
+      const initialEditedCosts = currentPlan.costs.filter((cost) =>
+        !input.edit.remove || cost.linkedEventId !== input.edit.eventId || hasProtectedCostFact(cost),
+      ).map((cost) =>
         input.edit.remove && cost.linkedEventId === input.edit.eventId
           ? { ...cost, eventRemoved: true }
           : cost,
+      );
+      const { routeLegs: editedRoutes, costs: editedCosts } = updateRoutesAfterEventChange(
+        currentPlan.routeLegs, editedPlan.events, initialEditedCosts, input.edit.eventId,
+        currentPlan.events,
       );
       const costErrors = validatePlanCosts(editedCosts, editedPlan.events);
       if (costErrors.length > 0) {
@@ -429,6 +455,7 @@ export async function savePlanEventEdit(input: {
       const validationResults = validatePlan(
         editedPlan,
         currentPlan.requestSnapshot,
+        editedCosts,
       );
       if (validationResults.errors.length > 0) {
         throw new PlanValidationError(validationResults.errors[0]);
@@ -443,13 +470,7 @@ export async function savePlanEventEdit(input: {
           events: JSON.stringify(editedPlan.events),
           costs: JSON.stringify(editedCosts),
           places: JSON.stringify(currentPlan.places.filter((place) => editedPlan.events.some((event) => event.placeId === place.id))),
-          routeLegs: JSON.stringify(currentPlan.routeLegs.filter((leg) =>
-            editedPlan.events.some((event) => event.id === leg.fromEventId) &&
-            editedPlan.events.some((event) => event.id === leg.toEventId) &&
-            (!input.edit.remove || (input.edit.eventId !== leg.fromEventId && input.edit.eventId !== leg.toEventId))
-          ).map((leg) => input.edit.eventId === leg.fromEventId || input.edit.eventId === leg.toEventId
-            ? { ...leg, status: "pending_confirmation" as const, scheduleBasis: `${leg.scheduleBasis}；日程时间或内容已修改，需按新时刻复核。` }
-            : leg)),
+          routeLegs: JSON.stringify(editedRoutes),
           pendingItems: JSON.stringify(editedPlan.pendingItems),
           validationResults: JSON.stringify(validationResults),
           requirementUpToDate: row.requirementUpToDate,
@@ -531,7 +552,7 @@ export async function savePlanCostEdit(input: {
       const currentPlan = serializePlan(row);
       let editedCosts: PlanCostItem[];
       try {
-        editedCosts = applyPlanCostEdit(currentPlan.costs, input.edit);
+        editedCosts = applyPlanCostEdit(currentPlan.costs, input.edit, currentPlan.events);
       } catch (error) {
         if (error instanceof CostEditValidationError) {
           throw new PlanValidationError(error.message);
@@ -553,6 +574,7 @@ export async function savePlanCostEdit(input: {
       const validationResults = validatePlan(
         sourcePlan,
         currentPlan.requestSnapshot,
+        editedCosts,
       );
       if (validationResults.errors.length > 0) {
         throw new PlanValidationError(validationResults.errors[0]);
@@ -648,17 +670,25 @@ export async function savePlanPlaceEdit(input: {
       const places = current.places.filter((item) => events.some((event) => event.placeId === item.id));
       if (place && !places.some((item) => item.id === place.id)) places.push(place);
       validatePlaceReferences(events, places);
+      const { routeLegs, costs } = updateRoutesAfterEventChange(current.routeLegs, events, current.costs, event.id, current.events);
+      const costErrors = validatePlanCosts(costs, events);
+      if (costErrors.length > 0) throw new PlanValidationError(costErrors[0]);
+      const validationResults = validatePlan({ events, pendingItems: current.pendingItems }, current.requestSnapshot, costs);
+      if (validationResults.errors.length > 0) throw new PlanValidationError(validationResults.errors[0]);
       const created = await transaction.planVersion.create({ data: {
         tripId: row.tripId, versionNumber: row.versionNumber + 1,
         requestRevision: row.requestRevision, requestSnapshot: row.requestSnapshot,
-        events: JSON.stringify(events), places: JSON.stringify(places), costs: row.costs,
-        routeLegs: JSON.stringify(current.routeLegs.filter((leg) => leg.fromEventId !== event.id && leg.toEventId !== event.id)),
-        pendingItems: row.pendingItems, validationResults: row.validationResults,
+        events: JSON.stringify(events), places: JSON.stringify(places), costs: JSON.stringify(costs),
+        routeLegs: JSON.stringify(routeLegs),
+        pendingItems: row.pendingItems, validationResults: JSON.stringify(validationResults),
         requirementUpToDate: row.requirementUpToDate,
       } });
-      await copyEvidenceFacts(transaction, row.id, created.id, current, { events, costs: current.costs });
+      await copyEvidenceFacts(transaction, row.id, created.id, current, { events, costs });
       if (input.abortSignal?.aborted) throw new PlanConflictError("本次定位已取消。");
-      await transaction.trip.update({ where: { id: row.tripId }, data: { currentPlanVersionId: created.id } });
+      await transaction.trip.update({ where: { id: row.tripId }, data: {
+        currentPlanVersionId: created.id,
+        status: !row.requirementUpToDate ? "plan_needs_update" : validationResults.warnings.length > 0 ? "plan_needs_review" : "planned",
+      } });
       const saved = await transaction.planVersion.findUnique({ where: { id: created.id }, include: { trip: { select: { currentPlanVersionId: true } } } });
       if (!saved) throw new PlanConflictError();
       return serializePlan(saved);
@@ -673,36 +703,145 @@ function routeCostId(fromEventId: string, toEventId: string) {
   return `route-${crypto.createHash("sha256").update(`${fromEventId}\n${toEventId}`).digest("hex").slice(0, 24)}`;
 }
 
+function routeTransportEventIds(route: RouteLeg, events: PlanEvent[]) {
+  const ordered = sortPlanEvents(events.filter((event) => event.date === route.date));
+  const fromIndex = ordered.findIndex((event) => event.id === route.fromEventId);
+  const toIndex = ordered.findIndex((event) => event.id === route.toEventId);
+  return fromIndex >= 0 && toIndex >= fromIndex
+    ? ordered.slice(fromIndex, toIndex + 1).filter((event) => event.type === "local_transport").map((event) => event.id)
+    : [];
+}
+
+function protectedRouteCostNote(cost: PlanCostItem, route: RouteLeg, possibleDuplicate = false) {
+  const unit = routeCostPricingUnit(route.mode);
+  if (!possibleDuplicate && cost.unit === unit && cost.unitAmountCents === route.cost.minCents &&
+    (cost.unitAmountMaxCents ?? cost.unitAmountCents) === (route.cost.maxCents ?? route.cost.minCents)) return cost;
+  const reference = route.status === "unavailable" ? "无可用路线" :
+    `${formatMoneyRange(route.cost.minCents, route.cost.maxCents)}${unit === "per_person" ? "/人（全程含换乘）" : "/全程"}`;
+  return {
+    ...cost,
+    note: `${(cost.note ?? "").replace(/；(?:路线参考核对：|该段另有已确认).*$/, "").slice(0, 100)}；路线参考核对：${reference}；${possibleDuplicate ? "该段另有确认或付款记录，可能重复；" : ""}原确认或付款金额保留，请核对差额及计价口径。`.slice(0, 240),
+  };
+}
+
 export function applyRouteCost(route: RouteLeg, events: PlanEvent[], costs: PlanCostItem[]): PlanCostItem[] {
   const id = routeCostId(route.fromEventId, route.toEventId);
-  const from = events.find((event) => event.id === route.fromEventId);
-  const to = events.find((event) => event.id === route.toEventId);
-  const base = costs.filter((cost) => cost.id !== id);
-  if (
-    route.mode === "walking" ||
-    route.status === "unavailable" ||
-    from?.type === "local_transport" ||
-    to?.type === "local_transport"
-  ) return base;
-
   const existing = costs.find((cost) => cost.id === id);
-  if (existing && (existing.source === "user_confirmed" || existing.paymentStatus !== "not_paid")) return base;
-  const amountKnown = route.cost.minCents !== null;
+  const currentTransportIds = new Set(routeTransportEventIds(route, events));
+  const transportEventIds = new Set([...(route.transportEventIds ?? []), ...currentTransportIds]);
+  // The saved association also covers removed/moved transport events. A
+  // schedule edit cannot turn the same old reference into a second purchase.
+  // Only current segment estimates can be replaced. A moved event's new
+  // unknown expense must not be swallowed by its former route association.
+  const transportCosts = costs.filter((cost) => !cost.id.startsWith("route-") &&
+    (hasProtectedCostFact(cost) ? transportEventIds.has(cost.linkedEventId) : currentTransportIds.has(cost.linkedEventId)));
+  const protectedTransport = transportCosts.filter(hasProtectedCostFact);
+  const draftIds = new Set(transportCosts.filter((cost) => !hasProtectedCostFact(cost)).map((cost) => cost.id));
+  if (existing && hasProtectedCostFact(existing)) {
+    return costs.filter((cost) => !draftIds.has(cost.id)).map((cost) => cost.id === id
+      ? protectedRouteCostNote(cost, route, protectedTransport.length > 0) : cost);
+  }
+  const base = costs.filter((cost) => cost.id !== id && !draftIds.has(cost.id)).map((cost) =>
+    protectedTransport.some((fact) => fact.id === cost.id) ? protectedRouteCostNote(cost, route) : cost,
+  );
+  const unresolvedRemainder = protectedTransport.length > 0 && events.some((event) =>
+    currentTransportIds.has(event.id) && !protectedTransport.some((cost) => cost.linkedEventId === event.id),
+  );
+  if (protectedTransport.length > 0 && !unresolvedRemainder) return base;
+  if (!unresolvedRemainder && (route.mode === "walking" || route.status === "unavailable")) return base;
+
+  // The route fare is a whole-journey price, even if it includes several
+  // transfers. Replace all pure estimates once and use the route's unit.
+  // Partial paid records cannot safely be subtracted from that price, so the
+  // unconfirmed remainder stays unknown instead of counting the full fare twice.
+  const amountKnown = !unresolvedRemainder && route.cost.minCents !== null;
   return [...base, planCostItemSchema.parse({
     id,
     linkedEventId: route.toEventId,
     category: "local_transport",
     currency: "CNY",
     unit: routeCostPricingUnit(route.mode),
-    unitAmountCents: route.cost.minCents,
-    unitAmountMaxCents: route.cost.maxCents,
+    unitAmountCents: unresolvedRemainder ? null : route.cost.minCents,
+    unitAmountMaxCents: unresolvedRemainder ? null : route.cost.maxCents,
     quantity: null,
     certainty: amountKnown && route.status !== "pending_confirmation" ? "estimated" : "pending_confirmation",
     paymentStatus: "not_paid",
     source: "ai_draft",
     eventRemoved: false,
-    note: `${routeModeLabels[route.mode]}：${route.cost.basis}`,
+    note: unresolvedRemainder
+      ? "该段已有部分确认或付款记录；全程参考票价不能再次全部计入，剩余费用需核对。"
+      : `${routeModeLabels[route.mode]}：${route.cost.basis}；该路段全程票价只计一次，包含关联交通及换乘。`.slice(0, 240),
   })];
+}
+
+function adjacentRoutePair(events: PlanEvent[], fromEventId: string, toEventId: string) {
+  const from = events.find((event) => event.id === fromEventId);
+  const to = events.find((event) => event.id === toEventId);
+  if (!from || !to || from.date !== to.date) return false;
+  const placed = sortPlanEvents(events.filter((event) => event.date === from.date && event.placeId));
+  const index = placed.findIndex((event) => event.id === from.id);
+  return index >= 0 && placed[index + 1]?.id === to.id;
+}
+
+function routeRelevantEventChanged(before: PlanEvent | undefined, after: PlanEvent, endpoint: "from" | "to") {
+  return !before || before.date !== after.date ||
+    (endpoint === "from" ? planEventEnd(before).getTime() !== planEventEnd(after).getTime() : before.startTime !== after.startTime) ||
+    before.placeId !== after.placeId || before.locationName !== after.locationName || before.type !== after.type;
+}
+
+function routeTransportChanged(before: PlanEvent | undefined, after: PlanEvent | undefined) {
+  return !before || !after || before.date !== after.date || before.startTime !== after.startTime ||
+    planEventEnd(before).getTime() !== planEventEnd(after).getTime() || before.type !== after.type ||
+    before.placeId !== after.placeId || before.locationName !== after.locationName;
+}
+
+function restoreReleasedTransportCosts(
+  previousRoutes: RouteLeg[], currentRoutes: RouteLeg[], events: PlanEvent[],
+  costs: PlanCostItem[], previousEvents = events,
+) {
+  const previouslyCovered = new Set(previousRoutes.flatMap((route) => route.transportEventIds ?? routeTransportEventIds(route, previousEvents)));
+  const currentlyCovered = new Set(currentRoutes.filter((route) => adjacentRoutePair(events, route.fromEventId, route.toEventId))
+    .flatMap((route) => routeTransportEventIds(route, events)));
+  const restored = events.filter((event) => event.type === "local_transport" && previouslyCovered.has(event.id) &&
+    !currentlyCovered.has(event.id) && !costs.some((cost) => cost.linkedEventId === event.id && !cost.id.startsWith("route-")))
+    .map((event) => ({
+      ...derivePlanCosts([event])[0], unitAmountCents: null, certainty: "pending_confirmation" as const,
+      note: "原路线已不再覆盖这项交通安排，费用需重新确认。",
+    }));
+  return restored.length > 0 ? [...costs, ...restored] : costs;
+}
+
+export function updateRoutesAfterEventChange(routeLegs: RouteLeg[], events: PlanEvent[], originalCosts: PlanCostItem[], changedEventId: string, previousEvents?: PlanEvent[]) {
+  let costs = originalCosts;
+  const routes: RouteLeg[] = [];
+  for (const leg of routeLegs) {
+    const oldTransportIds = leg.transportEventIds ?? routeTransportEventIds(leg, previousEvents ?? events);
+    const currentTransportIds = routeTransportEventIds(leg, events);
+    const associated = { ...leg, transportEventIds: [...new Set([...oldTransportIds, ...currentTransportIds])] };
+    const from = events.find((event) => event.id === leg.fromEventId);
+    const to = events.find((event) => event.id === leg.toEventId);
+    if (!from || !to || !adjacentRoutePair(events, leg.fromEventId, leg.toEventId)) {
+      const id = routeCostId(leg.fromEventId, leg.toEventId);
+      costs = costs.filter((cost) => cost.id !== id || hasProtectedCostFact(cost))
+        .map((cost) => cost.id === id ? { ...cost, note: `${(cost.note ?? "").slice(0, 170)}；原路线已不再适用，保留已确认或已支付金额，请在预算中核对。` } : cost);
+      continue;
+    }
+    const changedEndpoint = changedEventId === from.id ? from : changedEventId === to.id ? to : undefined;
+    const endpointChanged = changedEndpoint && (!previousEvents || routeRelevantEventChanged(previousEvents.find((event) => event.id === changedEndpoint.id), changedEndpoint, changedEndpoint.id === from.id ? "from" : "to"));
+    const transportChanged = associated.transportEventIds.includes(changedEventId) && (
+      oldTransportIds.includes(changedEventId) !== currentTransportIds.includes(changedEventId) ||
+      routeTransportChanged(previousEvents?.find((event) => event.id === changedEventId), events.find((event) => event.id === changedEventId))
+    );
+    if (endpointChanged || transportChanged) {
+      const invalidated = invalidateRouteReference(associated, from.date, from.endTime);
+      routes.push(invalidated);
+      costs = applyRouteCost(invalidated, events, costs);
+    } else {
+      routes.push(associated);
+      costs = applyRouteCost(associated, events, costs);
+    }
+  }
+  return { routeLegs: routes, costs: restoreReleasedTransportCosts(routeLegs, routes, events, costs, previousEvents ?? events) };
 }
 
 export async function savePlanRouteEdit(input: {
@@ -725,9 +864,10 @@ export async function savePlanRouteEdit(input: {
       const to = current.events.find((event) => event.id === input.route.toEventId);
       if (!from || !to) throw new PlanValidationError("路线关联的日程不存在，请刷新后重试。");
       if (from.date !== input.route.date || to.date !== input.route.date) throw new PlanValidationError("城市路线只能连接同一天的两个地点。");
-      if (from.endTime > input.route.departureTime) throw new PlanValidationError("出发时刻不能早于上一项结束时间。");
+      if (!adjacentRoutePair(current.events, from.id, to.id)) throw new PlanValidationError("只能按日程顺序记录当天相邻两个已确认地点的路线。");
+      if (planEventEnd(from).getTime() > Date.parse(`${input.route.date}T${input.route.departureTime}:00+08:00`)) throw new PlanValidationError("出发时刻不能早于上一项结束时间。");
 
-      const route = { ...input.route, conflict: routeConflict({
+      const route = { ...input.route, transportEventIds: routeTransportEventIds(input.route, current.events), conflict: input.route.status === "unavailable" ? null : routeConflict({
         route: input.route,
         earliestDate: to.date,
         earliestStartTime: to.startTime,
@@ -736,9 +876,12 @@ export async function savePlanRouteEdit(input: {
         ...current.routeLegs.filter((leg) => leg.fromEventId !== route.fromEventId || leg.toEventId !== route.toEventId),
         routeLegSchema.parse(route),
       ];
-      const costs = applyRouteCost(routeLegSchema.parse(route), current.events, current.costs);
+      const costs = restoreReleasedTransportCosts(current.routeLegs, routeLegs, current.events,
+        applyRouteCost(routeLegSchema.parse(route), current.events, current.costs));
       const costErrors = validatePlanCosts(costs, current.events);
       if (costErrors.length > 0) throw new PlanValidationError(costErrors[0]);
+      const validationResults = validatePlan({ events: current.events, pendingItems: current.pendingItems }, current.requestSnapshot, costs);
+      if (validationResults.errors.length > 0) throw new PlanValidationError(validationResults.errors[0]);
 
       const created = await transaction.planVersion.create({ data: {
         tripId: row.tripId,
@@ -750,12 +893,15 @@ export async function savePlanRouteEdit(input: {
         places: row.places,
         routeLegs: JSON.stringify(routeLegs),
         pendingItems: row.pendingItems,
-        validationResults: row.validationResults,
+        validationResults: JSON.stringify(validationResults),
         requirementUpToDate: row.requirementUpToDate,
       } });
       if (input.abortSignal?.aborted) throw new PlanConflictError("本次路线查询已取消。");
       await copyEvidenceFacts(transaction, row.id, created.id, current, { events: current.events, costs });
-      await transaction.trip.update({ where: { id: row.tripId }, data: { currentPlanVersionId: created.id } });
+      await transaction.trip.update({ where: { id: row.tripId }, data: {
+        currentPlanVersionId: created.id,
+        status: !row.requirementUpToDate ? "plan_needs_update" : validationResults.warnings.length > 0 ? "plan_needs_review" : "planned",
+      } });
       const saved = await transaction.planVersion.findUnique({ where: { id: created.id }, include: { trip: { select: { currentPlanVersionId: true } } } });
       if (!saved) throw new PlanConflictError();
       return serializePlan(saved);

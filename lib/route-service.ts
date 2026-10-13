@@ -6,6 +6,8 @@ import { getPlanVersion, PlanConflictError, PlanValidationError, savePlanRouteEd
 import { toGcj02, toWgs84 } from "./places";
 import {
   arrivalForRoute,
+  manualReferenceRoute,
+  manualRouteEditSchema,
   parseAmapRoute,
   parseOsmRoute,
   queryRouteWithCandidateRecheck,
@@ -18,7 +20,7 @@ import {
   type RouteLeg,
   type RouteMode,
 } from "./routes";
-import type { PlanEvent } from "./plan";
+import { planEventEnd, sortPlanEvents, type PlanEvent } from "./plan";
 
 export const routeQuerySchema = z.object({
   fromEventId: z.string().min(1).max(80),
@@ -34,7 +36,7 @@ export class RouteServiceError extends Error {
   }
 }
 
-async function fetchRouteJson(url: URL, signal?: AbortSignal) {
+export async function fetchRouteJson(url: URL, signal?: AbortSignal) {
   const allowed = url.protocol === "https:" &&
     ["routing.openstreetmap.de", "restapi.amap.com"].includes(url.hostname) &&
     !url.port && !url.username && !url.password;
@@ -47,9 +49,27 @@ async function fetchRouteJson(url: URL, signal?: AbortSignal) {
       cache: "no-store",
     });
     if (!response.ok || !response.body) throw new RouteServiceError("路线服务暂时不可用，请稍后重试。");
-    const payload = await response.text();
-    if (payload.length > 2_000_000) throw new RouteServiceError("路线响应过大，请缩小范围后重试。");
-    return JSON.parse(payload) as unknown;
+    const maxBytes = 2_000_000;
+    if (Number(response.headers.get("content-length")) > maxBytes) {
+      await response.body.cancel();
+      throw new RouteServiceError("路线响应过大，请缩小范围后重试。");
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > maxBytes) throw new RouteServiceError("路线响应过大，请缩小范围后重试。");
+        chunks.push(value);
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
   } catch (error) {
     if (error instanceof RouteServiceError) throw error;
     throw new RouteServiceError(timeout.aborted ? "路线查询超时，请重试。" : "路线服务连接失败，请检查网络后重试。");
@@ -58,11 +78,11 @@ async function fetchRouteJson(url: URL, signal?: AbortSignal) {
 
 function assertAdjacentRoutePair(dayEvents: PlanEvent[], from: PlanEvent, to: PlanEvent) {
   if (from.date !== to.date) throw new PlanValidationError("城市路线只能连接同一天的两个地点。");
-  const placed = dayEvents.filter((event) => event.placeId);
+  const placed = sortPlanEvents(dayEvents).filter((event) => event.placeId);
   const fromIndex = placed.findIndex((event) => event.id === from.id);
   const toIndex = placed.findIndex((event) => event.id === to.id);
-  if (fromIndex === -1 || toIndex === -1 || Math.abs(fromIndex - toIndex) !== 1) {
-    throw new PlanValidationError("只能查询当天相邻两个已确认地点的路线。");
+  if (fromIndex === -1 || toIndex !== fromIndex + 1) {
+    throw new PlanValidationError("只能按日程顺序查询当天相邻两个已确认地点的路线。");
   }
 }
 
@@ -93,12 +113,12 @@ function unavailableRoute(input: {
     departureTime: input.departureTime,
     validFromTime: input.departureTime,
     validUntilTime: input.departureTime,
-    arrivalDate: input.date,
-    arrivalTime: input.departureTime,
+    arrivalDate: null,
+    arrivalTime: null,
     mode: input.mode,
     status: "unavailable",
-    distanceMeters: 0,
-    durationSeconds: 1,
+    distanceMeters: null,
+    durationSeconds: null,
     includedTimes: [],
     polyline: [],
     coordinateSystem: "WGS84",
@@ -139,13 +159,16 @@ export async function searchAndSavePlanRoute(tripId: string, version: number, in
   const toPlace = plan.places.find((place) => place.id === to.placeId);
   if (!fromPlace || !toPlace) throw new PlanValidationError("两个安排都必须先确认地点。");
   const departureTime = parsed.data.departureTime ?? from.endTime;
-  if (from.endTime > departureTime) throw new PlanValidationError("出发时刻不能早于上一项结束时间。");
+  if (planEventEnd(from).getTime() > Date.parse(`${from.date}T${departureTime}:00+08:00`)) throw new PlanValidationError("出发时刻不能早于上一项结束时间。");
 
   const mode = parsed.data.mode;
+  const settings = await getSettingsRecord();
+  const provider = settings.mapProvider;
   const cacheKey = routeCacheKey({
     date: from.date,
     departureTime,
     mode,
+    provider,
     from: { longitude: fromPlace.longitude, latitude: fromPlace.latitude },
     to: { longitude: toPlace.longitude, latitude: toPlace.latitude },
   });
@@ -155,8 +178,6 @@ export async function searchAndSavePlanRoute(tripId: string, version: number, in
     return savePlanRouteEdit({ tripId, expectedPlanVersion: version, route: cached, abortSignal: signal });
   }
 
-  const settings = await getSettingsRecord();
-  const provider = settings.mapProvider;
   const common = { id, fromEventId: from.id, toEventId: to.id, date: from.date, departureTime, mode, cacheKey };
   let route: RouteLeg;
   if (provider === "amap") {
@@ -183,16 +204,16 @@ export async function searchAndSavePlanRoute(tripId: string, version: number, in
           ...common,
           validFromTime: departureTime,
           validUntilTime: departureTime,
-          arrivalDate: arrival.date,
-          arrivalTime: arrival.time,
-          status: parsedRoute.available ? "verified" : "unavailable",
-          distanceMeters: parsedRoute.distanceMeters,
-          durationSeconds: parsedRoute.durationSeconds,
+          arrivalDate: parsedRoute.available ? arrival.date : null,
+          arrivalTime: parsedRoute.available ? arrival.time : null,
+          status: !parsedRoute.available ? "unavailable" : mode === "public_transit" ? "pending_confirmation" : mode === "driving" ? "estimated" : "verified",
+          distanceMeters: parsedRoute.available ? parsedRoute.distanceMeters : null,
+          durationSeconds: parsedRoute.available ? parsedRoute.durationSeconds : null,
           includedTimes: parsedRoute.includedTimes,
           polyline: parsedRoute.polyline,
           coordinateSystem: "GCJ-02",
           steps: parsedRoute.steps,
-          futureQueryCapability: true,
+          futureQueryCapability: false,
           candidateRecheck: {
             attempts: 1,
             status: "converged",
@@ -261,5 +282,24 @@ export async function searchAndSavePlanRoute(tripId: string, version: number, in
   route = routeLegSchema.parse(route);
   if (signal?.aborted) throw new PlanConflictError("本次路线查询已取消。");
   writeCachedRoute(cacheKey, route);
+  return savePlanRouteEdit({ tripId, expectedPlanVersion: version, route, abortSignal: signal });
+}
+
+export async function saveManualPlanRoute(tripId: string, version: number, input: unknown, signal?: AbortSignal) {
+  const parsed = manualRouteEditSchema.safeParse(input);
+  if (!parsed.success) throw new PlanValidationError(parsed.error.issues[0]?.message ?? "人工路线记录格式不正确。");
+  const plan = await getPlanVersion(tripId, version);
+  if (!plan.isCurrent) throw new PlanConflictError("计划已变化，请刷新后重新记录路线。");
+  const from = plan.events.find((event) => event.id === parsed.data.fromEventId);
+  const to = plan.events.find((event) => event.id === parsed.data.toEventId);
+  if (!from || !to) throw new PlanValidationError("没有找到路线连接的两个地点。");
+  assertAdjacentRoutePair(plan.events.filter((event) => event.date === from.date), from, to);
+  if (!plan.places.some((place) => place.id === from.placeId) || !plan.places.some((place) => place.id === to.placeId)) {
+    throw new PlanValidationError("两个安排都必须先确认地点。");
+  }
+  if (planEventEnd(from).getTime() > Date.parse(`${from.date}T${parsed.data.departureTime}:00+08:00`)) {
+    throw new PlanValidationError("出发时刻不能早于上一项结束时间。");
+  }
+  const route = manualReferenceRoute({ tripId, date: from.date, edit: parsed.data });
   return savePlanRouteEdit({ tripId, expectedPlanVersion: version, route, abortSignal: signal });
 }

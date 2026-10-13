@@ -3,6 +3,9 @@ import {
   arrivalForRoute,
   clearRouteCache,
   formatRouteDistance,
+  invalidateRouteReference,
+  manualReferenceRoute,
+  manualRouteEditSchema,
   parseAmapRoute,
   parseOsmRoute,
   queryRouteWithCandidateRecheck,
@@ -10,6 +13,7 @@ import {
   routeCostPricingUnit,
   routeCacheKey,
   routeConflict,
+  routeLegSchema,
   scheduledTransitTiming,
   writeCachedRoute,
   type RouteLeg,
@@ -114,6 +118,25 @@ describe("city routes", () => {
     expect(result.route.scheduleBasis).toContain("3 轮");
   });
 
+  it("stops after one actual query when future timetable capability is missing", async () => {
+    let calls = 0;
+    const result = await queryRouteWithCandidateRecheck(async () => {
+      calls += 1;
+      return { route: route({ futureQueryCapability: false }), needsCandidateRecheck: true, nextCandidateTime: "09:05" };
+    }, "08:45");
+    expect(calls).toBe(1);
+    expect(result.route.status).toBe("pending_confirmation");
+    expect(result.route.candidateRecheck).toMatchObject({ attempts: 1, status: "not_applicable" });
+    expect(result.route.scheduleBasis).toContain("未验证未来");
+    expect(result.route.scheduleBasis).not.toContain("3 轮");
+  });
+
+  it("reports the actual round count when no next candidate is available", async () => {
+    const result = await queryRouteWithCandidateRecheck(async () => ({ route: route(), needsCandidateRecheck: true }), "08:45");
+    expect(result.route.candidateRecheck).toMatchObject({ attempts: 1, status: "not_converged" });
+    expect(result.route.candidateRecheck.reason).toContain("未返回下一候选");
+  });
+
   it("parses OSRM road data without turning failures into straight lines", () => {
     const parsed = parseOsmRoute({
       code: "Ok",
@@ -176,5 +199,63 @@ describe("city routes", () => {
     });
     expect(conflict).toContain("晚于");
     expect(routeConflict({ route: route({ arrivalTime: "09:00" }), earliestDate: "2026-10-12", earliestStartTime: "09:00" })).toBeNull();
+  });
+});
+
+function manualInput(overrides: Record<string, unknown> = {}) {
+  return {
+    fromEventId: "from", toEventId: "to", departureTime: "08:45",
+    manualReference: {
+      availability: "available", instructions: "步行到起点站\n乘 1 号线至终点站，换乘 2 号线",
+      durationMinutes: 45, fareCents: 600, sourceName: "高德地图人工查询",
+      sourceUrl: "https://uri.amap.com/navigation", checkedAt: "2026-01-01T00:00:00.000Z", acknowledged: true,
+      ...overrides,
+    },
+  };
+}
+
+describe("manual transit references", () => {
+  it("stores source and full applicability without fabricating geometry or timetable capability", () => {
+    const edit = manualRouteEditSchema.parse(manualInput());
+    const reference = manualReferenceRoute({ tripId: "trip", date: "2026-10-13", edit });
+    expect(reference).toMatchObject({
+      status: "pending_confirmation", futureQueryCapability: false,
+      distanceMeters: null, durationSeconds: 2700, arrivalDate: "2026-10-13", arrivalTime: "09:30",
+      polyline: [], cost: { minCents: 600, maxCents: 600 },
+      manualReference: { date: "2026-10-13", departureTime: "08:45", checkedAt: "2026-01-01T00:00:00.000Z", requiresReconfirmation: false },
+    });
+    expect(reference.steps).toHaveLength(2);
+    expect(reference.steps.every((step) => step.durationSeconds === null)).toBe(true);
+    expect(readCachedRoute(reference.cacheKey)).toBeNull();
+    const legacy = route({ cacheKey: "0123456789abcdef" });
+    expect(routeLegSchema.parse(legacy).manualReference).toBeUndefined();
+  });
+
+  it("keeps unknown duration, unknown fare and no service distinct from zero", () => {
+    const unknown = manualReferenceRoute({ tripId: "trip", date: "2026-10-13", edit: manualRouteEditSchema.parse(manualInput({ durationMinutes: null, fareCents: null })) });
+    expect(unknown).toMatchObject({ status: "pending_confirmation", durationSeconds: null, arrivalDate: null, arrivalTime: null, cost: { minCents: null, maxCents: null } });
+    const unavailable = manualReferenceRoute({ tripId: "trip", date: "2026-10-13", edit: manualRouteEditSchema.parse(manualInput({ availability: "no_service", durationMinutes: null, fareCents: null })) });
+    expect(unavailable).toMatchObject({ status: "unavailable", durationSeconds: null, arrivalTime: null, polyline: [], futureQueryCapability: false });
+  });
+
+  it("rejects unsafe sources, future checks and incomplete acknowledgment", () => {
+    for (const overrides of [
+      { sourceUrl: "javascript:alert(1)" }, { sourceUrl: "https://name:password@example.org" },
+      { checkedAt: "2099-01-01T00:00:00.000Z" }, { acknowledged: false }, { durationMinutes: 0 },
+      { durationMinutes: 45.5 }, { fareCents: -1 }, { sourceName: " " }, { instructions: " " },
+      { availability: "no_service", durationMinutes: 45 },
+    ]) expect(manualRouteEditSchema.safeParse(manualInput(overrides)).success).toBe(false);
+  });
+
+  it("invalidates timing and fare while retaining the original reference for re-entry", () => {
+    const original = manualReferenceRoute({ tripId: "trip", date: "2026-10-13", edit: manualRouteEditSchema.parse(manualInput()) });
+    const invalidated = invalidateRouteReference(original, "2026-10-14", "09:05");
+    expect(invalidated).toMatchObject({
+      date: "2026-10-14", departureTime: "09:05", status: "pending_confirmation",
+      durationSeconds: null, arrivalDate: null, arrivalTime: null, cost: { minCents: null, maxCents: null },
+      manualReference: { date: "2026-10-13", departureTime: "08:45", durationMinutes: 45, fareCents: 600, requiresReconfirmation: true },
+    });
+    expect(invalidated.conflict).toContain("待重新核实");
+    expect(routeConflict({ route: invalidated, earliestDate: "2026-10-14", earliestStartTime: "09:30" })).toBeNull();
   });
 });

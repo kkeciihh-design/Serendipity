@@ -54,6 +54,7 @@ const costEditSchema = z.object({
       .max(2_000_000_000)
       .nullable(),
     quantity: z.number().int().min(1).max(100).nullable(),
+    nightCount: z.number().int().min(1).max(4).optional(),
     paymentStatus: costPaymentStatusSchema,
   }),
 });

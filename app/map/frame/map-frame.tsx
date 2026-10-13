@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
-import { mapMarkerSchema, mapRouteSchema, markerLabel, type MapMarker, type MapRoute } from "@/lib/map-link";
+import { mapMarkerSchema, mapRouteSchema, markerLabel, routeArrowRotation, type MapMarker, type MapRoute } from "@/lib/map-link";
 import { toGcj02, toWgs84 } from "@/lib/places";
 import { z } from "zod";
 
@@ -40,16 +40,6 @@ function routeColor(route: MapRoute) {
   if (route.mode === "walking") return "#3f6212";
   if (route.mode === "public_transit") return "#1d4ed8";
   return "#9a3412";
-}
-
-function routeBearing(points: { latitude: number; longitude: number }[]) {
-  const index = Math.max(0, Math.floor(points.length / 2) - 1);
-  const from = points[index];
-  const to = points[Math.min(index + 1, points.length - 1)];
-  const y = Math.sin((to.longitude - from.longitude) * Math.PI / 180) * Math.cos(to.latitude * Math.PI / 180);
-  const x = Math.cos(from.latitude * Math.PI / 180) * Math.sin(to.latitude * Math.PI / 180) -
-    Math.sin(from.latitude * Math.PI / 180) * Math.cos(to.latitude * Math.PI / 180) * Math.cos((to.longitude - from.longitude) * Math.PI / 180);
-  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
 export function MapFrame() {
@@ -132,7 +122,7 @@ export function MapFrame() {
               keyboard: false,
               icon: L.divIcon({
                 className: "serendipity-map-route-arrow",
-                html: `<span style="transform: rotate(${routeBearing(route.polyline)}deg)">➤</span>`,
+                html: `<span style="transform: rotate(${routeArrowRotation(route.polyline)}deg)">➤</span>`,
                 iconSize: [20, 20],
                 iconAnchor: [10, 10],
               }),
@@ -213,7 +203,7 @@ export function MapFrame() {
             const arrow = toGcj02(route.polyline[Math.floor(route.polyline.length / 2)], route.coordinateSystem);
             const pin = document.createElement("div");
             pin.className = "serendipity-map-route-arrow";
-            pin.innerHTML = `<span style="transform: rotate(${routeBearing(route.polyline)}deg)">➤</span>`;
+            pin.innerHTML = `<span style="transform: rotate(${routeArrowRotation(route.polyline)}deg)">➤</span>`;
             markers.push(new sdk.Marker({ position: [arrow.longitude, arrow.latitude], content: pin }));
           }
           markers = [...markers, ...mapMarkers.map((markerData) => {

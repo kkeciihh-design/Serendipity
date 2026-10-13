@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { assertTestDataPath, assertTestDataTree } from "./test-data-safety.mjs";
 
 const projectRoot = process.cwd();
 const allowedRoot = path.join(projectRoot, "test-data");
@@ -9,14 +10,13 @@ const dataDirectory = path.resolve(
 );
 const databaseDirectory = path.join(dataDirectory, "data");
 
-if (!dataDirectory.startsWith(`${allowedRoot}${path.sep}`)) {
-  throw new Error("Refusing to clean data outside the project test-data directory.");
-}
+assertTestDataPath(dataDirectory, projectRoot);
+assertTestDataTree(databaseDirectory, projectRoot);
 
 fs.mkdirSync(databaseDirectory, { recursive: true });
 for (const entry of fs.readdirSync(databaseDirectory)) {
   const entryPath = path.join(databaseDirectory, entry);
-  if (fs.statSync(entryPath).isFile()) {
+  if (fs.lstatSync(entryPath).isFile()) {
     fs.chmodSync(entryPath, 0o666);
   }
   fs.rmSync(entryPath, { recursive: true, force: true });

@@ -1,11 +1,19 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import type { PlanCostItem } from "../lib/budget";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { validatePlanCosts, type PlanCostItem } from "../lib/budget";
 import type { PlanEvent } from "../lib/plan";
-import { applyRouteCost } from "../lib/plan-service";
 import type { RouteLeg } from "../lib/routes";
+import { assertTestDataPath } from "../scripts/test-data-safety.mjs";
 
-process.env.SERENDIPITY_DATA_DIR = path.resolve("test-data", "unit-route-cost");
+let plans: typeof import("../lib/plan-service");
+let applyRouteCost: typeof plans.applyRouteCost;
+let updateRoutesAfterEventChange: typeof plans.updateRoutesAfterEventChange;
+beforeAll(async () => {
+  process.env.SERENDIPITY_DATA_DIR = assertTestDataPath(path.resolve("test-data", "unit-route-cost"));
+  plans = await import("../lib/plan-service");
+  ({ applyRouteCost, updateRoutesAfterEventChange } = plans);
+});
+afterAll(async () => { await plans?.closePlanStore(); });
 
 function event(id: string, type: PlanEvent["type"]): PlanEvent {
   return {
@@ -17,6 +25,7 @@ function event(id: string, type: PlanEvent["type"]): PlanEvent {
     type,
     title: id,
     locationName: id,
+    placeId: id,
     suggestedDurationSeconds: 3600,
     costDraftCents: 0,
     costStatus: "estimated",
@@ -88,9 +97,66 @@ describe("route costs", () => {
     expect(drivingCosts.find((cost) => cost.id.startsWith("route-"))).toMatchObject({ unit: "one_time" });
   });
 
-  it("does not add a route fare when the linked transport event already carries it", () => {
+  it("replaces the unconfirmed endpoint transport estimate with the route fare once", () => {
     const costs = applyRouteCost(route("public_transit", 300), [event("from", "activity"), event("to", "local_transport")], [baseCost("cost-to", "to")]);
-    expect(costs.some((cost) => cost.id.startsWith("route-"))).toBe(false);
     expect(costs).toHaveLength(1);
+    expect(costs[0]).toMatchObject({ unitAmountCents: 300, unit: "per_person", linkedEventId: "to" });
+    expect(costs[0].id).toMatch(/^route-/);
+  });
+
+  it("replaces the same pair's fare once and keeps manual references pending", () => {
+    const events = [event("from", "activity"), event("to", "meal")];
+    const reference = { ...route("public_transit", 600), status: "pending_confirmation" as const };
+    const first = applyRouteCost(reference, events, []);
+    const second = applyRouteCost({ ...reference, cost: { ...reference.cost, minCents: 800, maxCents: 800 } }, events, first);
+    expect(second).toHaveLength(1);
+    expect(second[0]).toMatchObject({ unitAmountCents: 800, unit: "per_person", certainty: "pending_confirmation" });
+  });
+
+  it("retains confirmed and paid amounts through invalidation and mode changes", () => {
+    const events = [event("from", "activity"), { ...event("to", "meal"), startTime: "10:00", endTime: "11:00" }];
+    const original = applyRouteCost(route("public_transit", 600), events, []);
+    for (const protectedCost of [
+      { ...original[0], source: "user_confirmed" as const },
+      { ...original[0], paymentStatus: "paid" as const },
+    ]) {
+      const { note, ...facts } = protectedCost;
+      void note;
+      const changedMode = applyRouteCost(route("walking", 0), events, [protectedCost]);
+      expect(changedMode).toHaveLength(1);
+      expect(changedMode[0]).toMatchObject(facts);
+      expect(changedMode[0].note).toContain("原确认或付款金额保留");
+      const invalidated = updateRoutesAfterEventChange([route("public_transit", 600)], events, [protectedCost], "from").costs;
+      expect(invalidated).toHaveLength(1);
+      expect(invalidated[0]).toMatchObject(facts);
+    }
+  });
+
+  it("marks derived costs unknown after a schedule change and removes them with a deleted route", () => {
+    const events = [event("from", "activity"), { ...event("to", "meal"), startTime: "10:00", endTime: "11:00" }];
+    const reference = route("public_transit", 600);
+    const original = applyRouteCost(reference, events, []);
+    const changed = updateRoutesAfterEventChange([reference], events, original, "from");
+    expect(changed.costs[0]).toMatchObject({ unitAmountCents: null, certainty: "pending_confirmation" });
+    expect(changed.routeLegs[0]).toMatchObject({ durationSeconds: null, arrivalTime: null });
+    expect(updateRoutesAfterEventChange([reference], [events[1]], original, "from")).toEqual({ routeLegs: [], costs: [] });
+  });
+
+  it("removes a nonadjacent route draft but preserves paid facts without blocking the new pair", () => {
+    const events = [event("from", "activity"), { ...event("middle", "activity"), startTime: "09:00", endTime: "09:30" }, { ...event("to", "meal"), startTime: "10:00", endTime: "11:00" }];
+    const oldRoute = route("public_transit", 600);
+    const original = applyRouteCost(oldRoute, events, []);
+    expect(updateRoutesAfterEventChange([oldRoute], events, original, "middle")).toEqual({ routeLegs: [], costs: [] });
+    for (const protectedCost of [{ ...original[0], paymentStatus: "paid" as const }, { ...original[0], source: "user_confirmed" as const }]) {
+      const changed = updateRoutesAfterEventChange([oldRoute], events, [protectedCost], "middle");
+      expect(changed.routeLegs).toEqual([]);
+      expect(changed.costs[0]).toMatchObject({ unitAmountCents: 600, paymentStatus: protectedCost.paymentStatus });
+      expect(changed.costs[0].note).toContain("原路线已不再适用");
+      const costs = applyRouteCost({ ...oldRoute, fromEventId: "middle" }, events, changed.costs);
+      expect(costs).toHaveLength(2);
+      expect(validatePlanCosts(costs, events)).toEqual([]);
+    }
+    expect(validatePlanCosts([...original, { ...original[0], id: "route-other" }], events).join(" ")).toContain("重复关联");
+    expect(validatePlanCosts([original[0], original[0]], events).join(" ")).toContain("重复");
   });
 });

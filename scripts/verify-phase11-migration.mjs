@@ -3,11 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import assert from "node:assert/strict";
+import { assertTestDataTree } from "./test-data-safety.mjs";
 
 const [phase, input] = process.argv.slice(2);
 if (!["before", "after"].includes(phase) || !input || !path.isAbsolute(input)) throw new Error("Usage: node scripts/verify-phase11-migration.mjs before|after ABSOLUTE_DATABASE_PATH");
 const database = path.resolve(input);
-const output = path.resolve("test-data/phase11-evidence");
+const output = assertTestDataTree(path.resolve("test-data/phase11-evidence"));
 fs.mkdirSync(output, { recursive: true });
 const beforeFile = path.join(output, "migration-before.json");
 const before = phase === "after" ? JSON.parse(fs.readFileSync(beforeFile, "utf8")) : null;

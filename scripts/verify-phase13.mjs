@@ -1,18 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PrismaClient } from "@prisma/client";
+import { openVerifiedIsolatedDatabase } from "./verify-isolated-server.mjs";
 import { chromium } from "@playwright/test";
 import assert from "node:assert/strict";
+import { requireExternalVerification } from "./verification-safety.mjs";
 /* global window */
 
 const base = "http://127.0.0.1:3121";
+requireExternalVerification({ base, dataDirectories: ["test-data/phase13-live"] });
 const output = path.resolve("docs/阶段验收/证据/阶段-13");
 fs.mkdirSync(output, { recursive: true });
-const database = new PrismaClient({
-  datasources: {
-    db: { url: `file:${path.resolve("test-data/phase13-live/data/serendipity.db").replaceAll("\\", "/")}` },
-  },
-});
+const database = await openVerifiedIsolatedDatabase(base, "test-data/phase13-live");
 const result = {
   checkedAt: new Date().toISOString(),
   data: "test-data/phase13-live (isolated)",
