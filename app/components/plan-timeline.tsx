@@ -15,10 +15,10 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  formatMoneyAmount,
   formatPlanEventTimeRange,
   type PlanOverviewDay,
 } from "@/lib/plan-overview";
+import { costCertaintyLabels, eventCostSummary, formatMoneyRange } from "@/lib/budget";
 import {
   planEventEnd,
   planEventStart,
@@ -31,9 +31,10 @@ import type { PlanVersionClient } from "./plan-overview";
 import type { EvidenceFactClient, EvidenceField } from "@/lib/evidence";
 import { effectiveEvidenceStatus, evidenceFieldLabels, evidenceStatusLabels, summarizeEventEvidence } from "@/lib/evidence";
 import { numberPlanEvents } from "@/lib/map-link";
-import type { RouteLeg } from "@/lib/routes";
+import { RouteSummary } from "./route-summary";
 import { EvidenceDrawer } from "./evidence-drawer";
 import type { MapLinkTarget } from "./plan-map";
+import { useVersionedDraft } from "./use-versioned-draft";
 
 const eventTypeLabels: Record<PlanEvent["type"], string> = {
   departure_transport: "去程",
@@ -46,30 +47,9 @@ const eventTypeLabels: Record<PlanEvent["type"], string> = {
   preparation: "准备",
 };
 
-const costStatusLabels: Record<PlanEvent["costStatus"], string> = {
-  estimated: "估算",
-  pending_confirmation: "待确认",
-  user_confirmed: "已确认",
-};
-
 const eventStatusLabels: Record<PlanEventStatus, string> = {
   suggested: "AI建议",
   confirmed: "已确认",
-};
-const routeModeLabels: Record<RouteLeg["mode"], string> = {
-  walking: "步行",
-  public_transit: "地铁/公交",
-  driving: "驾车/打车",
-};
-const routeStatusLabels: Record<RouteLeg["status"], string> = {
-  verified: "已核实",
-  estimated: "估算",
-  pending_confirmation: "待确认",
-  unavailable: "暂无可用路线",
-};
-const formatRouteDuration = (seconds: number) => {
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  return minutes < 60 ? `${minutes} 分钟` : `${Math.floor(minutes / 60)} 小时 ${minutes % 60 ? `${minutes % 60} 分钟` : ""}`.trim();
 };
 
 type Draft = {
@@ -78,7 +58,6 @@ type Draft = {
   note: string;
   locked: boolean;
   status: PlanEventStatus;
-  timeChanged: boolean;
 };
 
 type Feedback = {
@@ -96,9 +75,19 @@ function createDraft(event: PlanEvent): Draft {
     note: event.note ?? "",
     locked: event.locked ?? false,
     status: event.status ?? "suggested",
-    timeChanged: false,
   };
 }
+
+const draftFieldLabels: Record<keyof Draft, string> = {
+  startTime: "开始时间", durationMinutes: "时长", note: "备注", locked: "锁定状态", status: "确认状态",
+};
+const equalDraftField = (field: keyof Draft, left: Draft[keyof Draft], right: Draft[keyof Draft]) =>
+  field === "note" ? String(left).trim() === String(right).trim() : Object.is(left, right);
+const incomingDraftValue = (field: keyof Draft, value: Draft[keyof Draft]) => {
+  if (field === "status") return eventStatusLabels[value as PlanEventStatus];
+  if (field === "locked") return value ? "已锁定" : "未锁定";
+  return String(value) || "（空）";
+};
 
 function formatGap(minutes: number) {
   if (minutes < 60) {
@@ -147,7 +136,11 @@ export function PlanTimeline({
   selectedEventId: string | null;
   onEventSelect: (eventId: string, target: MapLinkTarget, dayNumber: number) => void;
 }) {
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const selectedEvent = plan.events.find((event) => event.id === selectedEventId);
+  const sourceDraft = useMemo(() => selectedEvent ? createDraft(selectedEvent) : null, [selectedEvent]);
+  const { draft, setDraft, resetDraft, acknowledgeSaved, conflicts } = useVersionedDraft({
+    scope: tripId, version: plan.id, itemId: selectedEventId, source: sourceDraft, equal: equalDraftField,
+  });
   const [isSaving, setIsSaving] = useState(false);
   const [removeRequested, setRemoveRequested] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -173,13 +166,6 @@ export function PlanTimeline({
   }, [plan.events, day.dayNumber]);
 
   useEffect(() => {
-    const event = plan.events.find((item) => item.id === selectedEventId);
-    if (!event) {
-      setDraft(null);
-      setRemoveRequested(false);
-      return;
-    }
-    setDraft(createDraft(event));
     setRemoveRequested(false);
   }, [plan.id, selectedEventId]);
 
@@ -187,9 +173,6 @@ export function PlanTimeline({
     setEvidenceFacts(plan.evidenceFacts ?? []);
   }, [plan.id, plan.evidenceFacts]);
 
-  const selectedEvent = plan.events.find(
-    (event) => event.id === selectedEventId,
-  );
   const canEdit = plan.isCurrent;
   const originalLocked = selectedEvent?.locked ?? false;
   const fixedEvent =
@@ -209,6 +192,10 @@ export function PlanTimeline({
 
     setIsSaving(true);
     setFeedback({ tone: "info", message: "正在保存日程修改..." });
+    // Another editor may have locked this event while a note/time draft was
+    // pending. Unlock using the server fields first and keep that local draft.
+    const unlocking = originalLocked && !draft.locked;
+    const submitted = unlocking && sourceDraft ? { ...sourceDraft, locked: false } : draft;
     try {
       const response = await fetch(
         `/api/trips/${tripId}/plans/${plan.versionNumber}`,
@@ -218,12 +205,12 @@ export function PlanTimeline({
           body: JSON.stringify({
             type: "event",
             eventId: selectedEvent.id,
-            startTime: draft.startTime,
-            durationMinutes: draft.durationMinutes,
-            timeEdit: draft.timeChanged ? "start_duration" : "preserve",
-            note: draft.note.trim() ? draft.note : null,
-            locked: draft.locked,
-            status: draft.status,
+            startTime: submitted.startTime,
+            durationMinutes: submitted.durationMinutes,
+            timeEdit: submitted.startTime !== sourceDraft?.startTime || submitted.durationMinutes !== sourceDraft?.durationMinutes ? "start_duration" : "preserve",
+            note: submitted.note.trim() ? submitted.note : null,
+            locked: submitted.locked,
+            status: submitted.status,
             remove: removeRequested,
           }),
         },
@@ -233,10 +220,14 @@ export function PlanTimeline({
       }
 
       const payload = (await response.json()) as { plan: PlanVersionClient };
+      const savedEvent = payload.plan.events.find((item) => item.id === selectedEvent.id);
+      if (savedEvent && !unlocking) acknowledgeSaved(savedEvent.id, createDraft(savedEvent), payload.plan.id);
       onSaved(payload.plan);
       setFeedback({
         tone: "success",
-        message: `计划版本 ${payload.plan.versionNumber} 已保存。`,
+        message: unlocking
+          ? `计划版本 ${payload.plan.versionNumber} 已保存并取消锁定；待保存的其他输入仍保留，请核对后继续保存。`
+          : `计划版本 ${payload.plan.versionNumber} 已保存。`,
       });
     } catch (error) {
       setFeedback({
@@ -263,6 +254,7 @@ export function PlanTimeline({
             (fact) => fact.targetId === event.id,
           );
           const sourceStatus = summarizeEventEvidence(eventFacts).label;
+          const eventCost = eventCostSummary(event.id, plan.costs, plan.requestSnapshot);
           const route = next
             ? plan.routeLegs?.find((item) => item.fromEventId === event.id && item.toEventId === next.id)
             : undefined;
@@ -299,8 +291,8 @@ export function PlanTimeline({
                 </span>
                 <span className="inline-flex min-h-9 items-center gap-2 rounded-md bg-cream px-3 text-sm text-graphite sm:justify-self-end">
                   <Banknote aria-hidden="true" className="size-4 shrink-0" />
-                  {formatMoneyAmount(event.costDraftCents)}｜
-                  {costStatusLabels[event.costStatus]}
+                  {formatMoneyRange(eventCost?.minCents ?? null, eventCost?.maxCents ?? null)}｜
+                  {eventCost ? costCertaintyLabels[eventCost.certainty] : "待确认"}
                 </span>
                 {locked ? (
                   <span className="inline-flex min-h-9 items-center gap-2 rounded-md bg-shell px-3 text-sm font-medium text-charcoal sm:col-start-3 sm:justify-self-end">
@@ -321,12 +313,7 @@ export function PlanTimeline({
                 </button>
               </div>
               {next ? (
-            route ? <div className="ml-4 rounded-md bg-cream p-3 text-sm leading-6">
-              <p className="font-semibold text-charcoal">{routeModeLabels[route.mode]}｜{routeStatusLabels[route.status]}｜{formatRouteDuration(route.durationSeconds)}｜{route.date} {route.departureTime} 出发</p>
-              <p className="text-graphite">{route.scheduleBasis}｜费用：{route.cost.minCents === null ? "待确认" : `${Math.round(route.cost.minCents / 100)} 元`}</p>
-              {route.conflict ? <p className="font-medium text-clay">{route.conflict}</p> : null}
-              {route.steps.length ? <details className="mt-1"><summary className="cursor-pointer text-sage">查看路线步骤</summary><ol className="mt-1 space-y-1 text-graphite">{route.steps.map((step, index) => <li key={`${route.id}-${index}`}>{index + 1}. {step.instruction}</li>)}</ol></details> : null}
-            </div> :
+            route ? <div className="ml-4 min-w-0"><RouteSummary route={route} compact /></div> :
             <p className="flex items-center gap-2 pl-4 text-sm text-graphite">
                   <ArrowDown aria-hidden="true" className="size-4 shrink-0 text-sage" />
                   {connectionLabel(event, next)}
@@ -417,6 +404,10 @@ export function PlanTimeline({
             </ul>
           </section>
 
+          {conflicts.length > 0 ? <div role="alert" className="mt-4 rounded-md bg-clay-soft px-4 py-3 text-sm leading-6 text-clay">
+            <p>新版本也修改了{conflicts.map((field) => draftFieldLabels[field]).join("、")}。你的未保存输入已保留，请核对后保存；选择“取消修改”可采用新版本的值。</p>
+            <ul className="mt-2">{conflicts.map((field) => <li key={field}>新版{draftFieldLabels[field]}：{sourceDraft ? incomingDraftValue(field, sourceDraft[field]) : "（未知）"}</li>)}</ul>
+          </div> : null}
           <form onSubmit={saveEdit} className="mt-4 grid gap-4 sm:grid-cols-2">
             <label className="block text-sm font-medium text-charcoal">
               开始时间
@@ -425,7 +416,7 @@ export function PlanTimeline({
                 value={draft.startTime}
                 disabled={fieldsDisabled}
                 onChange={(event) =>
-                  setDraft({ ...draft, startTime: event.target.value, timeChanged: true })
+                  setDraft({ ...draft, startTime: event.target.value })
                 }
                 className="mt-2 min-h-12 w-full rounded-md border border-sand bg-white px-4 py-3 text-base text-charcoal focus:border-sage focus:outline-none disabled:bg-graphite/10"
               />
@@ -443,7 +434,6 @@ export function PlanTimeline({
                   setDraft({
                     ...draft,
                     durationMinutes: Number(event.target.value),
-                    timeChanged: true,
                   })
                 }
                 className="mt-2 min-h-12 w-full rounded-md border border-sand bg-white px-4 py-3 text-base text-charcoal focus:border-sage focus:outline-none disabled:bg-graphite/10"
@@ -515,7 +505,7 @@ export function PlanTimeline({
               <button
                 type="button"
                 onClick={() => {
-                  setDraft(createDraft(selectedEvent));
+                  resetDraft();
                   setRemoveRequested(false);
                   setFeedback(null);
                 }}

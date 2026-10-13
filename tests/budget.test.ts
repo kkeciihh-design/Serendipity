@@ -427,16 +427,17 @@ describe("cost items and edits", () => {
       certainty: "pending_confirmation",
     });
 
-    expect(() =>
-      applyPlanCostEdit(source, {
+    const unchangedConfirmation = {
         costId: "cost-meal",
-        unit: "one_time",
+        unit: "one_time" as const,
         unitAmountCents: 8000,
         unitAmountMaxCents: null,
         quantity: null,
-        paymentStatus: "not_paid",
-      }),
-    ).toThrow(/没有需要保存的费用修改/);
+        paymentStatus: "not_paid" as const,
+    };
+    const sameAmount = applyPlanCostEdit(source, unchangedConfirmation);
+    expect(sameAmount[0]).toMatchObject({ certainty: "user_confirmed", unitAmountCents: 8000, paymentStatus: "not_paid" });
+    expect(() => applyPlanCostEdit(sameAmount, unchangedConfirmation)).toThrow(/没有需要保存的费用修改/);
 
     const ticket = applyPlanCostEdit(source, {
       costId: "cost-meal",

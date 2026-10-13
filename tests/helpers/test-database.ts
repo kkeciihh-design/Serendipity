@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { assertTestDataPath, assertTestDataTree } from "../../scripts/test-data-safety.mjs";
 
 export function isolatedDatabase(name: string) {
   const root = path.resolve("test-data");
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9-]*$/.test(name)) throw new Error("Invalid isolated database name.");
+  assertTestDataPath(path.join(root, `${name}-`));
   fs.mkdirSync(root, { recursive: true });
   const directory = fs.mkdtempSync(path.join(root, `${name}-`));
   fs.mkdirSync(path.join(directory, "data"));
@@ -14,7 +17,7 @@ export function isolatedDatabase(name: string) {
   ], { env: { ...process.env, DATABASE_URL: databaseUrl, RUST_LOG: "info" }, encoding: "utf8" });
   if (result.status !== 0) throw new Error(`Isolated migrations failed: ${result.stderr}`);
   return { directory, databaseUrl, cleanup() {
-    if (!directory.startsWith(`${root}${path.sep}`)) throw new Error("Unsafe cleanup path.");
+    assertTestDataTree(directory);
     fs.rmSync(directory, { recursive: true, force: true });
   } };
 }

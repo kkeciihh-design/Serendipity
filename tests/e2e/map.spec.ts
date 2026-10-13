@@ -154,6 +154,8 @@ test("map numbers and timeline selections stay linked across edits and days", as
   await expect(page.getByRole("button", { name: "第 3 项：早餐" })).toBeVisible();
 
   await page.getByRole("button", { name: "定位地图：④Example Museum" }).click();
+  // Leaflet briefly retains the previous popup while its fade-out completes.
+  await expect(mapFrame.locator(".serendipity-map-popup strong")).toHaveCount(1);
   await expect(mapFrame.locator(".serendipity-map-popup strong")).toHaveText("Example Museum");
   await page.getByRole("tab", { name: "每日时间轴", exact: true }).click();
   await page.getByLabel("开始时间").fill("14:30");
@@ -201,14 +203,16 @@ test("mobile map summary jumps to the matching day and event", async ({ page, re
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test("public transit without a provider degrades instead of drawing a fake road", async ({ page, request }) => {
+test("legacy public-transit API without a provider does not draw a fake road", async ({ page, request }) => {
   const trip = await seed(request, true);
   await controlledMap(page, trip.id);
+  const response = await request.post(`/api/trips/${trip.id}/plans/1/routes`, { data: {
+    fromEventId: "d1-breakfast", toEventId: "d1-activity", departureTime: "08:30", mode: "public_transit",
+  } });
+  expect(response.status()).toBe(200);
   await page.goto(`/trips/${trip.id}`);
   await page.getByRole("tab", { name: "地图", exact: true }).click();
   const routeCard = page.locator("article").filter({ hasText: "③早餐 → ④Example Museum" });
-  await routeCard.getByLabel("交通方式").selectOption("public_transit");
-  await routeCard.getByRole("button", { name: "查询并保存" }).click();
   await expect(routeCard.getByText("暂无可用路线", { exact: false })).toBeVisible();
   await expect(routeCard.getByText("当前免费地图方案没有公共交通路线服务", { exact: false })).toBeVisible();
   await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();

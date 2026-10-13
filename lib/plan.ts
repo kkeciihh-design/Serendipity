@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { RequestSnapshot } from "./trip-request";
+import { budgetWarnings, derivePlanCosts, type PlanCostItem } from "./budget";
 
 export const planEventTypeSchema = z.enum([
   "departure_transport",
@@ -222,16 +223,10 @@ function overlaps(left: PlanEvent, right: PlanEvent) {
   );
 }
 
-function estimatedCostTotal(events: PlanEvent[]) {
-  return events.reduce(
-    (total, event) => total + (event.costDraftCents ?? 0),
-    0,
-  );
-}
-
 export function validatePlan(
   plan: PlanContent,
   snapshot: RequestSnapshot,
+  costs?: PlanCostItem[],
 ): PlanValidationResults {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -350,21 +345,7 @@ export function validatePlan(
     errors.push("基础计划必须列出至少一个待确认事项。");
   }
 
-  if (snapshot.budgetAmountCents !== null) {
-    const budgetTotalCents =
-      snapshot.budgetScope === "per_person" && snapshot.travelerCount
-        ? snapshot.budgetAmountCents * snapshot.travelerCount
-        : snapshot.budgetAmountCents;
-    const estimatedTotal = estimatedCostTotal(plan.events);
-    if (estimatedTotal > budgetTotalCents) {
-      warnings.push(
-        `当前费用草稿合计 ${Math.round(estimatedTotal / 100)} 元，超过确认预算 ${Math.round(budgetTotalCents / 100)} 元；请调整安排或预算。`,
-      );
-    }
-  }
-  if (snapshot.budgetAmountCents !== null && snapshot.budgetAmountCents <= 1000) {
-    warnings.push("确认预算非常低，请优先选择免费或低成本安排，并逐项确认费用。");
-  }
+  warnings.push(...budgetWarnings(costs ?? derivePlanCosts(plan.events), snapshot));
 
   return {
     status: errors.length > 0 ? "invalid" : warnings.length > 0 ? "needs_review" : "valid",

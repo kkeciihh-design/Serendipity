@@ -241,11 +241,20 @@ export function TripRequestWorkspace({
     }
   };
 
+  const captureEdits = () => ({ originalRequest, snapshot, interestsText, constraintsText, budgetText });
+  const editedSince = (sent: ReturnType<typeof captureEdits>) =>
+    originalRequestRef.current !== sent.originalRequest ||
+    !sameJson(snapshotRef.current, sent.snapshot) ||
+    interestsTextRef.current !== sent.interestsText ||
+    constraintsTextRef.current !== sent.constraintsText ||
+    budgetTextRef.current !== sent.budgetText;
+
   const saveRequest = async () => {
     if (!canSave) {
       return;
     }
 
+    const sent = captureEdits();
     setIsSaving(true);
     setFeedback({ tone: "info", message: "正在保存需求修订..." });
     try {
@@ -263,11 +272,14 @@ export function TripRequestWorkspace({
       }
 
       const payload = (await response.json()) as { request: TripRequestClient };
-      applyRecord(payload.request, false);
+      const keepLocalEdits = editedSince(sent);
+      applyRecord(payload.request, keepLocalEdits);
       router.refresh();
       setFeedback({
         tone: "success",
-        message: `需求修订 ${payload.request.requestRevision} 已保存，需要重新确认后才能用于后续规划。`,
+        message: keepLocalEdits
+          ? `需求修订 ${payload.request.requestRevision} 已保存；等待时输入的新内容已保留，请继续保存后再确认。`
+          : `需求修订 ${payload.request.requestRevision} 已保存，需要重新确认后才能用于后续规划。`,
       });
     } catch (error) {
       setFeedback({
@@ -356,6 +368,7 @@ export function TripRequestWorkspace({
       return;
     }
 
+    const sent = captureEdits();
     setIsConfirming(true);
     setFeedback({ tone: "info", message: "正在确认当前需求修订..." });
     try {
@@ -374,10 +387,13 @@ export function TripRequestWorkspace({
       }
 
       const payload = (await response.json()) as { request: TripRequestClient };
-      applyRecord(payload.request, false);
+      const keepLocalEdits = editedSince(sent);
+      applyRecord(payload.request, keepLocalEdits);
       setFeedback({
         tone: "success",
-        message: `修订 ${payload.request.requestRevision} 已确认，可作为阶段 06 生成计划的唯一需求依据。`,
+        message: keepLocalEdits
+          ? `修订 ${payload.request.requestRevision} 已确认；等待时输入的新内容已保留，保存后需要重新确认。`
+          : `修订 ${payload.request.requestRevision} 已确认，可作为阶段 06 生成计划的唯一需求依据。`,
       });
     } catch (error) {
       setFeedback({

@@ -8,7 +8,9 @@ export type EvidenceTarget = {
 };
 
 export function evidenceTarget(event: PlanEvent, costs: PlanCostItem[]): EvidenceTarget {
-  const matches = costs.filter((cost) => cost.linkedEventId === event.id && !cost.eventRemoved);
+  // Price evidence currently supports admission tickets. A separate journey to
+  // the event is not another candidate ticket and must not change its signature.
+  const matches = costs.filter((cost) => cost.linkedEventId === event.id && !cost.eventRemoved && cost.category === "ticket");
   const cost = matches.length === 1 ? matches[0] : null;
   return {
     event: { id: event.id, title: event.title, locationName: event.locationName, date: event.date,
@@ -101,6 +103,13 @@ export function evaluateEvidenceField(input: {
     if (closure.test(text) || /temporarily closed|closed until further notice|临时闭馆|暂停开放/i.test(text)) {
       return conflict("官方开放规则表明本次到访日闭馆或暂停开放，与安排冲突。");
     }
+    const closureClauses = text.split(/[\n.;。；，]/).map((clause) => clause.trim())
+      .filter((clause) => /\b(?:closed|closures?)\b|\bnot open\b|\bwill\s+(?:temporarily\s+)?close\b|闭馆|闭园|不开放|暂停开放|停止开放/i.test(clause));
+    const weekdays = "(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)s?";
+    const understoodClosure = new RegExp(`^(?:(?:closed|not open)\\s+(?:on\\s+)?(?:every\\s+)?${weekdays}|${weekdays}\\s*(?:are\\s*)?[:：-]?\\s*(?:closed|not open)|(?:每)?(?:周|星期)[一二三四五六日天]\\s*(?:闭馆|闭园|不开放))$`, "i");
+    if (closureClauses.some((clause) => !understoodClosure.test(clause))) {
+      return pending("来源包含尚未可靠解释的闭馆条件，需要人工复核，不能仅凭通常开放时段确认。");
+    }
     if (/\bnot\b|\bnever\b|\bno entry\b|n't|不|尚未|并非/i.test(extracted.quote)) {
       return pending("开放规则含未能可靠解释的否定说明，需要人工复核。");
     }
@@ -121,8 +130,16 @@ export function evaluateEvidenceField(input: {
     const end = minutes(target.event.endTime) + ((target.event.endDate ?? target.event.date) !== target.event.date ? 1440 : 0);
     const open = extracted.hours.start;
     const close = extracted.hours.end + (extracted.hours.end < open ? 1440 : 0);
-    const lastEntry = text.match(/(?:last entry|停止入馆|停止入场)[^\d]{0,12}((?:[01]?\d|2[0-3]):[0-5]\d)/i);
-    if (start < open || end > close || (lastEntry && start >= minutes(lastEntry[1]))) {
+    const entryLabel = "(?:last entry|last admission|停止入馆|停止入场|最后入场|最晚入场)";
+    const entryMentions = [...text.matchAll(new RegExp(entryLabel, "gi"))];
+    const entryTimes = [...text.matchAll(new RegExp(`${entryLabel}\\s*(?:[:：]|at)?\\s*((?:[01]?\\d|2[0-3]):[0-5]\\d)`, "gi"))];
+    const distinctEntryTimes = [...new Set(entryTimes.map((match) => minutes(match[1])))];
+    if (entryMentions.length && (entryMentions.length !== entryTimes.length || distinctEntryTimes.length !== 1)) {
+      return pending("来源的停止入场限制没有唯一、明确的时刻，需要人工复核。");
+    }
+    const lastEntry = distinctEntryTimes[0];
+    const entryLimit = lastEntry === undefined ? null : lastEntry + (close > 1440 && lastEntry < open ? 1440 : 0);
+    if (start < open || end > close || (entryLimit !== null && start >= entryLimit)) {
       return conflict("当前安排的起止时刻不符合来源的开放或停止入场时间。");
     }
   } else {

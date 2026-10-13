@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { collectEvidence } from "../lib/evidence-source";
 import { effectiveEvidenceStatus, extractEvidence, reservationRequirement, summarizeEventEvidence, type EvidenceFactClient, type EvidenceField } from "../lib/evidence";
-import { evidenceTarget, type EvidenceTarget } from "../lib/evidence-evaluation";
+import { evidenceTarget, evidenceTargetSignature, type EvidenceTarget } from "../lib/evidence-evaluation";
 import { derivePlanCosts } from "../lib/budget";
 import { planFixture, requestFixture } from "./helpers/plan-fixtures";
 
@@ -152,6 +152,52 @@ describe("SD-05 field value, object and date semantics", () => {
     const result = await read("opening_hours", "<p>Welcome to the museum.</p>");
     expect(result).toMatchObject({ status: "unverified", readStatus: "read", extractedValue: "" });
     expect(result.contentQuote).toContain("Welcome");
+  });
+
+  it("honors last admission and keeps unparsed or conflicting limits pending", async () => {
+    const late = targetFixture({ startTime: "16:00", endTime: "17:00" });
+    const body = "<p>Opening hours daily 09:00–17:00; last admission 15:00.</p>";
+    expect((await read("opening_hours", body, { target: late })).status).toBe("conflict");
+    expect((await read("opening_hours", body)).status).toBe("verified");
+    for (const limit of ["last admission varies", "last admission 15:00; last entry 16:00"]) {
+      expect((await read("opening_hours", `<p>Opening hours daily 09:00–17:00; ${limit}.</p>`)).status).toBe("unverified");
+    }
+  });
+
+  it.each([
+    "Closed on Tuesdays and Wednesdays.", "Closed for maintenance.",
+    "Temporary closure for maintenance.", "Seasonal closures apply.",
+    "Closure on Tuesdays and Wednesdays.",
+    "The museum will close for maintenance.", "The museum will temporarily close for maintenance.",
+  ])("does not promote unparsed closure conditions: %s", async (closure) => {
+    const target = targetFixture({ date: "2026-11-04", endDate: "2026-11-04" });
+    const result = await read("opening_hours", `<p>Opening hours daily 09:00–17:00.</p><p>${closure}</p>`, { target });
+    expect(result.status).toBe("unverified");
+    expect(result.conflictReason).toContain("闭馆条件");
+  });
+
+  it("still supports an understood closure on a different weekday", async () => {
+    expect((await read("opening_hours", "<p>Opening hours Tuesday to Sunday 09:00–17:00.</p><p>Closed on Mondays.</p>")).status).toBe("verified");
+  });
+
+  it("does not confuse an ordinary closing time with a closure condition", async () => {
+    expect((await read("opening_hours", "<p>Opening hours daily 09:00–17:00.</p><p>Closing time 17:00.</p>")).status).toBe("verified");
+  });
+
+  it("keeps ticket evidence and its signature independent of the journey fare", async () => {
+    const event = planFixture(requestFixture(2)).events.find((item) => item.id === "d1-activity")!;
+    Object.assign(event, { date: "2026-11-01", endDate: "2026-11-01" });
+    const ticket = { ...derivePlanCosts([event])[0], unit: "per_person" as const, unitAmountCents: 1800 };
+    const fare = { ...ticket, id: "route-to-museum", category: "local_transport" as const, unitAmountCents: 600 };
+    const before = evidenceTarget(event, [ticket]);
+    const after = evidenceTarget(event, [ticket, fare]);
+    expect(after.price).toEqual(before.price);
+    expect(evidenceTargetSignature(after, "price")).toBe(evidenceTargetSignature(before, "price"));
+    expect((await read("price", "<p>Ticket price CNY 18 per person.</p>", { target: after })).status).toBe("verified");
+    const changed = evidenceTarget(event, [{ ...ticket, unitAmountCents: 1900 }, fare]);
+    expect(evidenceTargetSignature(changed, "price")).not.toBe(evidenceTargetSignature(before, "price"));
+    expect(evidenceTarget(event, [ticket, { ...ticket, id: "second-ticket" }, fare]).price).toBeNull();
+    expect(evidenceTarget(event, [fare]).price).toBeNull();
   });
 });
 

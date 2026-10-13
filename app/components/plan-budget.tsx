@@ -9,7 +9,7 @@ import {
   Save,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   calculateBudgetSummary,
   costCategoryLabels,
@@ -27,12 +27,14 @@ import {
   type PlanCostItem,
 } from "@/lib/budget";
 import type { PlanVersionClient } from "./plan-overview";
+import { useVersionedDraft } from "./use-versioned-draft";
 
 type CostDraft = {
   amountYuan: string;
   maxAmountYuan: string;
   unit: CostPricingUnit;
   quantity: string;
+  nightCount: string;
   paymentStatus: CostPaymentStatus;
 };
 
@@ -59,12 +61,17 @@ function centsToYuanInput(cents: number | null) {
   return cents === null ? "" : `${formatMoneyValue(cents)}`;
 }
 
-function createDraft(cost: PlanCostItem): CostDraft {
+function createDraft(cost: PlanCostItem, tripNightCount: number): CostDraft {
   return {
     amountYuan: centsToYuanInput(cost.unitAmountCents),
     maxAmountYuan: centsToYuanInput(cost.unitAmountMaxCents),
     unit: cost.unit,
     quantity: cost.quantity === null ? "1" : `${cost.quantity}`,
+    nightCount: String(cost.nightCount ?? (
+      cost.unit === "per_room_per_night" || cost.unit === "per_night"
+        ? Math.max(1, tripNightCount)
+        : 1
+    )),
     paymentStatus: cost.paymentStatus,
   };
 }
@@ -79,6 +86,23 @@ function parseYuanToCents(value: string) {
   }
   return Math.round(yuan * 100);
 }
+
+const draftFieldLabels: Record<keyof CostDraft, string> = {
+  amountYuan: "单价", maxAmountYuan: "区间上限", unit: "计价单位", quantity: "票数", nightCount: "计费晚数", paymentStatus: "支付状态",
+};
+const equalDraftField = (field: keyof CostDraft, left: string, right: string) => {
+  if (field === "amountYuan" || field === "maxAmountYuan") {
+    const a = parseYuanToCents(left); const b = parseYuanToCents(right);
+    return Number.isNaN(a) || Number.isNaN(b) ? left === right : a === b;
+  }
+  if (field === "quantity" || field === "nightCount") return left.trim() && right.trim() ? Number(left) === Number(right) : left === right;
+  return left === right;
+};
+const incomingDraftValue = (field: keyof CostDraft, value: string) => {
+  if (field === "unit") return costUnitLabels[value as CostPricingUnit];
+  if (field === "paymentStatus") return costPaymentLabels[value as CostPaymentStatus];
+  return value || "（未知）";
+};
 
 async function readApiError(response: Response) {
   const payload = (await response.json().catch(() => null)) as {
@@ -100,7 +124,6 @@ export function PlanBudget({
   onSaved: (plan: PlanVersionClient) => void;
 }) {
   const [selectedCostId, setSelectedCostId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<CostDraft | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
@@ -113,17 +136,11 @@ export function PlanBudget({
     [plan.events],
   );
 
-  useEffect(() => {
-    const cost = plan.costs.find((item) => item.id === selectedCostId);
-    if (!cost) {
-      setSelectedCostId(null);
-      setDraft(null);
-      return;
-    }
-    setDraft(createDraft(cost));
-  }, [plan, selectedCostId]);
-
   const selectedCost = plan.costs.find((cost) => cost.id === selectedCostId);
+  const sourceDraft = useMemo(() => selectedCost ? createDraft(selectedCost, summary.factors.nightCount) : null, [selectedCost, summary.factors.nightCount]);
+  const { draft, setDraft, resetDraft, acknowledgeSaved, conflicts } = useVersionedDraft({
+    scope: tripId, version: plan.id, itemId: selectedCostId, source: sourceDraft, equal: equalDraftField,
+  });
   const canEdit = plan.isCurrent;
   const fieldsDisabled = !canEdit || isSaving;
 
@@ -136,15 +153,19 @@ export function PlanBudget({
     const unitAmountCents = parseYuanToCents(draft.amountYuan);
     const unitAmountMaxCents = parseYuanToCents(draft.maxAmountYuan);
     const quantity =
-      draft.unit === "per_ticket" ? Number.parseInt(draft.quantity, 10) : null;
+      draft.unit === "per_ticket" ? Number(draft.quantity) : null;
+    const nightCount = draft.unit === "per_room_per_night" || draft.unit === "per_night"
+      ? Number(draft.nightCount)
+      : undefined;
     if (
       Number.isNaN(unitAmountCents) ||
       Number.isNaN(unitAmountMaxCents) ||
-      (quantity !== null && (!Number.isInteger(quantity) || quantity < 1))
+      (quantity !== null && (!Number.isInteger(quantity) || quantity < 1)) ||
+      (nightCount !== undefined && (!Number.isInteger(nightCount) || nightCount < 1 || nightCount > 4))
     ) {
       setFeedback({
         tone: "error",
-        message: "金额需为不小于 0 的数字；按票计价时票数至少为 1。",
+        message: "金额需为不小于 0 的数字；票数需为正整数，计费晚数需为 1 至 4 的整数。",
       });
       return;
     }
@@ -165,6 +186,7 @@ export function PlanBudget({
               unitAmountCents,
               unitAmountMaxCents,
               quantity,
+              nightCount,
               paymentStatus: draft.paymentStatus,
             },
           }),
@@ -175,6 +197,8 @@ export function PlanBudget({
       }
 
       const payload = (await response.json()) as { plan: PlanVersionClient };
+      const savedCost = payload.plan.costs.find((item) => item.id === selectedCost.id);
+      if (savedCost) acknowledgeSaved(savedCost.id, createDraft(savedCost, summary.factors.nightCount), payload.plan.id);
       onSaved(payload.plan);
       setFeedback({
         tone: "success",
@@ -365,6 +389,7 @@ export function PlanBudget({
                                 {formatMoneyRange(line.minCents, line.maxCents)}
                               </span>
                             </span>
+                            {cost.note ? <span className="mt-2 block whitespace-pre-wrap text-sm leading-6 text-clay">{cost.note}</span> : null}
                           </span>
                           <span className="inline-flex min-h-9 items-center gap-2 rounded-md bg-cream px-3 text-sm text-graphite sm:justify-self-end">
                             {costCertaintyLabels[cost.certainty]}｜
@@ -395,6 +420,10 @@ export function PlanBudget({
             </h3>
           </div>
 
+          {conflicts.length > 0 ? <div role="alert" className="mt-4 rounded-md bg-clay-soft px-4 py-3 text-sm leading-6 text-clay">
+            <p>新版本也修改了{conflicts.map((field) => draftFieldLabels[field]).join("、")}。你的未保存输入已保留，请核对后保存；选择“恢复原值”可采用新版本的值。</p>
+            <ul className="mt-2">{conflicts.map((field) => <li key={field}>新版{draftFieldLabels[field]}：{sourceDraft ? incomingDraftValue(field, sourceDraft[field]) : "（未知）"}</li>)}</ul>
+          </div> : null}
           <form onSubmit={saveCost} className="mt-4 grid gap-4 sm:grid-cols-2">
             <label className="block text-sm font-medium text-charcoal">
               单价（元，留空表示未知）
@@ -461,6 +490,30 @@ export function PlanBudget({
               />
             </label>
 
+            {draft.unit === "per_room_per_night" || draft.unit === "per_night" ? (
+              <label className="block text-sm font-medium text-charcoal">
+                这笔住宿的计费晚数
+                <input
+                  type="number"
+                  min={1}
+                  max={4}
+                  step={1}
+                  value={draft.nightCount}
+                  disabled={fieldsDisabled}
+                  onChange={(event) => setDraft({ ...draft, nightCount: event.target.value })}
+                  className="mt-2 min-h-12 w-full rounded-md border border-sand bg-white px-4 py-3 text-base text-charcoal focus:border-sage focus:outline-none disabled:bg-graphite/10"
+                />
+                <span className="mt-1 block text-sm font-normal text-graphite">
+                  每天单独记录的住宿填 1；同一笔覆盖多晚时填写实际晚数，其他住宿不要重复记录这些晚数。
+                </span>
+                {selectedCost.nightCount === undefined && (selectedCost.unit === "per_room_per_night" || selectedCost.unit === "per_night") ? (
+                  <span className="mt-1 block text-sm font-normal text-clay">
+                    这笔旧费用原按全程 {summary.factors.nightCount} 晚计算，请核对实际覆盖晚数后确认。历史版本的金额会保留。
+                  </span>
+                ) : null}
+              </label>
+            ) : null}
+
             <fieldset
               disabled={fieldsDisabled}
               className="rounded-md border border-sand bg-white p-3"
@@ -506,7 +559,7 @@ export function PlanBudget({
               <button
                 type="button"
                 onClick={() => {
-                  setDraft(createDraft(selectedCost));
+                  resetDraft();
                   setFeedback(null);
                 }}
                 disabled={isSaving}

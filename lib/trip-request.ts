@@ -50,6 +50,14 @@ const dateString = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, "日期必须使用 YYYY-MM-DD。")
   .nullable();
 
+export function isValidRequestDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+const newDateString = dateString.refine((value) => value === null || isValidRequestDate(value), "日期不是有效的日历日期。");
+
 const boundedStringList = (maxLength: number, itemMaxLength: number) =>
   z
     .array(z.string().trim().min(1).max(itemMaxLength))
@@ -99,7 +107,9 @@ export const defaultAssumptionSchema = z.object({
 export type DefaultAssumption = z.infer<typeof defaultAssumptionSchema>;
 
 export const aiRequirementOutputSchema = z.object({
-  request: requestSnapshotSchema,
+  // Keep the persisted snapshot reader compatible with older records; new AI
+  // output and all writes have the stronger calendar validation.
+  request: requestSnapshotSchema.extend({ startDate: newDateString, endDate: newDateString }),
   openQuestions: z.array(requestQuestionSchema).max(3).default([]),
   defaultAssumptions: z.array(defaultAssumptionSchema).max(8).default([]),
 });
@@ -189,57 +199,52 @@ export function normalizeRequestSnapshot(
   return snapshot;
 }
 
-function parseLocalDate(value: string) {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day);
+export function requestToday(now: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+  return ["year", "month", "day"].map((type) => parts.find((part) => part.type === type)!.value).join("-");
 }
 
-function formatDate(date: Date) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function addDateDays(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
-function nextWeekend(now: Date) {
-  const date = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-  );
-  const daysUntilSaturday = (6 - date.getDay() + 7) % 7;
-  date.setDate(date.getDate() + daysUntilSaturday);
-  return date;
+function nextWeekend(today: string) {
+  const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
+  return addDateDays(today, (6 - weekday + 7) % 7);
 }
 
 function explicitDates(text: string, now: Date) {
-  const fullDates = [
-    ...text.matchAll(
-      /(?<year>\d{4})年(?<month>\d{1,2})月(?<day>\d{1,2})日/g,
-    ),
-  ].map((match) => {
-    const groups = match.groups as Record<string, string>;
-    return new Date(
-      Number(groups.year),
-      Number(groups.month) - 1,
-      Number(groups.day),
-    );
-  });
-
-  const monthDayDates = [
-    ...text.matchAll(/(?<!\d)(?<month>\d{1,2})月(?<day>\d{1,2})日/g),
-  ].map((match) => {
-    const groups = match.groups as Record<string, string>;
-    const month = Number(groups.month);
-    const day = Number(groups.day);
-    let candidate = new Date(now.getFullYear(), month - 1, day);
-    if (candidate < new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
-      candidate = new Date(now.getFullYear() + 1, month - 1, day);
+  const today = requestToday(now);
+  const dates: string[] = [];
+  // A single pass prevents a full Chinese date being counted again as month/day.
+  for (const match of text.matchAll(/(?<!\d)(?:(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日|(\d{4})-(\d{1,2})-(\d{1,2}))(?!\d)/g)) {
+    const explicitYear = match[1] ?? match[4];
+    const month = (match[2] ?? match[5]).padStart(2, "0");
+    const day = (match[3] ?? match[6]).padStart(2, "0");
+    const previous = dates.at(-1);
+    let year = explicitYear ?? (previous ?? today).slice(0, 4);
+    let value = `${year}-${month}-${day}`;
+    if (!isValidRequestDate(value)) throw new Error(`原话中的日期“${match[0]}”不是有效的日历日期，请核对。`);
+    if (!explicitYear && (previous ? month < previous.slice(5, 7) : value < today)) {
+      year = String(Number(year) + 1).padStart(4, "0");
+      value = `${year}-${month}-${day}`;
+      if (!isValidRequestDate(value)) throw new Error(`原话中的日期“${match[0]}”不是有效的日历日期，请核对。`);
     }
-    return candidate;
-  });
+    dates.push(value);
+  }
+  return dates;
+}
 
-  return [...fullDates, ...monthDayDates];
+function explicitTripDays(text: string) {
+  const chinese: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+  if (/[\d一二两三四五六七八九十]\s*(?:到|至|[-–—~～])\s*[\d一二两三四五六七八九十]\s*(?:天|日游)/.test(text)) return null;
+  const counts = [...text.matchAll(/(?<![\d一二两三四五六七八九十])(\d{1,3}|[一二两三四五六七八九十])\s*(?:天|日游)/g)]
+    .filter((match) => !/第\s*$/.test(text.slice(0, match.index)))
+    .map((match) => chinese[match[1]] ?? Number(match[1]));
+  const distinct = [...new Set(counts)];
+  return distinct.length === 1 && distinct[0] >= 1 ? distinct[0] : null;
 }
 
 export function resolveRelativeDates(
@@ -247,83 +252,36 @@ export function resolveRelativeDates(
   snapshot: RequestSnapshot,
   now: Date,
 ): RequestSnapshot {
-  if (snapshot.startDate || snapshot.endDate) {
-    return snapshot;
-  }
-
   const text = originalRequest;
   const dates = explicitDates(text, now);
+  const withDates = (startDate: string, endDate: string | null): RequestSnapshot => ({
+    ...snapshot, startDate, endDate,
+    fieldSources: { ...snapshot.fieldSources, startDate: "program_derived", endDate: endDate ? "program_derived" : "unspecified" },
+  });
   if (dates.length >= 2) {
-    const sorted = [...dates].sort((left, right) => left.getTime() - right.getTime());
-    return {
-      ...snapshot,
-      startDate: formatDate(sorted[0]),
-      endDate: formatDate(sorted[1]),
-      fieldSources: {
-        ...snapshot.fieldSources,
-        startDate: "program_derived",
-        endDate: "program_derived",
-      },
-    };
+    return withDates(dates[0], dates[1]);
   }
-
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = explicitTripDays(text);
+  const fromStart = (start: string) => withDates(start, days === null ? null : addDateDays(start, days - 1));
+  if (dates.length === 1) return fromStart(dates[0]);
+  const today = requestToday(now);
   if (/明天|明日/.test(text)) {
-    const start = new Date(today);
-    start.setDate(start.getDate() + 1);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
-    return {
-      ...snapshot,
-      startDate: formatDate(start),
-      endDate: formatDate(end),
-      fieldSources: {
-        ...snapshot.fieldSources,
-        startDate: "program_derived",
-        endDate: "program_derived",
-      },
-    };
+    return fromStart(addDateDays(today, 1));
   }
-
   if (/后天/.test(text)) {
-    const start = new Date(today);
-    start.setDate(start.getDate() + 2);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
-    return {
-      ...snapshot,
-      startDate: formatDate(start),
-      endDate: formatDate(end),
-      fieldSources: {
-        ...snapshot.fieldSources,
-        startDate: "program_derived",
-        endDate: "program_derived",
-      },
-    };
+    return fromStart(addDateDays(today, 2));
   }
-
   if (/周末/.test(text)) {
     const start = nextWeekend(today);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
-    return {
-      ...snapshot,
-      startDate: formatDate(start),
-      endDate: formatDate(end),
-      fieldSources: {
-        ...snapshot.fieldSources,
-        startDate: "program_derived",
-        endDate: "program_derived",
-      },
-    };
+    return withDates(start, addDateDays(start, (days ?? 2) - 1));
   }
 
   return snapshot;
 }
 
 function inclusiveDays(start: string, end: string) {
-  const startTime = parseLocalDate(start).getTime();
-  const endTime = parseLocalDate(end).getTime();
+  const startTime = Date.parse(`${start}T00:00:00Z`);
+  const endTime = Date.parse(`${end}T00:00:00Z`);
   return Math.round((endTime - startTime) / 86_400_000) + 1;
 }
 
@@ -333,9 +291,11 @@ export function validateRequestSnapshot(
   mode: "draft" | "confirmation",
 ): string[] {
   const errors: string[] = [];
-  const today = formatDate(
-    new Date(now.getFullYear(), now.getMonth(), now.getDate()),
-  );
+  const today = requestToday(now);
+  const startValid = snapshot.startDate !== null && isValidRequestDate(snapshot.startDate);
+  const endValid = snapshot.endDate !== null && isValidRequestDate(snapshot.endDate);
+  if (snapshot.startDate !== null && !startValid) errors.push("出发日期不是有效的日历日期。");
+  if (snapshot.endDate !== null && !endValid) errors.push("返回日期不是有效的日历日期。");
 
   if (mode === "confirmation" && !snapshot.destination) {
     errors.push("请先确认目的地。");
@@ -343,10 +303,8 @@ export function validateRequestSnapshot(
   if (mode === "confirmation" && (!snapshot.startDate || !snapshot.endDate)) {
     errors.push("请先确认具体出发和返回日期。");
   }
-  if (snapshot.startDate && snapshot.endDate) {
-    if (snapshot.startDate < today) {
-      errors.push("出发日期已经过去，请修改为未来日期。");
-    }
+  if (startValid && snapshot.startDate! < today) errors.push("出发日期已经过去，请修改为未来日期。");
+  if (startValid && endValid && snapshot.startDate && snapshot.endDate) {
     if (snapshot.startDate >= snapshot.endDate) {
       errors.push("返回日期必须晚于出发日期。");
     } else {
@@ -358,8 +316,6 @@ export function validateRequestSnapshot(
         errors.push(`当前行程为 ${days} 天；本阶段仅支持 2 到 4 天，请缩短或修改日期。`);
       }
     }
-  } else if (snapshot.startDate || snapshot.endDate) {
-    errors.push("请同时填写出发和返回日期。");
   }
 
   if (snapshot.budgetAmountCents !== null && !snapshot.budgetScope) {
@@ -370,6 +326,15 @@ export function validateRequestSnapshot(
   }
 
   return errors;
+}
+
+export function requestDateQuestions(snapshot: RequestSnapshot): RequestQuestion[] {
+  const questions: RequestQuestion[] = [];
+  if (!snapshot.startDate) questions.push({ id: "confirm-start-date", field: "startDate", question: "计划哪天出发？",
+    reason: "原话没有可确定的具体出发日期。", suggestedAnswer: null });
+  if (!snapshot.endDate) questions.push({ id: "confirm-end-date", field: "endDate", question: "计划旅行几天，或哪天返回？",
+    reason: "未明确旅行天数或返回日期，不能自行按两天安排。", suggestedAnswer: null });
+  return questions;
 }
 
 export function requestSnapshotChanged(

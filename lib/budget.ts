@@ -96,6 +96,9 @@ export const planCostItemSchema = z.object({
     .max(2_000_000_000)
     .nullable(),
   quantity: z.number().int().min(1).max(100).nullable(),
+  // Absent on legacy snapshots: retain their original whole-trip night basis.
+  // New daily accommodation rows explicitly cover one night.
+  nightCount: z.number().int().min(1).max(4).optional(),
   certainty: costCertaintySchema,
   paymentStatus: costPaymentStatusSchema,
   source: z.enum(["ai_draft", "user_confirmed"]),
@@ -111,6 +114,7 @@ export type PlanCostEditInput = {
   unitAmountCents: number | null;
   unitAmountMaxCents: number | null;
   quantity: number | null;
+  nightCount?: number;
   paymentStatus: CostPaymentStatus;
 };
 
@@ -198,6 +202,7 @@ export function derivePlanCosts(events: PlanEvent[]): PlanCostItem[] {
     unitAmountCents: event.costDraftCents,
     unitAmountMaxCents: null,
     quantity: null,
+    ...(event.type === "accommodation" ? { nightCount: 1 } : {}),
     certainty:
       event.costStatus === "user_confirmed"
         ? "pending_confirmation"
@@ -236,7 +241,7 @@ export function budgetTargetCentsFromSnapshot(snapshot: RequestSnapshot) {
 }
 
 export function costItemQuantity(
-  item: Pick<PlanCostItem, "unit" | "quantity">,
+  item: Pick<PlanCostItem, "unit" | "quantity" | "nightCount">,
   factors: BudgetFactors,
 ) {
   switch (item.unit) {
@@ -245,16 +250,16 @@ export function costItemQuantity(
     case "per_person":
       return factors.travelerCount;
     case "per_room_per_night":
-      return factors.roomCount * factors.nightCount;
+      return factors.roomCount * (item.nightCount ?? factors.nightCount);
     case "per_night":
-      return factors.nightCount;
+      return item.nightCount ?? factors.nightCount;
     case "per_ticket":
       return item.quantity ?? 1;
   }
 }
 
 export function costItemQuantityDescription(
-  item: Pick<PlanCostItem, "unit" | "quantity">,
+  item: Pick<PlanCostItem, "unit" | "quantity" | "nightCount">,
   factors: BudgetFactors,
 ) {
   const quantity = costItemQuantity(item, factors);
@@ -264,7 +269,7 @@ export function costItemQuantityDescription(
     case "per_person":
       return `${quantity} 人`;
     case "per_room_per_night":
-      return `${factors.roomCount} 房 × ${factors.nightCount} 晚`;
+      return `${factors.roomCount} 房 × ${item.nightCount ?? factors.nightCount} 晚`;
     case "per_night":
       return `${quantity} 晚`;
     case "per_ticket":
@@ -400,6 +405,40 @@ export function calculateBudgetSummary(
   };
 }
 
+/** One source for timeline amounts: route fares have their own route display. */
+export function eventCostSummary(
+  eventId: string,
+  costs: PlanCostItem[],
+  snapshot: RequestSnapshot,
+) {
+  const cost = costs.find((item) => item.linkedEventId === eventId && !item.id.startsWith("route-"));
+  return cost ? {
+    ...costItemLineTotals(cost, budgetFactorsFromSnapshot(snapshot)),
+    certainty: cost.certainty,
+    paymentStatus: cost.paymentStatus,
+  } : null;
+}
+
+export function budgetWarnings(costs: PlanCostItem[], snapshot: RequestSnapshot): string[] {
+  const summary = calculateBudgetSummary(costs, snapshot);
+  const warnings: string[] = [];
+  if (summary.budgetTargetCents !== null) {
+    if (summary.overspendStatus === "confirmed") {
+      warnings.push(`当前费用合计 ${formatMoneyRange(summary.totalMinCents, summary.totalMaxCents)}，超过确认预算 ${formatMoneyValue(summary.budgetTargetCents)} 元；请调整安排或预算。`);
+    } else if (summary.overspendStatus === "possible") {
+      warnings.push(`当前费用区间 ${formatMoneyRange(summary.totalMinCents, summary.totalMaxCents)}，可能超过确认预算 ${formatMoneyValue(summary.budgetTargetCents)} 元；请逐项确认费用。`);
+    }
+  }
+  if (snapshot.budgetAmountCents !== null && snapshot.budgetAmountCents <= 1000) {
+    warnings.push("确认预算非常低，请优先选择免费或低成本安排，并逐项确认费用。");
+  }
+  return warnings;
+}
+
+export function hasProtectedCostFact(cost: PlanCostItem) {
+  return cost.certainty === "user_confirmed" || cost.source === "user_confirmed" || cost.paymentStatus !== "not_paid";
+}
+
 export function validatePlanCosts(
   costs: PlanCostItem[],
   events: PlanEvent[],
@@ -408,26 +447,36 @@ export function validatePlanCosts(
   const eventIds = new Set(events.map((event) => event.id));
   const linkedEventIds = new Set<string>();
   const routeLinkedEventIds = new Set<string>();
+  const costIds = new Set<string>();
 
   for (const cost of costs) {
+    if (costIds.has(cost.id)) errors.push(`费用 ${cost.id} 重复。`);
+    costIds.add(cost.id);
     const routeCost = cost.id.startsWith("route-");
     if (routeCost) {
-      if (routeLinkedEventIds.has(cost.linkedEventId)) {
+      // A previous route's paid/confirmed amount survives route changes. Only
+      // competing draft fares for the current destination are duplicates.
+      if (cost.source !== "user_confirmed" && cost.paymentStatus === "not_paid") {
+        if (routeLinkedEventIds.has(cost.linkedEventId)) {
+          errors.push(`费用 ${cost.id} 与事件 ${cost.linkedEventId} 重复关联。`);
+        }
+        routeLinkedEventIds.add(cost.linkedEventId);
+      }
+    } else {
+      if (linkedEventIds.has(cost.linkedEventId)) {
         errors.push(`费用 ${cost.id} 与事件 ${cost.linkedEventId} 重复关联。`);
       }
-      routeLinkedEventIds.add(cost.linkedEventId);
-      continue;
+      linkedEventIds.add(cost.linkedEventId);
     }
-    if (linkedEventIds.has(cost.linkedEventId)) {
-      errors.push(`费用 ${cost.id} 与事件 ${cost.linkedEventId} 重复关联。`);
-    }
-    linkedEventIds.add(cost.linkedEventId);
 
     if (!cost.eventRemoved && !eventIds.has(cost.linkedEventId)) {
       errors.push(`费用 ${cost.id} 关联的事件不存在。`);
     }
     if (cost.unit === "per_ticket" && (cost.quantity ?? 0) < 1) {
       errors.push(`费用 ${cost.id} 的票数必须至少为 1。`);
+    }
+    if (cost.nightCount !== undefined && (!Number.isInteger(cost.nightCount) || cost.nightCount < 1 || cost.nightCount > 4)) {
+      errors.push(`费用 ${cost.id} 的计费晚数必须是 1 到 4 的整数。`);
     }
     if (
       cost.unitAmountCents === null &&
@@ -458,19 +507,30 @@ export function planCostEditHasChanges(
     cost.unitAmountCents !== input.unitAmountCents ||
     cost.unitAmountMaxCents !== (input.unitAmountMaxCents ?? null) ||
     cost.quantity !== normalizedQuantity ||
-    cost.paymentStatus !== input.paymentStatus
+    cost.paymentStatus !== input.paymentStatus ||
+    (input.nightCount !== undefined && cost.nightCount !== input.nightCount) ||
+    (input.unitAmountCents !== null && (cost.certainty !== "user_confirmed" || cost.source !== "user_confirmed"))
   );
 }
 
 export function applyPlanCostEdit(
   costs: PlanCostItem[],
   input: PlanCostEditInput,
+  events: PlanEvent[] = [],
 ): PlanCostItem[] {
   const target = costs.find((cost) => cost.id === input.costId);
   if (!target) {
     throw new CostEditValidationError("没有找到要确认的费用项目。");
   }
-  if (!planCostEditHasChanges(target, input)) {
+  if (input.nightCount !== undefined && (!Number.isInteger(input.nightCount) || input.nightCount < 1 || input.nightCount > 4)) {
+    throw new CostEditValidationError("计费晚数必须是 1 到 4 的整数。");
+  }
+  const nightly = (unit: CostPricingUnit) => unit === "per_room_per_night" || unit === "per_night";
+  const nightCount = input.nightCount ?? target.nightCount ?? (
+    nightly(input.unit) && !nightly(target.unit) && events.some((event) => event.id === target.linkedEventId && event.type === "accommodation")
+      ? 1 : undefined
+  );
+  if (!planCostEditHasChanges(target, { ...input, ...(nightCount !== undefined ? { nightCount } : {}) })) {
     throw new CostEditValidationError("本次没有需要保存的费用修改。");
   }
   if (
@@ -499,6 +559,7 @@ export function applyPlanCostEdit(
           unitAmountMaxCents: input.unitAmountMaxCents ?? null,
           quantity:
             input.unit === "per_ticket" ? (input.quantity ?? 1) : null,
+          ...(nightCount !== undefined ? { nightCount } : {}),
           certainty:
             input.unitAmountCents === null
               ? "pending_confirmation"

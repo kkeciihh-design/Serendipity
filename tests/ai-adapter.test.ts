@@ -21,7 +21,7 @@ beforeAll(async () => {
     request.on("end", () => {
       const challenge = extractChallenge(body);
       const authorization = request.headers.authorization ?? "";
-      if (authorization !== "Bearer valid-key") {
+      if (authorization !== "Bearer valid-key" && request.headers["x-api-key"] !== "valid-key") {
         response.writeHead(401, { "Content-Type": "application/json" });
         response.end(JSON.stringify({ error: { message: "Invalid key" } }));
         return;
@@ -50,11 +50,20 @@ beforeAll(async () => {
       }
 
       response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(
-        JSON.stringify({
-          choices: [{ message: { content: challenge } }],
-        }),
-      );
+      if (request.url?.includes("/invalid-json")) {
+        response.end("not JSON");
+        return;
+      }
+      const content = request.url?.includes("/fixed-text") ? "Your account has insufficient balance."
+        : request.url?.includes("/wrong-challenge") ? `${challenge.slice(0, -1)}${challenge.endsWith("0") ? "1" : "0"}`
+          : request.url?.includes("/extra-text") ? `Here is your result: ${challenge}`
+            : request.url?.includes("/empty-text") ? ""
+              : request.url?.includes("/padded") ? `\n ${challenge} \n` : challenge;
+      response.end(JSON.stringify(request.url?.endsWith("/messages")
+        ? { content: [{ type: "text", text: content }] }
+        : request.url?.endsWith("/responses")
+          ? { output: [{ content: [{ type: "output_text", text: content }] }] }
+          : { choices: [{ message: { content } }] }));
     });
   });
 
@@ -105,6 +114,19 @@ describe("AI adapter", () => {
       challenge: result.challenge,
     });
   });
+
+  it.each(["openai-chat-completions", "openai-responses", "anthropic-messages"] as const)(
+    "requires this request's challenge for %s, allowing surrounding whitespace only",
+    async (provider) => {
+      const valid = await testTextConnection({ ...input, provider, baseUrl: `${baseUrl}/padded` });
+      expect(valid.ok).toBe(true);
+      for (const scenario of ["fixed-text", "wrong-challenge", "extra-text", "empty-text", "invalid-json"]) {
+        const invalid = await testTextConnection({ ...input, provider, baseUrl: `${baseUrl}/${scenario}` });
+        expect(invalid, `${provider}: ${scenario}`).toMatchObject({ ok: false, category: "invalid_response" });
+        expect(invalid).not.toHaveProperty("challenge");
+      }
+    },
+  );
 
   it("classifies an invalid key", async () => {
     const result = await testTextConnection({

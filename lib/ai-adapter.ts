@@ -366,6 +366,14 @@ export async function testTextConnection(input: {
       };
     }
 
+    if (content.trim() !== challenge) {
+      return {
+        ok: false,
+        category: "invalid_response",
+        message: "服务没有返回本次测试要求的标识，连接测试未通过，请检查服务、模型或余额。",
+      };
+    }
+
     return {
       ok: true,
       responsePreview: limitText(content.trim(), 120),
