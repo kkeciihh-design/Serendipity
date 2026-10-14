@@ -15,7 +15,7 @@ import { RouteSummary, routeModeLabels } from "./route-summary";
 const inputStyle = "mt-1 min-h-12 min-w-0 w-full rounded-md border border-sand bg-cream px-3 py-2 text-base text-charcoal";
 const actionStyle = "min-h-12 rounded-md border border-sage px-4 py-2 text-sm font-semibold text-sage disabled:opacity-50";
 
-export type MapLinkTarget = "map" | "timeline";
+export type MapLinkTarget = "map" | "timeline" | "transport";
 
 export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange, selectedEventId, onEventSelect }: {
   tripId: string;
@@ -138,6 +138,11 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
     <MapCanvas markers={markers} routes={mapRoutes} focusEventId={selectedEventId} onEventSelect={selectEvent} />
     <p className="mt-2 text-sm leading-6 text-graphite">实心点：已确认地点；空心点：区域参考点。{dayPlaces.length === 0 ? "当天还没有已确认的地点，地图中不会放置推测标记。" : "可拖动地图，使用加减按钮或双指缩放。"}</p>
     <p className="mt-1 text-xs leading-6 text-graphite">免费地图 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline">OpenStreetMap contributors</a> · 搜索 Nominatim。公共服务需联网，可能限流；请用公共地标代替私人住址。</p>
+    {(plan.tickets ?? []).some((ticket) => ticket.status === "active" && ticket.confirmedAt) ? <section aria-label="跨城交通示意" className="mt-4 rounded-md border border-sand bg-cream p-4">
+      <h4 className="text-sm font-semibold">跨城交通 · 站点示意</h4>
+      <p className="mt-1 text-xs leading-5 text-graphite">以下来自已确认票面；没有实际轨迹时不绘制城际导航路线。接驳与返家环节见门到门交通。</p>
+      <ul className="mt-2 space-y-2">{(plan.tickets ?? []).filter((ticket) => ticket.status === "active" && ticket.confirmedAt).map((ticket) => <li key={ticket.id} className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-sm"><span className="min-w-0 break-words">{ticket.direction === "departure" ? "去程" : "返程"} · {ticket.serviceNumber || "班次待补"}：{ticket.fromName || "出发站待补"}{ticket.fromDetail ? ` ${ticket.fromDetail}` : ""} → {ticket.toName || "到达站待补"}{ticket.toDetail ? ` ${ticket.toDetail}` : ""}</span><button type="button" className={actionStyle} onClick={() => onEventSelect(ticket.eventId, "transport", plan.events.find((event) => event.id === ticket.eventId)?.dayNumber ?? day)}>查看交通票面</button></li>)}</ul>
+    </section> : null}
     <section className="mt-5" aria-label="城市路线">
       <h4 className="flex items-center gap-2 text-base font-semibold text-charcoal"><Route className="size-5 text-sage" />当天相邻地点路线</h4>
       <div className="mt-3 grid gap-3">
@@ -183,7 +188,7 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
       {events.map(({ event, visitLabel }) => {
         const place = plan.places?.find((item) => item.id === event.placeId);
         return <li key={event.id} className={`rounded-md border p-4 ${selectedEventId === event.id ? "border-sage bg-sage-soft" : "border-sand bg-white"}`}>
-          <p className="text-sm text-graphite"><span aria-hidden="true" className="mr-2 font-semibold text-sage">{visitLabel}</span>{event.startTime}–{event.endTime}</p>
+          <p className="text-sm text-graphite"><span aria-hidden="true" className="mr-2 font-semibold text-sage">{visitLabel}</span>{event.ticketTimingPending ? "票面时刻待补 / 冲突" : `${event.startTime}–${event.endTime}`}</p>
           <h4 className="mt-1 font-semibold text-charcoal">{event.title}</h4>
           <p className="mt-1 break-words text-sm leading-6 text-charcoal">{place?.name ?? event.locationName ?? "尚未指定地点"}</p>
           <p className={`mt-1 text-sm ${place ? "text-sage" : "text-clay"}`}>{place ? place.precision === "area_reference" ? "区域参考点 · 并非已订酒店" : "用户已确认地点" : "待确认位置"}</p>
@@ -192,7 +197,7 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
             <button type="button" className={`${actionStyle} inline-flex items-center gap-2`} aria-label={`查看日程：${visitLabel}${event.title}`} title={`查看日程：${visitLabel}${event.title}`} onClick={() => onEventSelect(event.id, "timeline", event.dayNumber)}><CalendarClock className="size-4" />查看日程</button>
             <button type="button" disabled={!plan.isCurrent || busy || event.locked || event.status === "confirmed"} className={`${actionStyle} inline-flex items-center gap-2`} aria-label={`定位：${event.title}`} onClick={() => { resetSearch(); setEditingId(event.id); setCity(place?.city ?? plan.requestSnapshot.destination ?? ""); setKeywords(place?.name ?? event.locationName ?? ""); setPrecision(place?.precision ?? (event.type === "accommodation" ? "area_reference" : "poi")); requestAnimationFrame(() => editor.current?.scrollIntoView({ behavior: "smooth", block: "center" })); }}><MapPin className="size-4" />{place ? "修改地点" : "搜索并定位"}</button>
           </div>
-          {event.locked || event.status === "confirmed" ? <p className="mt-1 text-xs text-graphite">先在时间轴解除锁定或确认，再修改地点。</p> : null}
+          {event.ticketManaged ? <p className="mt-1 text-xs text-graphite">地点由有效票面约束，变更请到门到门交通管理票据。</p> : event.locked || event.status === "confirmed" ? <p className="mt-1 text-xs text-graphite">先在时间轴解除锁定或确认，再修改地点。</p> : null}
         </li>;
       })}
     </ul>

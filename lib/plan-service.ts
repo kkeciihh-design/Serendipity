@@ -5,6 +5,8 @@ import {
   applyPlanCostEdit,
   CostEditValidationError,
   budgetWarnings,
+  budgetFactorsFromSnapshot,
+  costItemLineTotals,
   derivePlanCosts,
   formatMoneyRange,
   hasProtectedCostFact,
@@ -42,6 +44,22 @@ import {
 import { requestSnapshotSchema, type RequestSnapshot } from "./trip-request";
 import { placeSchema, placeIdentity, validatePlaceReferences, type Place, type PlaceCandidate } from "./places";
 import { invalidateRouteReference, routeConflict, routeCostPricingUnit, routeLegSchema, routeModeLabels, type RouteLeg } from "./routes";
+import {
+  activeTicketCoreSchema,
+  activateTicket,
+  applyTicketsToEvents,
+  cancelTicket,
+  createDraftTicket,
+  isActiveTicket,
+  replaceTicket,
+  ticketActionSchema,
+  ticketChangedEventIds,
+  ticketSchema,
+  updateTicketDetails,
+  validateTickets,
+  type Ticket,
+  type TicketAction,
+} from "./tickets";
 
 export class PlanValidationError extends Error {
   constructor(message: string) {
@@ -76,6 +94,7 @@ export type PlanVersionRecord = {
   costs: PlanCostItem[];
   places: Place[];
   routeLegs: RouteLeg[];
+  tickets: Ticket[];
   pendingItems: PlanPendingItem[];
   validationResults: PlanValidationResults;
   requirementUpToDate: boolean;
@@ -135,11 +154,42 @@ function parseStoredCosts(value: string, events: PlanEvent[]): PlanCostItem[] {
   return result.data;
 }
 
+function parseStoredTickets(value: string | null | undefined): Ticket[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value ?? "[]");
+  } catch {
+    throw new PlanValidationError("计划票据数据无法读取。");
+  }
+  const result = z.array(ticketSchema).safeParse(parsed);
+  if (!result.success) {
+    throw new PlanValidationError("计划票据数据无法读取。");
+  }
+  return result.data;
+}
+
+function validationWithTickets(
+  validation: PlanValidationResults,
+  tickets: Ticket[],
+  events: PlanEvent[],
+): PlanValidationResults {
+  const ticketValidation = validateTickets(tickets, events);
+  const errors = [...validation.errors, ...ticketValidation.errors];
+  const warnings = [...validation.warnings, ...ticketValidation.warnings];
+  return {
+    ...validation,
+    errors,
+    warnings,
+    status: errors.length > 0 ? "invalid" : warnings.length > 0 ? "needs_review" : "valid",
+  };
+}
+
 function serializePlan(record: PlanVersionRow): PlanVersionRecord {
   try {
     const events = z.array(planEventSchema).parse(JSON.parse(record.events));
     const places = z.array(placeSchema).parse(JSON.parse(record.places));
     const routeLegs = z.array(routeLegSchema).parse(JSON.parse(record.routeLegs ?? "[]"));
+    const tickets = parseStoredTickets(record.tickets);
     const isCurrent = record.trip.currentPlanVersionId === record.id;
     const costs = parseStoredCosts(record.costs, events).filter((cost) =>
       !isCurrent || !cost.eventRemoved || hasProtectedCostFact(cost),
@@ -167,6 +217,7 @@ function serializePlan(record: PlanVersionRow): PlanVersionRecord {
       events,
       places,
       routeLegs,
+      tickets,
       costs,
       pendingItems: z
         .array(planPendingItemSchema)
@@ -243,13 +294,13 @@ export async function getPlanGenerationContext(
   };
 }
 
-function assertRegenerationPreservesFacts(current: { events: string; costs: string } | null) {
+function assertRegenerationPreservesFacts(current: { events: string; costs: string; tickets?: string } | null) {
   if (!current) return;
   const events = z.array(planEventSchema).parse(JSON.parse(current.events));
   const costs = parseStoredCosts(current.costs, events);
   const protectedEvents = events.filter((event) => event.locked || event.status === "confirmed" || event.costStatus === "user_confirmed");
   const protectedCosts = costs.filter((cost) => cost.certainty === "user_confirmed" || cost.source === "user_confirmed" || cost.paymentStatus !== "not_paid");
-  if (protectedEvents.length || protectedCosts.length || events.some((event) => event.placeId)) {
+  if (protectedEvents.length || protectedCosts.length || events.some((event) => event.placeId) || parseStoredTickets(current.tickets).some((ticket) => ticket.confirmedAt)) {
     throw new PlanConflictError(
       `当前计划包含锁定、已确认安排／地点或金额及支付事实。重新生成可能覆盖这些事实，已保留当前计划。请在日程、地图或预算中逐项修改；误锁定的安排可先解锁。`,
     );
@@ -313,6 +364,8 @@ export async function savePlanVersion(input: {
       assertRegenerationPreservesFacts(trip.currentPlanVersion);
 
       const versionNumber = (capture.expectedPlanVersion ?? 0) + 1;
+      const inheritedTickets = parseStoredTickets(trip.currentPlanVersion?.tickets)
+        .filter((ticket) => plan.events.some((event) => event.id === ticket.eventId));
       const created = await transaction.planVersion.create({
         data: {
           tripId: trip.id,
@@ -322,8 +375,9 @@ export async function savePlanVersion(input: {
           events: JSON.stringify(plan.events),
           costs: JSON.stringify(costs),
           routeLegs: "[]",
+          tickets: JSON.stringify(inheritedTickets),
           pendingItems: JSON.stringify(plan.pendingItems),
-          validationResults: JSON.stringify(validation),
+          validationResults: JSON.stringify(validationWithTickets(validation, inheritedTickets, plan.events)),
           requirementUpToDate: true,
         },
       });
@@ -333,7 +387,7 @@ export async function savePlanVersion(input: {
         data: {
           currentPlanVersionId: created.id,
           status:
-            validation.warnings.length > 0
+            validationWithTickets(validation, inheritedTickets, plan.events).warnings.length > 0
               ? "plan_needs_review"
               : "planned",
         },
@@ -426,6 +480,9 @@ export async function savePlanEventEdit(input: {
       }
 
       const currentPlan = serializePlan(row);
+      if (currentPlan.tickets.some((ticket) => isActiveTicket(ticket) && ticket.eventId === input.edit.eventId)) {
+        throw new PlanConflictError("这项交通受当前有效票约束，请通过票面入口记录真实退票或替换；不能直接解锁或改动票面时刻。");
+      }
       const sourcePlan: PlanContent = {
         events: currentPlan.events,
         pendingItems: currentPlan.pendingItems,
@@ -452,15 +509,14 @@ export async function savePlanEventEdit(input: {
       if (costErrors.length > 0) {
         throw new PlanValidationError(costErrors[0]);
       }
-      const validationResults = validatePlan(
+      const validationResults = validationWithTickets(validatePlan(
         editedPlan,
         currentPlan.requestSnapshot,
         editedCosts,
-      );
+      ), currentPlan.tickets, editedPlan.events);
       if (validationResults.errors.length > 0) {
         throw new PlanValidationError(validationResults.errors[0]);
       }
-
       const created = await transaction.planVersion.create({
         data: {
           tripId: row.tripId,
@@ -471,6 +527,7 @@ export async function savePlanEventEdit(input: {
           costs: JSON.stringify(editedCosts),
           places: JSON.stringify(currentPlan.places.filter((place) => editedPlan.events.some((event) => event.placeId === place.id))),
           routeLegs: JSON.stringify(editedRoutes),
+          tickets: JSON.stringify(currentPlan.tickets),
           pendingItems: JSON.stringify(editedPlan.pendingItems),
           validationResults: JSON.stringify(validationResults),
           requirementUpToDate: row.requirementUpToDate,
@@ -571,14 +628,13 @@ export async function savePlanCostEdit(input: {
         events: currentPlan.events,
         pendingItems: currentPlan.pendingItems,
       });
-      const validationResults = validatePlan(
+      const validationResults = validationWithTickets(validatePlan(
         sourcePlan,
         currentPlan.requestSnapshot,
         editedCosts,
-      );
-      if (validationResults.errors.length > 0) {
-        throw new PlanValidationError(validationResults.errors[0]);
-      }
+      ), currentPlan.tickets, sourcePlan.events);
+      // A ticket can reveal an existing timing conflict. Money already paid
+      // or refunded remains recordable while that schedule is being repaired.
 
       const created = await transaction.planVersion.create({
         data: {
@@ -590,6 +646,7 @@ export async function savePlanCostEdit(input: {
           costs: JSON.stringify(editedCosts),
           places: JSON.stringify(currentPlan.places),
           routeLegs: JSON.stringify(currentPlan.routeLegs),
+          tickets: JSON.stringify(currentPlan.tickets),
           pendingItems: row.pendingItems,
           validationResults: JSON.stringify(validationResults),
           requirementUpToDate: row.requirementUpToDate,
@@ -610,7 +667,7 @@ export async function savePlanCostEdit(input: {
           currentPlanVersionId: created.id,
           status: !row.requirementUpToDate
             ? "plan_needs_update"
-            : validationResults.warnings.length > 0
+            : validationResults.errors.length > 0 || validationResults.warnings.length > 0
               ? "plan_needs_review"
               : "planned",
         },
@@ -673,13 +730,18 @@ export async function savePlanPlaceEdit(input: {
       const { routeLegs, costs } = updateRoutesAfterEventChange(current.routeLegs, events, current.costs, event.id, current.events);
       const costErrors = validatePlanCosts(costs, events);
       if (costErrors.length > 0) throw new PlanValidationError(costErrors[0]);
-      const validationResults = validatePlan({ events, pendingItems: current.pendingItems }, current.requestSnapshot, costs);
+      const validationResults = validationWithTickets(
+        validatePlan({ events, pendingItems: current.pendingItems }, current.requestSnapshot, costs),
+        current.tickets,
+        events,
+      );
       if (validationResults.errors.length > 0) throw new PlanValidationError(validationResults.errors[0]);
       const created = await transaction.planVersion.create({ data: {
         tripId: row.tripId, versionNumber: row.versionNumber + 1,
         requestRevision: row.requestRevision, requestSnapshot: row.requestSnapshot,
         events: JSON.stringify(events), places: JSON.stringify(places), costs: JSON.stringify(costs),
         routeLegs: JSON.stringify(routeLegs),
+        tickets: JSON.stringify(current.tickets),
         pendingItems: row.pendingItems, validationResults: JSON.stringify(validationResults),
         requirementUpToDate: row.requirementUpToDate,
       } });
@@ -734,7 +796,9 @@ export function applyRouteCost(route: RouteLeg, events: PlanEvent[], costs: Plan
   // Only current segment estimates can be replaced. A moved event's new
   // unknown expense must not be swallowed by its former route association.
   const transportCosts = costs.filter((cost) => !cost.id.startsWith("route-") &&
-    (hasProtectedCostFact(cost) ? transportEventIds.has(cost.linkedEventId) : currentTransportIds.has(cost.linkedEventId)));
+    ((cost.transferSide === "access" && cost.linkedEventId === route.toEventId) ||
+      (cost.transferSide === "egress" && cost.linkedEventId === route.fromEventId) ||
+      (hasProtectedCostFact(cost) ? transportEventIds.has(cost.linkedEventId) : currentTransportIds.has(cost.linkedEventId))));
   const protectedTransport = transportCosts.filter(hasProtectedCostFact);
   const draftIds = new Set(transportCosts.filter((cost) => !hasProtectedCostFact(cost)).map((cost) => cost.id));
   if (existing && hasProtectedCostFact(existing)) {
@@ -880,7 +944,11 @@ export async function savePlanRouteEdit(input: {
         applyRouteCost(routeLegSchema.parse(route), current.events, current.costs));
       const costErrors = validatePlanCosts(costs, current.events);
       if (costErrors.length > 0) throw new PlanValidationError(costErrors[0]);
-      const validationResults = validatePlan({ events: current.events, pendingItems: current.pendingItems }, current.requestSnapshot, costs);
+      const validationResults = validationWithTickets(
+        validatePlan({ events: current.events, pendingItems: current.pendingItems }, current.requestSnapshot, costs),
+        current.tickets,
+        current.events,
+      );
       if (validationResults.errors.length > 0) throw new PlanValidationError(validationResults.errors[0]);
 
       const created = await transaction.planVersion.create({ data: {
@@ -892,6 +960,7 @@ export async function savePlanRouteEdit(input: {
         costs: JSON.stringify(costs),
         places: row.places,
         routeLegs: JSON.stringify(routeLegs),
+        tickets: JSON.stringify(current.tickets),
         pendingItems: row.pendingItems,
         validationResults: JSON.stringify(validationResults),
         requirementUpToDate: row.requirementUpToDate,
@@ -908,6 +977,334 @@ export async function savePlanRouteEdit(input: {
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new PlanConflictError("计划已变化，请刷新后重试。");
+    throw error;
+  }
+}
+
+function updateRoutesAfterTicketChange(input: {
+  routeLegs: RouteLeg[];
+  previousEvents: PlanEvent[];
+  events: PlanEvent[];
+  costs: PlanCostItem[];
+  changedEventIds: string[];
+}) {
+  let routes: RouteLeg[] = [];
+  let costs = input.costs;
+  const changed = new Set(input.changedEventIds);
+
+  // A ticket fact can change the effective station or time even when the old
+  // event row happens to keep the same placeholder timing. Invalidate first,
+  // then let the normal event-change path handle adjacency and protected costs.
+  for (const leg of input.routeLegs) {
+    if (!changed.has(leg.fromEventId) && !changed.has(leg.toEventId)) {
+      routes.push(leg);
+      continue;
+    }
+    const from = input.events.find((event) => event.id === leg.fromEventId);
+    if (!from) {
+      routes.push(leg);
+      continue;
+    }
+    const invalidated = invalidateRouteReference(leg, from.date, from.endTime);
+    routes.push(invalidated);
+    costs = applyRouteCost(invalidated, input.events, costs);
+  }
+
+  for (const eventId of input.changedEventIds) {
+    const result = updateRoutesAfterEventChange(
+      routes,
+      input.events,
+      costs,
+      eventId,
+      input.previousEvents,
+    );
+    routes = result.routeLegs;
+    costs = result.costs;
+  }
+  return { routeLegs: routes, costs };
+}
+
+function ticketEventForAction(events: PlanEvent[], eventId: string, direction: "departure" | "return") {
+  const event = events.find((item) => item.id === eventId);
+  if (!event) throw new PlanValidationError("票据关联的去程或返程日程不存在。");
+  const expectedType = direction === "departure" ? "departure_transport" : "return_transport";
+  if (event.type !== expectedType) {
+    throw new PlanValidationError("票据方向必须关联到对应的去程或返程日程。");
+  }
+  return event;
+}
+
+function preserveTicketCostReference(cost: PlanCostItem, referenceTotalCents: number | null, referenceLabel: string, snapshot: RequestSnapshot) {
+  const totals = costItemLineTotals(cost, budgetFactorsFromSnapshot(snapshot));
+  const marker = "；票面金额核对：";
+  const baseNote = (cost.note ?? "").split(marker)[0];
+  if (referenceTotalCents !== null && totals.minCents === referenceTotalCents && totals.maxCents === referenceTotalCents) {
+    return cost.note?.includes(marker) ? { ...cost, note: baseNote || null } : cost;
+  }
+  const difference = referenceTotalCents !== null && totals.minCents !== null && totals.minCents === totals.maxCents
+    ? referenceTotalCents - totals.minCents : null;
+  const differenceNote = difference === null ? "差额待核对" : `参考比预算记录${difference >= 0 ? "高" : "低"} ${formatMoneyRange(Math.abs(difference), null)}`;
+  return { ...cost, note: `${baseNote.slice(0, 70)}${marker}${referenceLabel}；预算原记录 ${formatMoneyRange(totals.minCents, totals.maxCents)}；${differenceNote}。原金额及付款/退款状态保留，差额可能涉及退款或手续费，请在预算中另行核对。`.slice(0, 240) };
+}
+
+function applyTicketCosts(tickets: Ticket[], events: PlanEvent[], costs: PlanCostItem[], snapshot: RequestSnapshot) {
+  let result = [...costs];
+
+  for (const ticket of tickets) {
+    if (!ticket.confirmedAt || ticket.status === "draft") continue;
+    const id = `ticket-${ticket.id}`;
+    const existing = result.find((cost) => cost.id === id);
+    const ticketTotal = ticket.fareCents === null ? null : ticket.fareCents * ticket.passengerCount;
+    const referenceLabel = `主票每人 ${formatMoneyRange(ticket.fareCents, null)} × ${ticket.passengerCount} 人，合计 ${formatMoneyRange(ticketTotal, null)}`;
+    // The budget editor owns payment and refund facts after initial creation.
+    // Never restore a refunded amount or reset paid/refund_pending here.
+    if (existing && (existing.unitAmountCents !== null || hasProtectedCostFact(existing) || ticket.fareCents === null)) {
+      result = result.map((cost) => cost.id === id ? preserveTicketCostReference(cost, ticketTotal, referenceLabel, snapshot) : cost);
+      continue;
+    }
+    const protectedBase = result.find((cost) => cost.id === `cost-${ticket.eventId}` && hasProtectedCostFact(cost));
+    const firstConfirmedTicket = tickets.find((item) => item.eventId === ticket.eventId && item.confirmedAt && item.status !== "draft");
+    if (protectedBase && firstConfirmedTicket?.id === ticket.id) {
+      // The first ticket may already be represented by a confirmed event cost.
+      // Keep its stable cost ID and evidence; further tickets get separate rows.
+      result = result.map((cost) => cost.id === protectedBase.id ? preserveTicketCostReference(cost, ticketTotal, referenceLabel, snapshot) : cost);
+      continue;
+    }
+    const item = {
+      id,
+      linkedEventId: ticket.eventId,
+      category: "transport" as const,
+      currency: "CNY" as const,
+      unit: "per_ticket" as const,
+      unitAmountCents: ticket.fareCents,
+      unitAmountMaxCents: null,
+      quantity: ticket.passengerCount,
+      certainty: ticket.fareCents === null ? "pending_confirmation" as const : "user_confirmed" as const,
+      paymentStatus: "not_paid" as const,
+      source: ticket.fareCents === null ? "ai_draft" as const : "user_confirmed" as const,
+      eventRemoved: false,
+      note: ticket.status === "active"
+        ? "用户确认的票面金额；退改签或退款后请在预算中另行确认。"
+        : "历史票面金额保留；退票/替换不自动归零，退款到账需另行确认。",
+    };
+    result = existing ? result.map((cost) => cost.id === id ? planCostItemSchema.parse(item) : cost) : [...result, planCostItemSchema.parse(item)];
+  }
+
+  const ticketCostEvents = new Set(
+    tickets.filter((ticket) => ticket.confirmedAt && ticket.status !== "draft").map((ticket) => ticket.eventId),
+  );
+  return result.filter((cost) =>
+    cost.id.startsWith("ticket-") ||
+    cost.id.startsWith("route-") ||
+    !ticketCostEvents.has(cost.linkedEventId) ||
+    cost.id !== `cost-${cost.linkedEventId}` ||
+    hasProtectedCostFact(cost)
+  );
+}
+
+function applyTicketTransferCosts(tickets: Ticket[], routes: RouteLeg[], costs: PlanCostItem[], snapshot: RequestSnapshot) {
+  const applicable = new Set<string>();
+  let result = [...costs];
+  for (const ticket of tickets.filter(isActiveTicket)) {
+    for (const side of ["access", "egress"] as const) {
+      const mode = side === "access" ? ticket.accessMode : ticket.egressMode;
+      if (!mode) continue;
+      const fare = side === "access" ? ticket.accessFareCents : ticket.egressFareCents;
+      const referenceLabel = `${side === "access" ? "出发" : "到达"}接驳全段参考 ${formatMoneyRange(fare, null)}`;
+      // The same city segment may already carry an expense. Keep confirmed or
+      // paid facts; replace only disposable route estimates with this record.
+      const routeCostIds = new Set(routes.filter((route) => side === "access" ? route.toEventId === ticket.eventId : route.fromEventId === ticket.eventId)
+        .map((route) => routeCostId(route.fromEventId, route.toEventId)));
+      if (result.some((cost) => routeCostIds.has(cost.id) && hasProtectedCostFact(cost))) {
+        result = result.map((cost) => routeCostIds.has(cost.id) && hasProtectedCostFact(cost)
+          ? preserveTicketCostReference(cost, fare, referenceLabel, snapshot) : cost);
+        continue;
+      }
+      result = result.filter((cost) => !routeCostIds.has(cost.id));
+      const identity = side === "access"
+        ? [ticket.eventId, side, ticket.date, ticket.departureTime, ticket.chainOriginName, ticket.fromName, ticket.fromDetail, mode]
+        : [ticket.eventId, side, ticket.arrivalDate, ticket.arrivalTime, ticket.toName, ticket.toDetail, ticket.chainDestinationName, mode];
+      const id = `ticket-transfer-${crypto.createHash("sha256").update(JSON.stringify(identity)).digest("hex").slice(0, 24)}`;
+      // Shared travelers reuse one segment expense. Do not let a later ticket
+      // erase the first reference's discrepancy note for that same segment.
+      if (applicable.has(id)) continue;
+      applicable.add(id);
+      const existing = result.find((cost) => cost.id === id);
+      if (existing && (existing.unitAmountCents !== null || hasProtectedCostFact(existing) || fare === null)) {
+        result = result.map((cost) => cost.id === id ? preserveTicketCostReference(cost, fare, referenceLabel, snapshot) : cost);
+        continue;
+      }
+      const item = planCostItemSchema.parse({
+        id, linkedEventId: ticket.eventId, category: "local_transport", currency: "CNY", unit: "one_time",
+        unitAmountCents: fare, unitAmountMaxCents: null, quantity: null, transferSide: side,
+        certainty: fare === null ? "pending_confirmation" : "user_confirmed", paymentStatus: "not_paid",
+        source: fare === null ? "ai_draft" : "user_confirmed", eventRemoved: false,
+        note: `${ticket.direction === "departure" ? "去程" : "返程"}${side === "access" ? "出发" : "到达"}接驳全段费用，只计一次；多人同段共享，退款及金额变化请在预算中另行确认。`,
+      });
+      result = existing ? result.map((cost) => cost.id === id ? item : cost) : [...result, item];
+    }
+  }
+  result = result.filter((cost) => !cost.id.startsWith("ticket-transfer-") || applicable.has(cost.id) || hasProtectedCostFact(cost));
+  return result;
+}
+
+export async function savePlanTicketEdit(input: {
+  tripId: string;
+  expectedPlanVersion: number;
+  action: TicketAction;
+}) {
+  const action = ticketActionSchema.parse(input.action);
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      const row = await transaction.planVersion.findUnique({
+        where: {
+          tripId_versionNumber: {
+            tripId: input.tripId,
+            versionNumber: input.expectedPlanVersion,
+          },
+        },
+        include: { trip: { select: { currentPlanVersionId: true } } },
+      });
+      if (!row) throw new PlanNotFoundError();
+      if (row.trip.currentPlanVersionId !== row.id) {
+        throw new PlanConflictError("计划已变化，请刷新后重新确认票面；历史版本保持只读。");
+      }
+
+      const current = serializePlan(row);
+      const now = new Date();
+      let tickets: Ticket[];
+      let actionEventId: string;
+      if (action.action === "create_draft") {
+        ticketEventForAction(current.events, action.ticket.eventId, action.ticket.direction);
+        tickets = [...current.tickets, createDraftTicket(action.ticket, now)];
+        actionEventId = action.ticket.eventId;
+      } else if (action.action === "activate") {
+        ticketEventForAction(current.events, action.ticket.eventId, action.ticket.direction);
+        tickets = [...current.tickets, activateTicket(action.ticket, now)];
+        actionEventId = action.ticket.eventId;
+      } else if (action.action === "cancel") {
+        const target = current.tickets.find((ticket) => ticket.id === action.ticketId);
+        if (!target) throw new PlanValidationError("没有找到要确认退票的指定票据。");
+        if (target.status !== "active") throw new PlanValidationError("只能对当前有效票确认退票事实。");
+        tickets = current.tickets.map((ticket) => ticket.id === target.id ? cancelTicket(ticket, now) : ticket);
+        actionEventId = target.eventId;
+      } else if (action.action === "activate_draft") {
+        const target = current.tickets.find((ticket) => ticket.id === action.ticketId);
+        if (!target) throw new PlanValidationError("没有找到要确认的草稿票面。");
+        if (target.status !== "draft") throw new PlanValidationError("只有草稿票面可以确认有效。");
+        const { id, status, confirmedAt, cancelledAt, replacedAt, replacedByTicketId, createdAt, updatedAt, ...core } = target;
+        void id;
+        void status;
+        void confirmedAt;
+        void cancelledAt;
+        void replacedAt;
+        void replacedByTicketId;
+        void createdAt;
+        void updatedAt;
+        activeTicketCoreSchema.parse(core);
+        tickets = current.tickets.map((ticket) => ticket.id === target.id ? {
+          ...ticket,
+          status: "active" as const,
+          confirmedAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+        } : ticket);
+        actionEventId = target.eventId;
+      } else if (action.action === "update_details") {
+        const target = current.tickets.find((ticket) => ticket.id === action.ticketId);
+        if (!target) throw new PlanValidationError("没有找到要补充资料的票面。");
+        ticketEventForAction(current.events, action.ticket.eventId, action.ticket.direction);
+        let updated: Ticket;
+        try { updated = updateTicketDetails(target, action.ticket, now); }
+        catch (error) { throw new PlanValidationError(error instanceof Error ? error.message : "票面资料不能更新。"); }
+        tickets = current.tickets.map((ticket) => ticket.id === target.id ? updated : ticket);
+        actionEventId = target.eventId;
+      } else {
+        const target = current.tickets.find((ticket) => ticket.id === action.ticketId);
+        if (!target) throw new PlanValidationError("没有找到要替换的指定原票。");
+        if (target.status !== "active") throw new PlanValidationError("只能替换当前有效票。");
+        if (target.eventId !== action.replacement.eventId || target.direction !== action.replacement.direction) {
+          throw new PlanValidationError("替换票必须关联同一方向和同一主交通日程。");
+        }
+        ticketEventForAction(current.events, action.replacement.eventId, action.replacement.direction);
+        const { replaced, replacement } = replaceTicket(target, action.replacement, now);
+        tickets = [...current.tickets.map((ticket) => ticket.id === target.id ? replaced : ticket), replacement];
+        actionEventId = target.eventId;
+      }
+
+      const draftOnly = action.action === "create_draft" || action.action === "update_details" &&
+        current.tickets.find((ticket) => ticket.id === action.ticketId)?.status === "draft";
+      const planAfterTickets = preparePlanForStorage({
+        events: draftOnly ? current.events : applyTicketsToEvents(current.events, tickets, current.tickets),
+        pendingItems: current.pendingItems,
+      });
+      const changedEventIds = draftOnly ? [] : [
+        ...new Set([actionEventId, ...ticketChangedEventIds(current.events, planAfterTickets.events)]),
+      ];
+      const { routeLegs, costs } = updateRoutesAfterTicketChange({
+        routeLegs: current.routeLegs,
+        previousEvents: current.events,
+        events: planAfterTickets.events,
+        costs: current.costs,
+        changedEventIds,
+      });
+      const ticketCosts = draftOnly ? current.costs : applyTicketTransferCosts(
+        tickets, current.routeLegs, applyTicketCosts(tickets, planAfterTickets.events, costs, current.requestSnapshot), current.requestSnapshot,
+      );
+
+      const costErrors = validatePlanCosts(ticketCosts, planAfterTickets.events);
+      if (costErrors.length > 0) throw new PlanValidationError(costErrors[0]);
+      const ticketValidation = validateTickets(tickets, planAfterTickets.events);
+      if (ticketValidation.errors.length > 0) throw new PlanValidationError(ticketValidation.errors[0]);
+      const validationResults = validationWithTickets(
+        validatePlan(planAfterTickets, current.requestSnapshot, ticketCosts),
+        tickets,
+        planAfterTickets.events,
+      );
+
+      const created = await transaction.planVersion.create({
+        data: {
+          tripId: row.tripId,
+          versionNumber: row.versionNumber + 1,
+          requestRevision: row.requestRevision,
+          requestSnapshot: row.requestSnapshot,
+          events: JSON.stringify(planAfterTickets.events),
+          costs: JSON.stringify(ticketCosts),
+          places: row.places,
+          routeLegs: JSON.stringify(routeLegs),
+          tickets: JSON.stringify(tickets),
+          pendingItems: row.pendingItems,
+          validationResults: JSON.stringify(validationResults),
+          requirementUpToDate: row.requirementUpToDate,
+        },
+      });
+      await copyEvidenceFacts(
+        transaction,
+        row.id,
+        created.id,
+        current,
+        { events: planAfterTickets.events, costs: ticketCosts },
+      );
+      await transaction.trip.update({
+        where: { id: row.tripId },
+        data: {
+          currentPlanVersionId: created.id,
+          status: !row.requirementUpToDate || validationResults.errors.length > 0 || validationResults.warnings.length > 0
+            ? (!row.requirementUpToDate ? "plan_needs_update" : "plan_needs_review")
+            : "planned",
+        },
+      });
+
+      const saved = await transaction.planVersion.findUnique({
+        where: { id: created.id },
+        include: { trip: { select: { currentPlanVersionId: true } } },
+      });
+      if (!saved) throw new PlanConflictError();
+      return serializePlan(saved);
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      throw new PlanConflictError("计划已变化，票面确认不能提交；请刷新后重试。");
+    }
     throw error;
   }
 }

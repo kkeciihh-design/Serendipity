@@ -30,8 +30,10 @@ import {
 import { PlanBudget } from "./plan-budget";
 import { PlanTimeline } from "./plan-timeline";
 import { PlanMap, type MapLinkTarget } from "./plan-map";
+import { TransportOverview } from "./transport-overview";
 import type { Place } from "@/lib/places";
 import type { RouteLeg } from "@/lib/routes";
+import type { Ticket } from "@/lib/tickets";
 import type {
   PlanEvent,
   PlanPendingItem,
@@ -50,6 +52,7 @@ export type PlanVersionClient = {
   costs: PlanCostItem[];
   places?: Place[];
   routeLegs?: RouteLeg[];
+  tickets?: Ticket[];
   pendingItems: PlanPendingItem[];
   validationResults: PlanValidationResults;
   requirementUpToDate: boolean;
@@ -107,9 +110,12 @@ export function PlanOverview({
   const [selectedDayNumber, setSelectedDayNumber] = useState(1);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [pendingTimelineScrollEventId, setPendingTimelineScrollEventId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"timeline" | "budget" | "map">("timeline");
+  const [activeTab, setActiveTab] = useState<
+    "timeline" | "transport" | "budget" | "map"
+  >("timeline");
   const [hasOpenedMap, setHasOpenedMap] = useState(false);
   const [hasOpenedBudget, setHasOpenedBudget] = useState(false);
+  const [transportDirection, setTransportDirection] = useState<"departure" | "return">("departure");
   const [isGenerating, setIsGenerating] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -270,8 +276,12 @@ export function PlanOverview({
     setSelectedEventId(eventId);
     setSelectedDayNumber(dayNumber);
     setActiveTab(target);
+    if (target === "transport") {
+      const event = displayPlan?.events.find((item) => item.id === eventId);
+      setTransportDirection(event?.type === "return_transport" ? "return" : "departure");
+    }
     setPendingTimelineScrollEventId(target === "timeline" ? eventId : null);
-  }, []);
+  }, [displayPlan]);
 
   const handleDayChange = useCallback((dayNumber: number) => {
     setSelectedDayNumber(dayNumber);
@@ -488,12 +498,25 @@ export function PlanOverview({
             </div>
           ) : null}
 
+          {displayPlan.validationResults.errors.length > 0 ? (
+            <div className="mt-4 rounded-md border border-clay bg-clay-soft p-4">
+              <h3 className="text-base font-semibold text-clay">
+                当前存在硬冲突或待补数据
+              </h3>
+              <ul className="mt-2 space-y-1 text-sm leading-6 text-charcoal">
+                {displayPlan.validationResults.errors.map((error) => (
+                  <li key={error}>{error}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="mt-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div
                 role="tablist"
                 aria-label="计划视图"
-                className="inline-flex rounded-md border border-sand bg-cream p-1"
+                className="grid max-w-full grid-cols-2 gap-1 rounded-md border border-sand bg-cream p-1 sm:inline-flex"
               >
                 <button
                   type="button"
@@ -520,6 +543,19 @@ export function PlanOverview({
                   }`}
                 >
                   预算
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "transport"}
+                  onClick={() => setActiveTab("transport")}
+                  className={`min-h-11 rounded px-4 text-sm font-semibold transition-colors ${
+                    activeTab === "transport"
+                      ? "bg-sage text-white"
+                      : "text-graphite hover:text-sage"
+                  }`}
+                >
+                  门到门交通
                 </button>
                 <button type="button" role="tab" aria-selected={activeTab === "map"} onClick={() => setActiveTab("map")}
                   className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "map" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>地图</button>
@@ -575,6 +611,15 @@ export function PlanOverview({
               {hasOpenedMap || activeTab === "map" ? (
               <PlanMap tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} selectedDayNumber={selectedDayNumber} onDayChange={handleDayChange} selectedEventId={selectedEventId} onEventSelect={handleEventSelect} />
               ) : null}
+            </div>
+            <div hidden={activeTab !== "transport"} role="tabpanel" aria-label="门到门交通">
+              <TransportOverview
+                tripId={tripId}
+                plan={displayPlan}
+                onSaved={handlePlanSaved}
+                direction={transportDirection}
+                onDirectionChange={setTransportDirection}
+              />
             </div>
             <div hidden={activeTab !== "budget"} role="tabpanel" aria-label="预算">
               {hasOpenedBudget || activeTab === "budget" ? (
