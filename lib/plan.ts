@@ -53,6 +53,8 @@ export const planEventSchema = z.object({
   order: z.number().int().min(1).nullable().optional(),
   status: planEventStatusSchema.optional(),
   locked: z.boolean().optional(),
+  ticketManaged: z.boolean().optional(),
+  ticketTimingPending: z.boolean().optional(),
   suggestedDurationSeconds: z
     .number()
     .int()
@@ -93,7 +95,7 @@ export type PlanContent = z.infer<typeof planContentSchema>;
 
 // The model DTO has no user confirmation, lock or payment authority. Unknown
 // fields (including event/root costs and payment fields) are stripped by Zod.
-const aiEventSchema = planEventSchema.omit({ status: true, locked: true, order: true, placeId: true }).extend({
+const aiEventSchema = planEventSchema.omit({ status: true, locked: true, order: true, placeId: true, ticketManaged: true, ticketTimingPending: true }).extend({
   costStatus: planCostStatusSchema.transform((status) =>
     status === "user_confirmed" ? "pending_confirmation" as const : status),
 });
@@ -187,6 +189,7 @@ export function preparePlanForStorage(plan: PlanContent): PlanContent {
         order: index + 1,
         status: event.status ?? "suggested",
         locked: event.locked ?? false,
+        ticketManaged: event.ticketManaged ?? false,
         endDate: formatPlanDate(end),
         // Actual occupied time is authoritative; repair only the new snapshot.
         suggestedDurationSeconds: planEventDurationSeconds(event),

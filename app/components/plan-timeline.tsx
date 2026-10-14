@@ -99,6 +99,9 @@ function formatGap(minutes: number) {
 }
 
 function connectionLabel(current: PlanEvent, next: PlanEvent) {
+  if (current.ticketTimingPending || next.ticketTimingPending) {
+    return "票面时刻待补 / 冲突，衔接待重算";
+  }
   const gapMinutes = Math.round(
     (planEventStart(next).getTime() - planEventEnd(current).getTime()) /
       60_000,
@@ -175,10 +178,11 @@ export function PlanTimeline({
 
   const canEdit = plan.isCurrent;
   const originalLocked = selectedEvent?.locked ?? false;
+  const ticketManaged = Boolean(selectedEvent?.ticketManaged);
   const fixedEvent =
     selectedEvent?.type === "departure_transport" ||
     selectedEvent?.type === "return_transport";
-  const fieldsDisabled = !canEdit || isSaving || originalLocked;
+  const fieldsDisabled = !canEdit || isSaving || originalLocked || ticketManaged;
   const selectedFact = (field: EvidenceField) =>
     currentFacts.find(
       (fact) => fact.targetId === selectedEvent?.id && fact.field === field,
@@ -186,7 +190,7 @@ export function PlanTimeline({
 
   const saveEdit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!canEdit || !selectedEvent || !draft) {
+    if (!canEdit || !selectedEvent || !draft || ticketManaged) {
       return;
     }
 
@@ -273,7 +277,7 @@ export function PlanTimeline({
               >
                 <span className="text-sm font-semibold text-sage">
                   <span aria-hidden="true" className="mr-2">{visitLabel}</span>
-                  {formatPlanEventTimeRange(event)}
+                  {event.ticketTimingPending ? "票面时刻待补 / 冲突" : formatPlanEventTimeRange(event)}
                 </span>
                 <span className="min-w-0">
                   <span className="block break-words text-base font-semibold text-charcoal">
@@ -302,6 +306,7 @@ export function PlanTimeline({
                 ) : null}
               </button>
               <div>
+                {event.type === "departure_transport" || event.type === "return_transport" ? <button type="button" onClick={() => onEventSelect(event.id, "transport", event.dayNumber)} className="mr-2 inline-flex min-h-11 items-center rounded-md border border-sage bg-white px-3 text-sm font-medium text-sage">查看交通票面</button> : null}
                 <button
                   type="button"
                   onClick={() => onEventSelect(event.id, "map", day.dayNumber)}
@@ -344,6 +349,8 @@ export function PlanTimeline({
               </span>
             ) : null}
           </div>
+
+          {ticketManaged ? <div className="mt-3 rounded-md bg-sage-soft p-3 text-sm leading-6 text-charcoal"><p>当前交通由有效票面固定，请在门到门交通中记录已办妥的退票或替换事实。</p><button type="button" onClick={() => onEventSelect(selectedEvent.id, "transport", selectedEvent.dayNumber)} className="mt-2 min-h-11 rounded-md border border-sage bg-white px-3 font-semibold text-sage">管理这项交通票面</button></div> : null}
 
           <section
             aria-labelledby="event-evidence-title"
@@ -484,7 +491,7 @@ export function PlanTimeline({
               <input
                 type="checkbox"
                 checked={draft.locked}
-                disabled={!canEdit || isSaving}
+                disabled={!canEdit || isSaving || ticketManaged}
                 onChange={(event) =>
                   setDraft({ ...draft, locked: event.target.checked })
                 }
@@ -496,7 +503,7 @@ export function PlanTimeline({
             <div className="flex flex-col gap-3 sm:col-span-2 sm:flex-row sm:flex-wrap">
               <button
                 type="submit"
-                disabled={!canEdit || isSaving}
+                disabled={!canEdit || isSaving || ticketManaged}
                 className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-md bg-sage px-5 py-3 text-base font-semibold text-white transition-colors hover:bg-focus disabled:cursor-not-allowed disabled:bg-graphite/70 sm:flex-none"
               >
                 <Save aria-hidden="true" className="size-5" />
@@ -538,7 +545,9 @@ export function PlanTimeline({
             }`}
           >
             {feedback?.message ??
-              (originalLocked
+              (ticketManaged
+                ? "有效票面不可在普通日程编辑中解除，请使用交通票面入口。"
+                : originalLocked
                 ? "已锁定的安排保持原时间、备注和状态；取消锁定后才能继续修改。"
                 : canEdit
                   ? "编辑会生成新的计划版本，并继承当前版本的需求修订和确认快照。"
@@ -557,7 +566,7 @@ export function PlanTimeline({
           历史版本不能编辑
         </p>
       ) : null}
-      {originalLocked && selectedEvent ? (
+      {originalLocked && selectedEvent && !ticketManaged ? (
         <p className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-md bg-shell px-3 text-sm text-charcoal">
           <LockOpen aria-hidden="true" className="size-4" />
           取消锁定会创建新版本，但不会同时改动时间、状态或备注

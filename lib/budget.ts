@@ -96,6 +96,7 @@ export const planCostItemSchema = z.object({
     .max(2_000_000_000)
     .nullable(),
   quantity: z.number().int().min(1).max(100).nullable(),
+  transferSide: z.enum(["access", "egress"]).optional(),
   // Absent on legacy snapshots: retain their original whole-trip night basis.
   // New daily accommodation rows explicitly cover one night.
   nightCount: z.number().int().min(1).max(4).optional(),
@@ -411,12 +412,22 @@ export function eventCostSummary(
   costs: PlanCostItem[],
   snapshot: RequestSnapshot,
 ) {
-  const cost = costs.find((item) => item.linkedEventId === eventId && !item.id.startsWith("route-"));
-  return cost ? {
-    ...costItemLineTotals(cost, budgetFactorsFromSnapshot(snapshot)),
-    certainty: cost.certainty,
-    paymentStatus: cost.paymentStatus,
-  } : null;
+  const related = costs.filter((item) => item.linkedEventId === eventId && !item.id.startsWith("route-"));
+  if (related.length === 0) return null;
+  const factors = budgetFactorsFromSnapshot(snapshot);
+  const lines = related.map((cost) => costItemLineTotals(cost, factors));
+  const unknown = lines.some((line) => line.minCents === null || line.maxCents === null);
+  const certainty: CostCertainty = unknown || related.some((cost) => cost.certainty === "pending_confirmation")
+    ? "pending_confirmation" : related.some((cost) => cost.certainty === "estimated") ? "estimated" : "user_confirmed";
+  const paymentStatus: CostPaymentStatus = related.some((cost) => cost.paymentStatus === "refund_pending")
+    ? "refund_pending" : related.every((cost) => cost.paymentStatus === "paid") ? "paid" : "not_paid";
+  return {
+    quantity: lines.reduce((sum, line) => sum + line.quantity, 0),
+    minCents: unknown ? null : lines.reduce((sum, line) => sum + line.minCents!, 0),
+    maxCents: unknown ? null : lines.reduce((sum, line) => sum + line.maxCents!, 0),
+    certainty,
+    paymentStatus,
+  };
 }
 
 export function budgetWarnings(costs: PlanCostItem[], snapshot: RequestSnapshot): string[] {
@@ -453,6 +464,7 @@ export function validatePlanCosts(
     if (costIds.has(cost.id)) errors.push(`费用 ${cost.id} 重复。`);
     costIds.add(cost.id);
     const routeCost = cost.id.startsWith("route-");
+    const ticketCost = cost.id.startsWith("ticket-");
     if (routeCost) {
       // A previous route's paid/confirmed amount survives route changes. Only
       // competing draft fares for the current destination are duplicates.
@@ -462,6 +474,9 @@ export function validatePlanCosts(
         }
         routeLinkedEventIds.add(cost.linkedEventId);
       }
+    } else if (ticketCost) {
+      // Several travelers can hold separate tickets for the same main transport
+      // event. Each stable ticket keeps its own fare/payment history.
     } else {
       if (linkedEventIds.has(cost.linkedEventId)) {
         errors.push(`费用 ${cost.id} 与事件 ${cost.linkedEventId} 重复关联。`);
