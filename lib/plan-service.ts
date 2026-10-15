@@ -1171,6 +1171,19 @@ export async function savePlanTicketEdit(input: {
       }
 
       const current = serializePlan(row);
+      if ("importSource" in action && action.importSource) {
+        const core = action.action === "replace" ? action.replacement : action.ticket;
+        const { ticketDuplicateHints } = await import("./ticket-import");
+        const duplicates = ticketDuplicateHints(current.tickets, core, action.importSource);
+        if (core.mode !== "train") throw new PlanValidationError("截图导入仅支持火车票。");
+        if (action.importSource.documentKind === "refund") throw new PlanValidationError("退票资料不能作为有效新票，请确认指定原票的退票事实。");
+        if (action.importSource.documentKind === "change" && action.action !== "replace") throw new PlanValidationError("改签资料必须指定原票并确认替换。");
+        if (action.action === "replace" && action.importResolution !== "replacement") throw new PlanValidationError("请核对指定替换关系。");
+        if (action.action !== "replace" && action.importResolution === "replacement") throw new PlanValidationError("请使用指定原票的替换入口。");
+        if (duplicates.length && action.action !== "replace" && action.importResolution !== "companion") {
+          throw new PlanValidationError("发现疑似重复票，请选择同一张票（不重复保存）、同行者的新票或指定替换。");
+        }
+      }
       const now = new Date();
       let tickets: Ticket[];
       let actionEventId: string;
@@ -1182,11 +1195,11 @@ export async function savePlanTicketEdit(input: {
         actionEventId = target.eventId;
       } else if (action.action === "create_draft") {
         ticketEventForAction(current.events, action.ticket.eventId, action.ticket.direction);
-        tickets = [...current.tickets, createDraftTicket(action.ticket, now)];
+        tickets = [...current.tickets, { ...createDraftTicket(action.ticket, now), ...(action.importSource ? { importSource: action.importSource } : {}) }];
         actionEventId = action.ticket.eventId;
       } else if (action.action === "activate") {
         ticketEventForAction(current.events, action.ticket.eventId, action.ticket.direction);
-        tickets = [...current.tickets, activateTicket(action.ticket, now)];
+        tickets = [...current.tickets, { ...activateTicket(action.ticket, now), ...(action.importSource ? { importSource: action.importSource } : {}) }];
         actionEventId = action.ticket.eventId;
       } else if (action.action === "cancel") {
         const target = current.tickets.find((ticket) => ticket.id === action.ticketId);
@@ -1233,6 +1246,7 @@ export async function savePlanTicketEdit(input: {
         }
         ticketEventForAction(current.events, action.replacement.eventId, action.replacement.direction);
         const { replaced, replacement } = replaceTicket(target, action.replacement, now);
+        if (action.importSource) replacement.importSource = action.importSource;
         tickets = [...current.tickets.map((ticket) => ticket.id === target.id ? replaced : ticket), replacement];
         actionEventId = target.eventId;
       }

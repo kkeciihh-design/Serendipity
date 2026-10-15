@@ -8,6 +8,8 @@ import { ticketFixture } from "./helpers/ticket-fixtures";
 import { defaultRedlinePreferences } from "../lib/redline-preferences";
 import { buildPlanRedlines, ticketRedlineInput } from "../lib/redline-service";
 import { manualReferenceRoute, readCachedRoute } from "../lib/routes";
+import { parseTicketRecognition } from "../lib/ticket-ocr";
+import type { TicketImportSource } from "../lib/ticket-import";
 
 let database: ReturnType<typeof isolatedDatabase>;
 let db: PrismaClient;
@@ -50,6 +52,49 @@ async function pay(current: Record, costId: string, amount: number, paymentStatu
 }
 
 describe("atomic ticket fact persistence", () => {
+  it("T30 imported tickets share manual redlines, preserve companions/payments and invalidate only active constraints", async () => {
+    const original = await fixture();
+    const date = original.requestSnapshot.startDate!;
+    const source: TicketImportSource = { engine: "tesseract-local", imageFingerprint: "a".repeat(64), cropFingerprint: "b".repeat(64), recognizedAt: new Date().toISOString(), documentKind: "ticket" };
+    const fields = parseTicketRecognition(`深圳北 G6012 长沙南\n${date} 06:30\n${date} 07:30\n05车08A\n票价:243.00`).segments[0].fields;
+    const ticket = core(original, fields);
+    let current = await act(original, { action: "activate", ticket, acknowledged: true, importSource: source, importResolution: "new" });
+    const first = current.tickets[0];
+    expect(first.importSource).toEqual(source);
+    const reference = await fixture();
+    const manual = await act(reference, { action: "activate", ticket, acknowledged: true });
+    expect((await buildPlanRedlines(current))[0].suggestedAt).toBe((await buildPlanRedlines(manual))[0].suggestedAt);
+    current = await pay(current, `ticket-${first.id}`, 24300);
+    await expect(act(current, { action: "activate", ticket, acknowledged: true, importSource: source, importResolution: "new" })).rejects.toThrow("疑似重复");
+    expect((await plans.listPlanVersions(current.tripId))[0].tickets).toHaveLength(1);
+    current = await act(current, { action: "activate", ticket: { ...ticket, seat: "05车08B", fareCents: null }, acknowledged: true, importSource: source, importResolution: "companion" });
+    const companion = current.tickets[1];
+    expect(current.costs.find((cost) => cost.id === `ticket-${companion.id}`)?.unitAmountCents).toBeNull();
+    const before = (await buildPlanRedlines(current))[0].calculationVersion;
+    await requests.saveRequestDraft(current.tripId, { expectedRequestRevision: current.requestRevision, request: { ...current.requestSnapshot, budgetAmountCents: 999999 } });
+    vi.stubGlobal("fetch", vi.fn(() => { throw new Error("offline"); }));
+    current = await act(current, { action: "replace", ticketId: first.id, replacement: { ...ticket, serviceNumber: "G888", departureTime: "09:30", arrivalTime: null }, acknowledged: true, importSource: { ...source, documentKind: "change" }, importResolution: "replacement" });
+    expect(current).toMatchObject({ requirementUpToDate: false, requestSnapshot: original.requestSnapshot, requestRevision: original.requestRevision });
+    expect(current.tickets.find((t) => t.id === companion.id)).toEqual(companion);
+    const old = current.tickets.find((t) => t.id === first.id)!;
+    expect(old.status).toBe("replaced"); expect(old.confirmedAt).toBe(first.confirmedAt);
+    const replacement = current.tickets.find((t) => t.id === old.replacedByTicketId)!;
+    expect(replacement.status).toBe("active");
+    const redlines = await buildPlanRedlines(current);
+    expect(redlines.every((r) => r.calculationVersion !== before)).toBe(true);
+    expect(redlines.every((r) => r.precision === "pending_confirmation")).toBe(true);
+    expect(current.events.find((e) => e.id === "departure")?.ticketTimingPending).toBe(true);
+    expect(current.costs.find((cost) => cost.id === `ticket-${first.id}`)).toMatchObject({ paymentStatus: "paid", unitAmountCents: 24300 });
+    current = await act(current, { action: "cancel", ticketId: replacement.id, acknowledged: true });
+    expect(current.tickets.find((t) => t.id === companion.id)).toEqual(companion);
+    expect((await buildPlanRedlines(current))).toHaveLength(1);
+    expect(current.events.find((e) => e.id === "departure")?.ticketManaged).toBe(true);
+    current = await act(current, { action: "cancel", ticketId: companion.id, acknowledged: true });
+    expect(await buildPlanRedlines(current)).toEqual([]);
+    expect(current.events.find((e) => e.id === "departure")?.ticketManaged).toBe(false);
+    expect((await plans.getPlanVersion(current.tripId, current.versionNumber)).tickets).toEqual(current.tickets);
+    await expect(act(current, { action: "activate", ticket, acknowledged: true, importSource: { ...source, documentKind: "refund" } })).rejects.toThrow("退票资料");
+  });
   it("uses only time-applicable saved routes and never shifts a no-service finding to another time", async () => {
     const original = await fixture();
     const current = await act(original, { action: "activate", acknowledged: true,
@@ -272,10 +317,12 @@ describe("atomic ticket fact persistence", () => {
   it("rolls back new version, ticket status and costs when the final trip update fails", async () => {
     const original = await fixture();
     const active = await act(original, { action: "activate", acknowledged: true, ticket: core(original) });
+    const beforeRedlines = await buildPlanRedlines(active, `${active.requestSnapshot.startDate}T00:00:00.000Z`);
     await db.$executeRawUnsafe("CREATE TRIGGER ticket_test_fail BEFORE UPDATE ON Trip BEGIN SELECT RAISE(ABORT, 'synthetic commit failure'); END");
     try {
       await expect(act(active, { action: "replace", ticketId: active.tickets[0].id, acknowledged: true,
-        replacement: core(active, { serviceNumber: "G999" }) })).rejects.toThrow();
+        replacement: core(active, { serviceNumber: "G999" }), importResolution: "replacement",
+        importSource: { engine: "tesseract-local", documentKind: "change", imageFingerprint: "c".repeat(64), cropFingerprint: "d".repeat(64), recognizedAt: new Date().toISOString() } })).rejects.toThrow();
     } finally {
       await db.$executeRawUnsafe("DROP TRIGGER ticket_test_fail");
     }
@@ -284,6 +331,7 @@ describe("atomic ticket fact persistence", () => {
     expect(latest.tickets).toEqual(active.tickets);
     expect(latest.costs).toEqual(active.costs);
     expect(latest.isCurrent).toBe(true);
+    expect(await buildPlanRedlines(latest, `${active.requestSnapshot.startDate}T00:00:00.000Z`)).toEqual(beforeRedlines);
   });
 
   it("permits only one concurrent submission and rejects a stale version without partial changes", async () => {

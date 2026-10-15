@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { redlinePreferencesSchema } from "./redline-preferences";
+import { importResolutionSchema, ticketImportSourceSchema } from "./ticket-import";
 import { planEventDurationSeconds, planEventEnd, planEventStart, sortPlanEvents, type PlanEvent } from "./plan";
 
 export const ticketModeSchema = z.enum(["train", "flight"]);
@@ -43,6 +44,7 @@ export const ticketCoreSchema = z.object({
   direction: ticketDirectionSchema,
   mode: ticketModeSchema,
   serviceNumber: z.string().trim().max(40).nullable(),
+  seat: z.string().trim().max(80).nullable().optional(),
   date: ticketDate.nullable(),
   departureTime: ticketTime.nullable(),
   arrivalDate: ticketDate.nullable(),
@@ -78,6 +80,7 @@ export type TicketCore = z.infer<typeof ticketCoreSchema>;
 export const activeTicketCoreSchema = ticketCoreSchema;
 
 export const ticketSchema = ticketCoreSchema.extend({
+  importSource: ticketImportSourceSchema.optional(),
   redlinePreferences: redlinePreferencesSchema.optional(),
   id: z.string().trim().min(1).max(80),
   status: ticketStatusSchema,
@@ -99,10 +102,14 @@ export const ticketActionSchema = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("create_draft"),
+    importSource: ticketImportSourceSchema.optional(),
+    importResolution: importResolutionSchema.optional(),
     ticket: ticketCoreSchema,
   }),
   z.object({
     action: z.literal("activate"),
+    importSource: ticketImportSourceSchema.optional(),
+    importResolution: importResolutionSchema.optional(),
     ticket: activeTicketCoreSchema,
     acknowledged: z.literal(true, {
       error: "请确认本人已核对这张票面。",
@@ -130,6 +137,8 @@ export const ticketActionSchema = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("replace"),
+    importSource: ticketImportSourceSchema.optional(),
+    importResolution: importResolutionSchema.optional(),
     ticketId: z.string().trim().min(1).max(80),
     replacement: activeTicketCoreSchema,
     acknowledged: z.literal(true, {
@@ -221,9 +230,9 @@ export function updateTicketDetails(existing: Ticket, core: TicketCore, now = ne
   }
   if (existing.status === "active") {
     const protectedFields: Array<keyof TicketCore> = ["eventId", "direction", "mode", "serviceNumber", "date", "departureTime",
-      "arrivalDate", "arrivalTime", "fromName", "fromDetail", "toName", "toDetail", "passengerCount", "fareCents"];
+      "arrivalDate", "arrivalTime", "fromName", "fromDetail", "toName", "toDetail", "passengerCount", "fareCents", "seat"];
     for (const key of protectedFields) {
-      if (existing[key] !== null && existing[key] !== "" && existing[key] !== core[key]) {
+      if (existing[key] != null && existing[key] !== "" && existing[key] !== core[key]) {
         throw new Error("已确认的班次、日期、站点、人数或票面金额不能直接改写；仅可补空白资料，真实改签请使用替换指定票。");
       }
     }

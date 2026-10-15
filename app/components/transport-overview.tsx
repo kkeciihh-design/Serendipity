@@ -7,6 +7,7 @@ import type { PlanEvent } from "@/lib/plan";
 import type { Ticket, TicketAction, TicketCore, TicketDirection, TicketMode } from "@/lib/tickets";
 import { ticketChain, ticketWarnings } from "@/lib/tickets";
 import type { PlanVersionClient } from "./plan-overview";
+import { TicketImportPanel, type ImportReview } from "./ticket-import-panel";
 
 const inputStyle = "mt-1 min-h-12 min-w-0 w-full rounded-md border border-sand bg-white px-3 py-2 text-base text-charcoal disabled:bg-shell disabled:text-graphite";
 const actionStyle = "inline-flex min-h-12 items-center justify-center gap-2 rounded-md border border-sage px-4 py-2 text-sm font-semibold text-sage disabled:cursor-not-allowed disabled:opacity-50";
@@ -15,12 +16,12 @@ const directionLabels = { departure: "去程", return: "返程" };
 const modeLabels = { train: "高铁 / 火车", flight: "国内飞机" };
 const statusLabels = { draft: "草稿", active: "当前有效", cancelled: "已退票", replaced: "已替换" };
 const accessLabels = { walking: "步行", public_transit: "公交 / 地铁", driving: "驾车 / 出租车" };
-type TicketDraft = { [K in keyof TicketCore]: string };
+type TicketDraft = { [K in keyof TicketCore]-?: string };
 type TicketOperation = { kind: "cancel" | "activate_draft"; ticketId: string };
 
 function blankTicket(event: PlanEvent, direction: TicketDirection, mode: TicketMode): TicketDraft {
   return {
-    eventId: event.id, direction, mode, serviceNumber: "", date: "", departureTime: "",
+    eventId: event.id, direction, mode, serviceNumber: "", seat: "", date: "", departureTime: "",
     arrivalDate: "", arrivalTime: "", fromName: "", fromDetail: "", toName: "", toDetail: "",
     chainOriginName: "", chainDestinationName: "", accessMode: "", accessDurationMinutes: "",
     accessFareCents: "", accessNote: "", egressMode: "", egressDurationMinutes: "",
@@ -33,7 +34,7 @@ function ticketDraft(ticket: TicketCore, event: PlanEvent): TicketDraft {
   return Object.fromEntries(Object.keys(blankTicket(event, ticket.direction, ticket.mode)).map((key) => {
     const field = key as keyof TicketCore;
     const value = ticket[field];
-    return [field, value === null ? "" : field.endsWith("Cents") ? String(Number(value) / 100) : String(value)];
+    return [field, value == null ? "" : field.endsWith("Cents") ? String(Number(value) / 100) : String(value)];
   })) as TicketDraft;
 }
 
@@ -64,6 +65,7 @@ function ticketName(ticket: TicketCore) {
 
 function TicketDetails({ ticket }: { ticket: TicketCore }) {
   return <dl className="grid min-w-0 gap-x-4 gap-y-2 text-sm leading-6 sm:grid-cols-2">
+    <div><dt className="text-graphite">座位（仅本机票面）</dt><dd>{ticket.seat || "待补"}</dd></div>
     <div className="min-w-0 sm:col-span-2"><dt className="text-graphite">班次与站点</dt><dd className="break-words font-semibold">{modeLabels[ticket.mode]} · {ticketName(ticket)}</dd></div>
     <div><dt className="text-graphite">出发（北京时间）</dt><dd>{dateTime(ticket.date, ticket.departureTime)}{ticket.fromDetail ? ` · ${ticket.fromDetail}` : ""}</dd></div>
     <div><dt className="text-graphite">到达（北京时间）</dt><dd>{dateTime(ticket.arrivalDate, ticket.arrivalTime)}{ticket.toDetail ? ` · ${ticket.toDetail}` : ""}</dd></div>
@@ -110,8 +112,8 @@ function JourneyChain({ ticket, events }: { ticket: Ticket; events: PlanEvent[] 
 }
 
 function TicketFields({ draft, setDraft, disabled, activeTicket }: { draft: TicketDraft; setDraft: (draft: TicketDraft) => void; disabled: boolean; activeTicket?: Ticket }) {
-  const protectedFields = new Set<keyof TicketCore>(["mode", "serviceNumber", "date", "departureTime", "arrivalDate", "arrivalTime", "fromName", "fromDetail", "toName", "toDetail", "passengerCount", "fareCents"]);
-  const fieldDisabled = (key: keyof TicketCore) => disabled || Boolean(activeTicket && protectedFields.has(key) && activeTicket[key] !== null && activeTicket[key] !== "");
+  const protectedFields = new Set<keyof TicketCore>(["mode", "serviceNumber", "date", "departureTime", "arrivalDate", "arrivalTime", "fromName", "fromDetail", "toName", "toDetail", "passengerCount", "fareCents", "seat"]);
+  const fieldDisabled = (key: keyof TicketCore) => disabled || Boolean(activeTicket && protectedFields.has(key) && activeTicket[key] != null && activeTicket[key] !== "");
   const field = (key: keyof TicketDraft, label: string, type = "text", options: { min?: number; max?: number; maxLength?: number; step?: number; placeholder?: string } = {}) => <label className="block min-w-0 text-sm font-medium text-charcoal">{label}<input type={type} value={draft[key]} onChange={(event) => setDraft({ ...draft, [key]: event.target.value })} disabled={fieldDisabled(key)} className={inputStyle} maxLength={120} {...options} /></label>;
   const accessFields = (prefix: "access" | "egress", label: string) => <fieldset className="min-w-0 rounded-md border border-sand p-3">
     <legend className="px-1 text-sm font-semibold">{label}</legend>
@@ -126,6 +128,7 @@ function TicketFields({ draft, setDraft, disabled, activeTicket }: { draft: Tick
     <div className="grid min-w-0 gap-3 sm:grid-cols-2">
       <label className="min-w-0 text-sm font-medium text-charcoal">交通方式<select value={draft.mode} disabled={fieldDisabled("mode")} onChange={(event) => setDraft({ ...draft, mode: event.target.value })} className={inputStyle}>{Object.entries(modeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       {field("serviceNumber", "车次 / 航班号", "text", { maxLength: 40 })}
+      {field("seat", "座位 / 车厢", "text", { maxLength: 80 })}
       {field("date", "出发日期", "date")}{field("departureTime", "出发时刻", "time")}
       {field("arrivalDate", "到达日期", "date")}{field("arrivalTime", "到达时刻", "time")}
       {field("fromName", "出发站点 / 机场")}{field("toName", "到达站点 / 机场")}
@@ -167,6 +170,8 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
   const [acknowledged, setAcknowledged] = useState(false);
   const [operationAcknowledged, setOperationAcknowledged] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [importReview, setImportReview] = useState<ImportReview | null>(null);
+  const [importKey, setImportKey] = useState(0);
   const [feedback, setFeedback] = useState<{ error: boolean; message: string } | null>(null);
   const editor = useRef<HTMLElement>(null);
   const operationPanel = useRef<HTMLElement>(null);
@@ -196,6 +201,8 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
       const payload = await response.json().catch(() => null) as { error?: string; plan?: PlanVersionClient } | null;
       if (!response.ok || !payload?.plan) throw new Error(payload?.error ?? `保存失败（HTTP ${response.status}），请重试。`);
       onSaved(payload.plan);
+      setImportKey((key) => key + 1);
+      setImportReview(null);
       setAcknowledged(false);
       setOperationAcknowledged(false);
       const remainsDraft = action.action === "create_draft" || action.action === "update_details" && tickets.find((ticket) => ticket.id === action.ticketId)?.status === "draft";
@@ -212,6 +219,7 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
 
   const openEditor = (replacement?: Ticket, editDetails = false) => {
     if (!event) return;
+    setImportReview(null);
     if (replacement && editDetails) {
       if (editTicketId !== replacement.id || !draft) setDraft(ticketDraft(replacement, event));
       setEditTicketId(replacement.id);
@@ -220,7 +228,7 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
       if (replacementId !== replacement.id || !draft) setDraft(ticketDraft(replacement, event));
       setReplacementId(replacement.id);
       setEditTicketId(null);
-    } else if (replacementId || editTicketId || !draft) {
+    } else if (replacementId || editTicketId || !draft || importReview) {
       setDraft(blankTicket(event, direction, mode));
       setReplacementId(null);
       setEditTicketId(null);
@@ -238,9 +246,10 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
     const core = { ...draftCore(draft), eventId: event.id, direction };
     const isDraft = button?.value === "draft";
     if (!isDraft && !acknowledged) return;
-    const action: TicketAction = editTicketId ? { action: "update_details", ticketId: editTicketId, ticket: core, acknowledged: true } : isDraft ? { action: "create_draft", ticket: core } : replacementId
-      ? { action: "replace", ticketId: replacementId, replacement: core, acknowledged: true }
-      : { action: "activate", ticket: core, acknowledged: true };
+    const imported = importReview ? { importSource: importReview.source, importResolution: importReview.resolution } : {};
+    const action: TicketAction = editTicketId ? { action: "update_details", ticketId: editTicketId, ticket: core, acknowledged: true } : isDraft ? { action: "create_draft", ticket: core, ...imported } : replacementId
+      ? { action: "replace", ticketId: replacementId, replacement: core, acknowledged: true, ...imported }
+      : { action: "activate", ticket: core, acknowledged: true, ...imported };
     if (await save(action)) {
       setDraft(null);
       setEditorOpen(false);
@@ -252,6 +261,12 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
   return <section hidden={hidden} aria-label={`${directionLabels[direction]}交通`} className="mt-4 min-w-0">
     {!event ? <p className="rounded-md bg-clay-soft p-4 text-sm leading-6 text-clay">这个计划缺少{directionLabels[direction]}交通事件，请先修复行程再录入票面。</p> : <>
       <div className="flex flex-wrap items-center justify-between gap-3"><h4 className="text-base font-semibold text-charcoal">{directionLabels[direction]} · {active.length ? `${active.length} 张有效票` : "尚未确认有效票"}</h4><button type="button" disabled={!plan.isCurrent || busy} onClick={() => openEditor()} className={actionStyle}><Plus aria-hidden="true" className="size-4" />录入票面</button></div>
+      {plan.isCurrent ? <TicketImportPanel key={importKey} tickets={tickets} disabled={busy} onDiscard={() => { if (importReview) { setEditorOpen(false); setDraft(null); setImportReview(null); } setOperation(null); setAcknowledged(false); setOperationAcknowledged(false); }} onRefund={(ticketId) => { setOperation({ kind: "cancel", ticketId }); setOperationAcknowledged(false); setEditorOpen(false); requestAnimationFrame(() => operationPanel.current?.scrollIntoView({ behavior: "smooth", block: "center" })); }} onReview={(review) => {
+        const fields = Object.fromEntries(Object.entries(review.fields).map(([key, value]) => [key, value === null ? "" : key === "fareCents" ? String(Number(value) / 100) : String(value)]));
+        setDraft({ ...blankTicket(event, direction, "train"), ...fields });
+        setImportReview(review); setReplacementId(review.resolution === "replacement" ? review.targetId ?? null : null); setEditTicketId(null); setOperation(null); setAcknowledged(false); setEditorOpen(true);
+        requestAnimationFrame(() => editor.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      }} /> : null}
       {active.length === 0 ? <div className="mt-3 rounded-md border border-sand bg-cream p-4">
         <h5 className="text-sm font-semibold">先选候选，再核对实际票面</h5>
         <p className="mt-2 text-sm leading-6 text-graphite">建议时段：{event.date} {event.startTime} → {event.endDate ?? event.date} {event.endTime}，来自本版行程安排，班次、价格和余票待查询。</p>
@@ -264,6 +279,7 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
       {tickets.length > 0 ? <div className="mt-4 space-y-3" aria-label={`${directionLabels[direction]}票据列表`}>{tickets.map((ticket, index) => <article key={ticket.id} data-testid={`ticket-${ticket.id}`} aria-label={`${directionLabels[direction]}票据 ${index + 1} ${ticket.serviceNumber || "班次待补"} ${statusLabels[ticket.status]}`} className="min-w-0 rounded-md border border-sand bg-white p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h5 className="text-sm font-semibold">票据 {index + 1} · {ticket.serviceNumber || "班次待补"}</h5><span className={`rounded px-2 py-1 text-xs font-medium ${ticket.status === "active" ? "bg-sage-soft text-sage" : "bg-shell text-graphite"}`}>{statusLabels[ticket.status]}</span></div>
         <TicketDetails ticket={ticket} />
+        {ticket.importSource ? <p className="mt-2 text-xs text-graphite">来源：本机 OCR，关键票面由用户确认；非官方核验。原图不保存。</p> : null}
         <p className="mt-2 break-all text-xs leading-5 text-graphite">票据编号：{ticket.id}{ticket.confirmedAt ? ` · 票面确认于 ${new Date(ticket.confirmedAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}` : " · 尚未确认"}</p>
         {ticket.status === "active" && ticket.confirmedAt ? <JourneyChain ticket={ticket} events={plan.events} /> : null}
         {ticket.status === "draft" ? <p className="mt-2 text-sm leading-6 text-graphite">草稿不会固定日程，核对后才生效。</p> : null}
@@ -284,7 +300,7 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
         <div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={!plan.isCurrent || busy || !operationAcknowledged || !operationValid} onClick={async () => { if (await save({ action: operation.kind, ticketId: operation.ticketId, acknowledged: true })) setOperation(null); }} className={`${actionStyle} bg-sage text-white hover:bg-focus`}>{busy ? "正在保存…" : operation.kind === "cancel" ? "确认记录退票" : "确认草稿生效"}</button><button type="button" disabled={busy} onClick={() => { setOperation(null); setOperationAcknowledged(false); }} className={actionStyle}>取消操作</button></div>
       </section> : null}
       {editorOpen && draft ? <section ref={editor} aria-label="手工票面" className="mt-4 min-w-0 rounded-md border border-sage bg-white p-4">
-        <h4 className="text-base font-semibold">{editTicketId ? edited?.status === "draft" ? "编辑草稿资料" : "补充有效票资料" : replacementId ? "替换指定票面" : `手工录入${directionLabels[direction]}票面`}</h4>
+        <h4 className="text-base font-semibold">{importReview ? `核对识别的${directionLabels[direction]}票面` : editTicketId ? edited?.status === "draft" ? "编辑草稿资料" : "补充有效票资料" : replacementId ? "替换指定票面" : `手工录入${directionLabels[direction]}票面`}</h4>
         <p className="mt-2 text-sm leading-6 text-graphite">{editTicketId && edited?.status === "active" ? "可补充空白票面字段、接驳与办理资料。已确认的非空票面字段已锁定；如已办理改签，请使用替换指定票入口。" : "已知票面如实记录，未知字段留空。确认有效票会固定已知班次与时刻，接驳资料可稍后补齐。"}</p>
         {editTicketId ? <p className="mt-2 break-all text-xs text-graphite">保留票据编号：{editTicketId}{edited?.status === "draft" ? " · 修改后仍为草稿，需另行确认生效。" : ""}</p> : null}
         {replacementId ? <div className="mt-4 rounded-md border border-sand bg-shell p-3" aria-label="指定原票预览"><h5 className="mb-2 text-sm font-semibold">指定原票 · 将记为已替换</h5>{replaced ? <TicketDetails ticket={replaced} /> : <p>原票已不存在。</p>}<p className="mt-2 break-all text-xs text-graphite">指定票据：{replacementId}</p></div> : null}
@@ -310,7 +326,7 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
 export function TransportOverview({ tripId, plan, onSaved, direction, onDirectionChange }: { tripId: string; plan: PlanVersionClient; onSaved: (plan: PlanVersionClient) => void; direction: TicketDirection; onDirectionChange: (direction: TicketDirection) => void }) {
   return <section className="mt-4 min-w-0" aria-label="门到门交通总览">
     <h3 className="text-lg font-semibold text-charcoal">把去程与返家都接完整</h3>
-    <p className="mt-2 text-sm leading-6 text-graphite">核对家门口到目的地、目的地到最终返回点的每个环节。只有手工确认的有效票参与当前交通约束。</p>
+    <p className="mt-2 text-sm leading-6 text-graphite">核对家门口到目的地、目的地到最终返回点的每个环节。只有你确认的有效票参与当前交通约束。选择去程或返程后可导入对应票图。</p>
     {!plan.isCurrent ? <p className="mt-3 rounded-md bg-shell p-3 text-sm leading-6 text-graphite">历史版本只读，展示当时的票据与交通链。</p> : null}
     {!plan.requirementUpToDate && plan.isCurrent ? <p className="mt-3 rounded-md bg-clay-soft p-3 text-sm leading-6 text-clay">需求已变化，仍可记录真实票据或退改签事实；本计划继续保留待更新提示。</p> : null}
     <div className="mt-4 flex gap-2" aria-label="交通方向">{directions.map((value) => <button type="button" key={value} aria-pressed={direction === value} onClick={() => onDirectionChange(value)} className={`${actionStyle} flex-1 sm:flex-none ${direction === value ? "bg-sage text-white hover:bg-focus" : "bg-white"}`}>{directionLabels[value]}</button>)}</div>
