@@ -21,6 +21,7 @@ import {
   type RouteMode,
 } from "./routes";
 import { planEventEnd, sortPlanEvents, type PlanEvent } from "./plan";
+import { cityRouteOriginIssue } from "./route-origin";
 
 export const routeQuerySchema = z.object({
   fromEventId: z.string().min(1).max(80),
@@ -77,6 +78,8 @@ export async function fetchRouteJson(url: URL, signal?: AbortSignal) {
 }
 
 function assertAdjacentRoutePair(dayEvents: PlanEvent[], from: PlanEvent, to: PlanEvent) {
+  const originIssue = cityRouteOriginIssue(from);
+  if (originIssue) throw new PlanValidationError(originIssue);
   if (from.date !== to.date) throw new PlanValidationError("城市路线只能连接同一天的两个地点。");
   const placed = sortPlanEvents(dayEvents).filter((event) => event.placeId);
   const fromIndex = placed.findIndex((event) => event.id === from.id);

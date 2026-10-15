@@ -54,7 +54,8 @@ function parseSegment(raw: string) {
 
 export function parseTicketRecognition(text: string): RecognitionDraft {
   const compact = text.replace(/\s/g, "");
-  const documentKind = /退票|退款|已退/.test(compact) ? "refund" : /改签|换票|变更/.test(compact) ? "change" : /[GDCZTK]\s?\d{1,5}/i.test(text) ? "ticket" : "unknown";
+  const uncertainChange = /(?:退票|退款|改签|换票|变更)(?:规则|规定|须知|说明|政策|失败|未成功|不成功)|(?:未|没有|尚未|未曾)(?:办理)?(?:退票|退款|改签|换票|变更)/.test(compact);
+  const documentKind = uncertainChange ? "unknown" : /退票|退款|已退/.test(compact) ? "refund" : /改签|换票|变更/.test(compact) ? "change" : /[GDCZTK]\s?\d{1,5}/i.test(text) ? "ticket" : "unknown";
   // Split only at explicit segment boundaries. Ambiguous multi-ticket images
   // must be cropped separately rather than combining old/new ticket fields.
   const chunks = text.split(/(?:第[一二三四五六七八九\d]+[段程]|行程\s*\d+)[:：]?/).filter((part) => /[GDCZTK]\s?\d{1,5}/i.test(part));

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { forwardCheck, formatRedlineTime, isoAt, redlineUrgency, reverseCandidate, type RedlineInput, type TimingRoute } from "../lib/redlines";
 import { resolveRedline, type RedlineRouteLookup } from "../lib/redline-resolver";
 import { routeCacheKey, clearRouteCache, readCachedRoute } from "../lib/routes";
+import { verificationEvidenceDirectory } from "./helpers/evidence-directory";
 
 const at = (time: string, date = "2026-10-20") => isoAt(Date.parse(`${date}T${time}:00+08:00`));
 function standard(): RedlineInput {
@@ -113,7 +114,7 @@ describe("T28 departure-time validation and bounded lookup", () => {
     expect(r.currentCheck.departureAt).toBe(at("08:45")); expect(r.currentCheck.deadlines[0].arrivalAt).toBe(at("09:30"));
     expect(lookup.mock.calls.map(([time]) => time)).toEqual([at("09:05"), at("08:50"), at("08:45")]);
     expect(r.precision).toBe("verified");
-    const dir = path.resolve("docs/阶段验收/证据/阶段-15"); fs.mkdirSync(dir, { recursive: true });
+    const dir = verificationEvidenceDirectory("phase15"); fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "T28-actual.json"), JSON.stringify({ fixture: "演示班次09:00/10:00；步行10分，乘车30分，截止10:00，缓冲10分", result: r }, null, 2));
   });
   it("can conservatively recheck an earlier candidate without claiming a global latest departure", async () => {

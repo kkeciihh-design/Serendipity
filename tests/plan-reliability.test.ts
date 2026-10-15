@@ -172,9 +172,62 @@ describe("confirmed generation inputs and protected user facts", () => {
       validationResults: { status: "valid", errors: [], warnings: [] } })).rejects.toThrow(/返程/);
     expect(await plans.listPlanVersions(capture.tripId)).toHaveLength(0);
   });
+
+  it.each(["departure", "return"])("rejects a falsely validated destination plan outside the %s boundary before persisting", async (direction) => {
+    const { capture } = await createConfirmed();
+    const bad = planFixture(capture.requestSnapshot);
+    Object.assign(bad.events.find((event) => event.id === direction)!, direction === "departure"
+      ? { startTime: "15:00", endTime: "16:00" } : { startTime: "07:00", endTime: "08:00" });
+    await expect(plans.savePlanVersion({ capture, plan: bad,
+      validationResults: { status: "valid", errors: [], warnings: [] } })).rejects.toThrow(direction === "departure" ? /去程到达前/ : /返程出发后/);
+    expect(await plans.listPlanVersions(capture.tripId)).toHaveLength(0);
+    expect((await trips.getTrip(capture.tripId))?.currentPlanVersionId).toBeNull();
+  });
+
+  it("rejects an AI destination-order error after bounded repair without saving a plan", async () => {
+    const { trip, capture } = await createConfirmed();
+    const bad = planFixture(capture.requestSnapshot);
+    Object.assign(bad.events.find((event) => event.id === "departure")!, { startTime: "15:00", endTime: "16:00" });
+    reply = bad;
+    const requestsBefore = capturedPrompts.length;
+    await expect(generation.generatePlanVersion({ tripId: trip.id, expectedRequestRevision: capture.expectedRequestRevision,
+      expectedPlanVersion: null })).rejects.toMatchObject({ name: "PlanGenerationError", category: "invalid_output" });
+    expect(capturedPrompts.length - requestsBefore).toBe(2);
+    expect(await plans.listPlanVersions(trip.id)).toHaveLength(0);
+  });
 });
 
 describe("legacy event time integrity", () => {
+  it("rechecks stored destination-order errors for current and historical reads without rewriting their data or budget basis", async () => {
+    const { trip, capture, confirmed } = await createConfirmed();
+    const first = await save(capture);
+    const oldEvents = first.events.map((event) => event.id === "departure"
+      ? { ...event, startTime: "15:00", endTime: "16:00" } : event);
+    await prisma.planVersion.update({ where: { id: first.id }, data: {
+      events: JSON.stringify(oldEvents), validationResults: JSON.stringify({ status: "valid", errors: [], warnings: ["既有路线资料仍待复核"] }),
+    } });
+    const beforeCurrentRead = await prisma.planVersion.findUniqueOrThrow({ where: { id: first.id } });
+    const current = await plans.getPlanVersion(trip.id, 1);
+    expect(current.validationResults.status).toBe("invalid");
+    expect(current.validationResults.errors.some((message) => message.includes("去程到达前"))).toBe(true);
+    expect(current.validationResults.warnings).toContain("既有路线资料仍待复核");
+    expect(await prisma.planVersion.findUniqueOrThrow({ where: { id: first.id } })).toEqual(beforeCurrentRead);
+
+    const revised = await confirm(trip.id, confirmed.requestRevision, requestFixture(4, { destination: "杭州", travelerCount: 4 }));
+    const second = await save(await plans.getPlanGenerationContext(trip.id, revised.requestRevision));
+    const beforeHistoryRead = await prisma.planVersion.findUniqueOrThrow({ where: { id: first.id } });
+    const historical = await plans.getPlanVersion(trip.id, 1);
+    expect(historical.isCurrent).toBe(false);
+    expect(historical.validationResults.status).toBe("invalid");
+    expect(historical.validationResults.errors.some((message) => message.includes("去程到达前"))).toBe(true);
+    expect(historical.validationResults.errors.some((message) => /日期必须等于|超出.*行程范围|没有安排/.test(message))).toBe(false);
+    expect(historical.requestSnapshot).toEqual(capture.requestSnapshot);
+    expect(historical.costs).toEqual(first.costs);
+    expect(calculateBudgetSummary(historical.costs, historical.requestSnapshot).factors.travelerCount).toBe(2);
+    expect(await prisma.planVersion.findUniqueOrThrow({ where: { id: first.id } })).toEqual(beforeHistoryRead);
+    expect((await trips.getTrip(trip.id))?.currentPlanVersionId).toBe(second.id);
+  });
+
   async function legacyPlan(crossesMidnight = false) {
     const { trip, capture } = await createConfirmed();
     const first = await save(capture);

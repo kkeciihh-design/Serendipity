@@ -9,11 +9,12 @@ import { derivePlanCosts } from "../../lib/budget";
 import { preparePlanForStorage } from "../../lib/plan";
 import type { RedlineResult } from "../../lib/redlines";
 import type { Ticket } from "../../lib/tickets";
+import { verificationEvidenceDirectory } from "../helpers/evidence-directory";
 
 const directory = path.resolve("test-data/e2e");
 const prisma = new PrismaClient({ datasources: { db: { url: `file:${path.join(directory, "data/serendipity.db").replaceAll("\\", "/")}` } } });
 const seeded: string[] = [];
-const evidence = path.resolve("docs/阶段验收/证据/阶段-15");
+const evidence = verificationEvidenceDirectory("phase15");
 test.afterAll(async () => { await prisma.trip.deleteMany({ where: { id: { in: seeded } } }); await prisma.$disconnect(); });
 
 async function seed(request: APIRequestContext, mode: "walking" | "public_transit" = "walking") {

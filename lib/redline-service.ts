@@ -1,8 +1,9 @@
 import type { PlanVersionRecord } from "./plan-service";
-import { planEventEnd, sortPlanEvents } from "./plan";
+import { planEventEnd, planEventStart } from "./plan";
 import { defaultRedlinePreferences } from "./redline-preferences";
 import { isActiveTicket, type Ticket } from "./tickets";
 import { readCachedRoute, routeCacheKey, writeCachedRoute, type RouteLeg } from "./routes";
+import { cityRouteOriginIssue } from "./route-origin";
 import { forwardCheck, isoAt, routeApplies, type RedlineDeadline, type RedlineInput, type RedlineStep, type TimingRoute } from "./redlines";
 import { resolveRedline } from "./redline-resolver";
 
@@ -20,7 +21,7 @@ export function ticketRedlineInput(plan: PlanVersionRecord, ticket: Ticket): Red
   const departureAt = ticket.date && ticket.departureTime ? isoAt(Date.parse(`${ticket.date}T${ticket.departureTime}:00+08:00`)) : null;
   const incoming = plan.routeLegs.find((r) => r.toEventId === ticket.eventId);
   const originEvent = incoming && plan.events.find((e) => e.id === incoming.fromEventId);
-  const routeMatchesOrigin = originEvent?.locationName === ticket.chainOriginName;
+  const routeMatchesOrigin = originEvent?.locationName === ticket.chainOriginName && !cityRouteOriginIssue(originEvent);
   const linked = incoming && routeMatchesOrigin ? incoming : undefined;
   const route: TimingRoute = linked ? routeTiming(linked) : {
     kind: ticket.accessMode === "walking" ? "fixed" : "timed",
@@ -68,20 +69,33 @@ export function ticketRedlineInput(plan: PlanVersionRecord, ticket: Ticket): Red
   if (!ticket.chainOriginName || !ticket.fromName || !departureAt || !ticket.accessMode) blockers.push("起点、站点、票面日期时刻或接驳方式待补。");
   const peers = plan.tickets.filter((t) => isActiveTicket(t) && t.eventId === ticket.eventId);
   if (peers.some((t) => [t.date, t.departureTime, t.serviceNumber, t.fromName, t.fromDetail].join() !== [ticket.date, ticket.departureTime, ticket.serviceNumber, ticket.fromName, ticket.fromDetail].join())) blockers.push("同一主交通存在不同的有效班次，当前单线行程无法同时衔接。");
-  const ordered = sortPlanEvents(plan.events);
-  const index = ordered.findIndex((e) => e.id === ticket.eventId);
-  const previous = ordered.slice(0, index).reverse().find((e) => e.type !== "local_transport" && e.type !== "preparation");
+  const mainEvent = plan.events.find((e) => e.id === ticket.eventId);
+  const departure = departureAt ? Date.parse(departureAt) : mainEvent ? planEventStart(mainEvent).getTime() : null;
+  const routeStart = linked ? Date.parse(`${linked.date}T${linked.departureTime}:00+08:00`) : null;
+  const routeEnd = routeStart !== null && linked?.durationSeconds != null ? routeStart + linked.durationSeconds * 1000 : null;
+  // Only an explicitly associated transport interval already inside this
+  // route's total may be excluded. Preparation and unrelated travel still
+  // occupy time, including an earlier long event ending after a later one.
+  const occupiedUntil = plan.events.filter((event) => event.id !== ticket.eventId && departure !== null &&
+    planEventStart(event).getTime() <= departure).filter((event) => !(
+    event.type === "local_transport" && linked?.transportEventIds?.includes(event.id) &&
+    linked.status !== "unavailable" && linked.includedTimes.length > 0 && !linked.manualReference?.requiresReconfirmation &&
+    routeStart !== null && routeEnd !== null && planEventStart(event).getTime() >= routeStart &&
+    planEventEnd(event).getTime() <= routeEnd
+  )).map((event) => planEventEnd(event).getTime());
   return { id: ticket.id, eventId: ticket.eventId, direction: ticket.direction,
     origin: ticket.chainOriginName || "起点待补", destination: ticket.fromName || "车站 / 机场待补", departureAt,
     route, steps, deadlines, buffers, assumptions, blockers,
-    earliestDepartureAt: previous ? planEventEnd(previous).toISOString() : null };
+    earliestDepartureAt: occupiedUntil.length ? isoAt(Math.max(...occupiedUntil)) : null };
 }
 
 export async function buildPlanRedlines(plan: PlanVersionRecord, now = new Date().toISOString()) {
   return Promise.all(plan.tickets.filter(isActiveTicket).map(async (ticket) => {
     const input = ticketRedlineInput(plan, ticket);
-    const candidates = plan.routeLegs.filter((r) => r.toEventId === ticket.eventId &&
-      plan.events.find((e) => e.id === r.fromEventId)?.locationName === input.origin);
+    const candidates = plan.routeLegs.filter((r) => {
+      const origin = plan.events.find((e) => e.id === r.fromEventId);
+      return r.toEventId === ticket.eventId && origin?.locationName === input.origin && !cityRouteOriginIssue(origin);
+    });
     return resolveRedline(input, now, plan.id, async (departureAt) => {
       const local = new Date(Date.parse(departureAt) + 8 * 3600_000).toISOString();
       for (const route of candidates) {

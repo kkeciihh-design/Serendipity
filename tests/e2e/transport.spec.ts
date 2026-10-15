@@ -7,6 +7,7 @@ import { planFixture, requestFixture } from "../helpers/plan-fixtures";
 import { calculateBudgetSummary, derivePlanCosts, type PlanCostItem } from "../../lib/budget";
 import { nextPlanDate, preparePlanForStorage, type PlanEvent } from "../../lib/plan";
 import type { Ticket, TicketAction, TicketCore } from "../../lib/tickets";
+import { verificationEvidenceDirectory } from "../helpers/evidence-directory";
 
 // Every setup write and cleanup uses the explicit isolated browser-test DB.
 // These are invented journeys, fares and public landmarks, not live tickets.
@@ -16,7 +17,7 @@ const prisma = new PrismaClient({
   datasources: { db: { url: `file:${path.join(databaseDirectory, "data", "serendipity.db").replaceAll("\\", "/")}` } },
 });
 const seededTripIds: string[] = [];
-const evidenceDirectory = path.resolve("docs", "阶段验收", "证据", "阶段-14");
+const evidenceDirectory = verificationEvidenceDirectory("phase14");
 
 test.afterAll(async () => {
   await prisma.trip.deleteMany({ where: { id: { in: seededTripIds } } });

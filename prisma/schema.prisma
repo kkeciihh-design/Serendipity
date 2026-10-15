@@ -76,6 +76,7 @@ model EvidenceFact {
   targetId          String
   field             String
   status            String
+  evaluationVersion Int         @default(0)
   sourceTitle       String
   sourceUrl         String
   sourcePublisher   String

@@ -1,6 +1,6 @@
 import type { PlanCostItem } from "./budget";
 import { formatPlanDate, nextPlanDate, planEventEnd, type PlanEvent } from "./plan";
-import { reservationRequirement, type EvidenceField, type ExtractedEvidence } from "./evidence";
+import { openingHoursConditions, reservationRequirement, type EvidenceField, type ExtractedEvidence } from "./evidence";
 
 export type EvidenceTarget = {
   event: Pick<PlanEvent, "id" | "title" | "locationName" | "date" | "endDate" | "startTime" | "endTime" | "note">;
@@ -110,6 +110,14 @@ export function evaluateEvidenceField(input: {
     if (closureClauses.some((clause) => !understoodClosure.test(clause))) {
       return pending("来源包含尚未可靠解释的闭馆条件，需要人工复核，不能仅凭通常开放时段确认。");
     }
+    const timeValue = "((?:[01]?\\d|2[0-3]):[0-5]\\d)";
+    const entryClause = new RegExp(`^(?:last entry|last admission|entry ends|admission ends|停止入馆|停止入场|最后入场|最晚入场|入场截止|入馆截止)\\s*(?:[:：]|at)?\\s*${timeValue}$`, "i");
+    const exitClause = new RegExp(`^(?:closing time|(?:all )?visitors must leave by|清场时间|最晚离馆|最晚离园)\\s*[:：]?\\s*${timeValue}$`, "i");
+    const conditions = openingHoursConditions(text);
+    if (conditions.some((clause) => !understoodClosure.test(clause) &&
+      !entryClause.test(clause) && !exitClause.test(clause))) {
+      return pending("来源包含尚未完整解释的开放、入场或离场限制，请核对摘录中的条件；通常开放时段不足以确认本次安排。");
+    }
     if (/\bnot\b|\bnever\b|\bno entry\b|n't|不|尚未|并非/i.test(extracted.quote)) {
       return pending("开放规则含未能可靠解释的否定说明，需要人工复核。");
     }
@@ -130,16 +138,22 @@ export function evaluateEvidenceField(input: {
     const end = minutes(target.event.endTime) + ((target.event.endDate ?? target.event.date) !== target.event.date ? 1440 : 0);
     const open = extracted.hours.start;
     const close = extracted.hours.end + (extracted.hours.end < open ? 1440 : 0);
-    const entryLabel = "(?:last entry|last admission|停止入馆|停止入场|最后入场|最晚入场)";
-    const entryMentions = [...text.matchAll(new RegExp(entryLabel, "gi"))];
-    const entryTimes = [...text.matchAll(new RegExp(`${entryLabel}\\s*(?:[:：]|at)?\\s*((?:[01]?\\d|2[0-3]):[0-5]\\d)`, "gi"))];
-    const distinctEntryTimes = [...new Set(entryTimes.map((match) => minutes(match[1])))];
-    if (entryMentions.length && (entryMentions.length !== entryTimes.length || distinctEntryTimes.length !== 1)) {
+    const distinctEntryTimes = [...new Set(conditions.flatMap((clause) => {
+      const match = clause.match(entryClause);
+      return match ? [minutes(match[1])] : [];
+    }))];
+    const distinctExitTimes = [...new Set(conditions.flatMap((clause) => {
+      const match = clause.match(exitClause);
+      return match ? [minutes(match[1])] : [];
+    }))];
+    if (distinctEntryTimes.length > 1 || distinctExitTimes.length > 1) {
       return pending("来源的停止入场限制没有唯一、明确的时刻，需要人工复核。");
     }
     const lastEntry = distinctEntryTimes[0];
     const entryLimit = lastEntry === undefined ? null : lastEntry + (close > 1440 && lastEntry < open ? 1440 : 0);
-    if (start < open || end > close || (entryLimit !== null && start >= entryLimit)) {
+    const lastExit = distinctExitTimes[0];
+    const exitLimit = lastExit === undefined ? close : lastExit + (close > 1440 && lastExit < open ? 1440 : 0);
+    if (start < open || end > Math.min(close, exitLimit) || (entryLimit !== null && start >= entryLimit)) {
       return conflict("当前安排的起止时刻不符合来源的开放或停止入场时间。");
     }
   } else {

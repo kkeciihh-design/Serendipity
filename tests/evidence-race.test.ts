@@ -1,9 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { derivePlanCosts } from "../lib/budget";
-import { summarizeEventEvidence, type EvidenceField } from "../lib/evidence";
+import { CURRENT_EVIDENCE_EVALUATION_VERSION, summarizeEventEvidence, type EvidenceField } from "../lib/evidence";
 import type { EvidenceTarget } from "../lib/evidence-evaluation";
 import type { EvidenceCandidate, collectEvidence } from "../lib/evidence-source";
+import { collectEvidence as collectFromPages } from "../lib/evidence-source";
 import { nextPlanDate } from "../lib/plan";
 import { isolatedDatabase } from "./helpers/test-database";
 import { planFixture, requestFixture } from "./helpers/plan-fixtures";
@@ -94,6 +95,40 @@ async function snapshotState(tripId: string) {
 }
 
 describe("SD-07 asynchronous source refresh boundaries", () => {
+  it("keeps legacy stored and inherited opening evidence stale until the full page is evaluated again", async () => {
+    const fixture = await seed();
+    const original = await prisma.evidenceFact.create({ data: {
+      tripId: fixture.trip.id, planVersionId: fixture.row.id, targetType: "event", targetId: fixture.event.id,
+      field: "opening_hours", status: "verified", sourceTitle: "Example Museum", sourceUrl: "https://www.example.com/visit",
+      sourcePublisher: "www.example.com", sourceDateStatus: "applicable", extractedValue: "09:00–17:00",
+      contentQuote: "Opening hours daily 09:00–17:00.", searchProvider: "duckduckgo", searchQuery: "Example Museum",
+      retrievedAt: new Date(), applicableFrom: new Date(`${fixture.event.date}T00:00:00+08:00`),
+      applicableUntil: new Date(`${nextPlanDate(fixture.event.date)}T23:59:59+08:00`), lastRefreshStatus: "success",
+    } });
+    expect(original.evaluationVersion).toBe(0);
+    await evidence.closeEvidenceStore();
+    expect((await evidence.listEvidenceFacts(fixture.trip.id))[0]).toMatchObject({ status: "verified", evaluationVersion: 0, effectiveStatus: "stale" });
+    expect(await prisma.evidenceFact.findUnique({ where: { id: original.id } })).toEqual(original);
+
+    const next = await editPlan(fixture, "note");
+    const inherited = (await evidence.listEvidenceFacts(fixture.trip.id)).find((fact) => fact.planVersionId === next.id)!;
+    expect(inherited).toMatchObject({ status: "verified", evaluationVersion: 0, effectiveStatus: "stale" });
+    expect(inherited.conflictReason).toContain("重新读取完整来源");
+    const refreshed = await evidence.verifyEvidenceFact({ ...fixture.input, expectedPlanVersion: next.versionNumber }, {
+      collectEvidence: (input) => collectFromPages({ ...input,
+        lookupImpl: async () => [{ address: "93.184.216.34", family: 4 }],
+        fetchImpl: async (url) => new Response(url.startsWith("https://html.duckduckgo.com/")
+          ? '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.example.com%2Fvisit">Example Museum</a>'
+          : `<title>Example Museum</title><p>Valid from ${fixture.event.date} to ${nextPlanDate(fixture.event.date)}</p><p>Opening hours daily 09:00–17:00.</p>`,
+        { headers: { "content-type": "text/html" } }),
+      }),
+    });
+    expect(refreshed).toMatchObject({ status: "verified", effectiveStatus: "verified", evaluationVersion: CURRENT_EVIDENCE_EVALUATION_VERSION });
+    expect(await prisma.evidenceFact.findUnique({ where: { id: original.id } })).toEqual(original);
+    await evidence.closeEvidenceStore();
+    expect((await evidence.listEvidenceFacts(fixture.trip.id)).find((fact) => fact.planVersionId === next.id)).toMatchObject({ effectiveStatus: "verified", evaluationVersion: CURRENT_EVIDENCE_EVALUATION_VERSION });
+  });
+
   const scenarios = (["note", "schedule", "cost"] as const).flatMap((edit) =>
     (["success", "throw", "failed_result"] as const).map((outcome) => ({ edit, outcome })));
   it.each(scenarios)("keeps both snapshots and pointer unchanged after late $outcome with a $edit edit", async ({ edit, outcome }) => {

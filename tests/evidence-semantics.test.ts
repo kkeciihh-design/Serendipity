@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { collectEvidence } from "../lib/evidence-source";
-import { effectiveEvidenceStatus, extractEvidence, reservationRequirement, summarizeEventEvidence, type EvidenceFactClient, type EvidenceField } from "../lib/evidence";
+import { CURRENT_EVIDENCE_EVALUATION_VERSION, effectiveEvidenceStatus, extractEvidence, reservationRequirement, summarizeEventEvidence, type EvidenceFactClient, type EvidenceField } from "../lib/evidence";
 import { evidenceTarget, evidenceTargetSignature, type EvidenceTarget } from "../lib/evidence-evaluation";
 import { derivePlanCosts } from "../lib/budget";
 import { planFixture, requestFixture } from "./helpers/plan-fixtures";
@@ -33,6 +33,7 @@ function fact(field: EvidenceField, overrides: Partial<EvidenceFactClient> = {})
   return {
     id: field, targetType: "event", targetId: "museum", planVersionId: "v1", field,
     status: "verified", effectiveStatus: "verified", sourceTitle: "Example Museum", sourceUrl: "https://www.example.com/visit",
+    evaluationVersion: CURRENT_EVIDENCE_EVALUATION_VERSION,
     sourcePublisher: "www.example.com", sourcePublishedAt: null, sourceDateStatus: "applicable", extractedValue: "supported value",
     contentQuote: "Explicit supported field value", searchProvider: "duckduckgo", searchQuery: "Example Museum",
     retrievedAt: "2026-10-01T00:00:00Z", applicableFrom: "2026-10-01T00:00:00Z", applicableUntil: "2999-11-30T00:00:00Z",
@@ -184,6 +185,35 @@ describe("SD-05 field value, object and date semantics", () => {
     expect((await read("opening_hours", "<p>Opening hours daily 09:00–17:00.</p><p>Closing time 17:00.</p>")).status).toBe("verified");
   });
 
+  it.each([
+    "每周三休馆", "Doors shut at 3 pm", "Access is discontinued after lunch",
+    "Visitors must vacate the building before the afternoon session",
+    "周三停止接待", "Entry is permitted until 15:00 subject to capacity",
+  ])("retains and downgrades an additional access condition outside the simple timetable grammar: %s", async (condition) => {
+    const target = targetFixture({ date: "2026-11-04", endDate: "2026-11-04", startTime: "16:00", endTime: "17:00" });
+    const result = await read("opening_hours", `<p>Opening hours daily 09:00–18:00.</p><p>${condition}</p>`, { target });
+    expect(result.status).toBe("unverified");
+    expect(result.contentQuote).toContain(condition);
+  });
+
+  it.each(["Entry ends at 15:00", "All visitors must leave by 15:00", "Closing time 15:00"])("compares a separately stated cutoff with the whole visit: %s", async (condition) => {
+    const body = `<p>Opening hours daily 09:00–18:00.</p><p>${condition}</p>`;
+    expect((await read("opening_hours", body, { target: targetFixture({ startTime: "16:00", endTime: "17:00" }) })).status).toBe("conflict");
+    expect((await read("opening_hours", body)).status).toBe("verified");
+  });
+
+  it("distinguishes an entry deadline from a departure deadline", async () => {
+    const target = targetFixture({ startTime: "14:00", endTime: "16:00" });
+    expect((await read("opening_hours", "<p>Opening hours daily 09:00–18:00.</p><p>Entry ends at 15:00.</p>", { target })).status).toBe("verified");
+    expect((await read("opening_hours", "<p>Opening hours daily 09:00–18:00.</p><p>All visitors must leave by 15:00.</p>", { target })).status).toBe("conflict");
+  });
+
+  it("puts an unexplained restriction in the bounded quote even after a long introduction", async () => {
+    const result = await read("opening_hours", `<p>${"Welcome to our museum. ".repeat(100)}</p><p>Opening hours daily 09:00–18:00.</p><p>Visitors must leave when the alarm sounds.</p>`);
+    expect(result.status).toBe("unverified");
+    expect(result.contentQuote).toContain("Visitors must leave when the alarm sounds");
+  });
+
   it("keeps ticket evidence and its signature independent of the journey fare", async () => {
     const event = planFixture(requestFixture(2)).events.find((item) => item.id === "d1-activity")!;
     Object.assign(event, { date: "2026-11-01", endDate: "2026-11-01" });
@@ -215,6 +245,14 @@ describe("SD-05 conservative card labels", () => {
     const legacy = fact("location", { extractedValue: "", sourceDateStatus: "undated" });
     const before = structuredClone(legacy);
     expect(effectiveEvidenceStatus(legacy)).toBe("pending");
+    expect(legacy).toEqual(before);
+  });
+  it("requires a current evaluator version for opening hours while keeping other fields and stored facts unchanged", () => {
+    const legacy = fact("opening_hours", { evaluationVersion: 0 });
+    const before = structuredClone(legacy);
+    expect(effectiveEvidenceStatus(legacy)).toBe("stale");
+    expect(effectiveEvidenceStatus(fact("opening_hours", { evaluationVersion: undefined }))).toBe("stale");
+    expect(effectiveEvidenceStatus(fact("location", { evaluationVersion: 0 }))).toBe("verified");
     expect(legacy).toEqual(before);
   });
   it("labels sources outside the trip's applicable window as needing review", () => {

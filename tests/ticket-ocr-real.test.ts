@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { recognizeTicketImage } from "../lib/ticket-ocr-service";
+import { verificationEvidenceDirectory } from "./helpers/evidence-directory";
 
 // Opt-in because this exercises the actual CPU OCR models, never a mock.
 it.skipIf(process.env.SERENDIPITY_VERIFY_OCR !== "1")("recognizes anonymous normal, rotated, blurry, missing and changed ticket images with real local OCR", async () => {
@@ -14,9 +15,9 @@ it.skipIf(process.env.SERENDIPITY_VERIFY_OCR !== "1")("recognizes anonymous norm
     const draft = await recognizeTicketImage(bytes, "image/png");
     results.push({ sample: name, draft });
   }
-  const output = path.resolve("docs/阶段验收/证据/阶段-16");
+  const output = verificationEvidenceDirectory("phase16");
   await fs.mkdir(output, { recursive: true });
-  await fs.writeFile(path.join(output, "real-ocr.json"), JSON.stringify({ engine: "Tesseract.js 7 / bundled chi_sim", checkedAt: new Date().toISOString(), provenance: "Invented anonymous tickets, real local CPU OCR; no external requests", results }, null, 2));
+  await fs.writeFile(path.join(output, "real-ocr.json"), JSON.stringify({ engine: "Tesseract.js 7 / bundled chi_sim", checkedAt: new Date().toISOString(), provenance: "Invented anonymous tickets, real local CPU OCR; this recognition test does not observe network traffic", results }, null, 2));
   console.log(JSON.stringify(results.map(({ sample, draft }) => ({ sample, kind: draft.documentKind, fields: draft.segments[0].fields }))));
   for (const name of ["normal", "rotated"]) {
     const draft = results.find((result) => result.sample === name)!.draft;

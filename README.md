@@ -31,6 +31,7 @@ SERENDIPITY_DATA_DIR 可为隔离实例指定独立根目录，数据库位于�
 - npm run lint：静态检查。
 - npm run test:e2e：生产构建与隔离浏览器验证，当前配置使用 Microsoft Edge 和独立 3100 端口。
 - npm run verify:phase16：生成匿名合成票面，并实际运行本机 OCR 验证；常规单元测试默认跳过这一独立真实识别用例。
+- npm run verify:ocr-offline：在服务、识别子进程和工作线程中拦截 Node 网络 API，运行真实本机 OCR；这是 API 层验证，不是操作系统级抓包。测试证据写入隔离 test-data/verification-output，不覆盖旧验收证据。
 
 旧阶段 03–10 的一次性验收/截图脚本已停用，不能用于当前版本；请使用上述现行回归入口。外部地图演示属于单独验证，必须显式启用并使用隔离实例，不等同于离线自动测试。
 

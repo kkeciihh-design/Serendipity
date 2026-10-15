@@ -90,6 +90,7 @@ function planPrompt(input: {
     `请为目的地 ${input.destination} 生成 ${input.dates.length} 天基础行程草稿。`,
     `日期必须逐日等于：${input.dates.join("、")}。`,
     "硬性结构：第 1 天恰好一个去程交通；最后一天恰好一个返程交通；每天至少两餐、一个活动、一个休息、一个准备事项；除最后一天外每天一个住宿区域；所有事件不得重叠，结束时间必须晚于开始时间。",
+    "目的地活动和住宿必须在去程到达之后开始、在返程出发之前结束。出发前准备和早餐可以发生在出发地，不要为凑齐每日活动把活动放在尚未到达或已经返程的时段。",
     "费用只能是草稿估算：没有实时依据时 costStatus 用 estimated 或 pending_confirmation，不能宣称余票、确切价格、营业状态、天气或路线已核验。",
     "不要输出 HTML、Markdown、总计或保证可执行的结论。未知费用用 null 并加入 pendingItems。",
     `今天只用于理解语境；计划日期使用确认需求中的日期。JSON Schema：${schema}`,

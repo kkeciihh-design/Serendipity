@@ -6,6 +6,7 @@ import type { Place, SignedPlaceCandidate } from "@/lib/places";
 import { buildPlanOverviewDays } from "@/lib/plan-overview";
 import { buildMapMarkers, buildMapRoutes, numberPlanEvents } from "@/lib/map-link";
 import type { RouteMode } from "@/lib/routes";
+import { cityRouteOriginIssue } from "@/lib/route-origin";
 import { buildAmapTransitLink } from "@/lib/transit-reference";
 import type { PlanVersionClient } from "./plan-overview";
 import { MapCanvas } from "./map-canvas";
@@ -54,9 +55,10 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
     (plan.places ?? []).filter((place) => !filter || place.city === filter),
   ), [events, plan.places, filter]);
   const mapRoutes = useMemo(() => buildMapRoutes((plan.routeLegs ?? []).filter((route) => {
+    if (cityRouteOriginIssue(plan.events.find((event) => event.id === route.fromEventId))) return false;
     const key = `${route.fromEventId}->${route.toEventId}`;
     return (!routeModes[key] || routeModes[key] === route.mode) && (!routeDepartures[key] || routeDepartures[key] === route.departureTime);
-  }), markers), [plan.routeLegs, routeModes, routeDepartures, markers]);
+  }), markers), [plan.routeLegs, plan.events, routeModes, routeDepartures, markers]);
   const placedEvents = events.filter((item) => item.event.placeId);
   const routePairs = placedEvents.slice(0, -1).map((item, index) => ({
     from: item,
@@ -149,6 +151,13 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
         {routePairs.length === 0 ? <p className="rounded-md bg-shell px-4 py-3 text-sm text-graphite">至少确认两个地点后可查询路线。</p> : null}
         {routePairs.map(({ from, to, key }) => {
           const route = (plan.routeLegs ?? []).find((item) => item.fromEventId === from.event.id && item.toEventId === to.event.id);
+          const originIssue = cityRouteOriginIssue(from.event);
+          if (originIssue) return <article key={key} className="min-w-0 rounded-md border border-sand bg-white p-4">
+            <h5 className="text-sm font-semibold text-charcoal">{from.visitLabel}{from.event.title} → {to.visitLabel}{to.event.title}</h5>
+            <p className="mt-2 text-sm leading-6 text-clay">{originIssue}</p>
+            {route ? <p className="mt-2 text-sm text-graphite">原路线起点不适用，耗时、到达和地图折线不再作为衔接依据。{!plan.isCurrent ? "历史费用保留原记录。" : "未确认路线费用需重新核对，已确认或已支付金额保留。"}</p> : null}
+            <button type="button" className={`${actionStyle} mt-3`} onClick={() => onEventSelect(from.event.id, "transport", from.event.dayNumber)}>核对门到门后段接驳</button>
+          </article>;
           const mode = routeModes[key] ?? route?.mode ?? "walking";
           const date = from.event.date;
           const sameDayConnection = (!from.event.endDate || from.event.endDate === date) && to.event.date === date;

@@ -4,8 +4,10 @@ import { ArrowDown, ExternalLink, Plane, Plus, TrainFront } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { PlanEvent } from "@/lib/plan";
-import type { Ticket, TicketAction, TicketCore, TicketDirection, TicketMode } from "@/lib/tickets";
+import type { Ticket, TicketAction, TicketCore, TicketCostAllocation, TicketDirection, TicketMode } from "@/lib/tickets";
 import { ticketChain, ticketWarnings } from "@/lib/tickets";
+import { budgetFactorsFromSnapshot, costItemLineTotals, costPaymentLabels, hasProtectedCostFact } from "@/lib/budget";
+import { ticketDuplicateHints } from "@/lib/ticket-import";
 import type { PlanVersionClient } from "./plan-overview";
 import { TicketImportPanel, type ImportReview } from "./ticket-import-panel";
 
@@ -17,7 +19,38 @@ const modeLabels = { train: "高铁 / 火车", flight: "国内飞机" };
 const statusLabels = { draft: "草稿", active: "当前有效", cancelled: "已退票", replaced: "已替换" };
 const accessLabels = { walking: "步行", public_transit: "公交 / 地铁", driving: "驾车 / 出租车" };
 type TicketDraft = { [K in keyof TicketCore]-?: string };
-type TicketOperation = { kind: "cancel" | "activate_draft"; ticketId: string };
+type TicketOperation = { kind: "cancel" | "activate_draft" | "resolve_cost"; ticketId: string };
+
+function existingTicketCost(plan: PlanVersionClient, eventId: string) {
+  return plan.costs.find((cost) => cost.id === `cost-${eventId}` && cost.linkedEventId === eventId &&
+    cost.category === "transport" && !cost.eventRemoved && hasProtectedCostFact(cost));
+}
+
+function selectedCostAllocation(plan: PlanVersionClient, eventId: string, choice: string): TicketCostAllocation {
+  if (!existingTicketCost(plan, eventId) || choice === "separate") return { kind: "separate" };
+  return choice === "pending" ? { kind: "pending" } : { kind: "existing", costId: choice };
+}
+
+function needsCostReview(plan: PlanVersionClient, ticket: Ticket) {
+  return Boolean(ticket.confirmedAt && (ticket.costAllocation?.kind === "pending" ||
+    !ticket.costAllocation && existingTicketCost(plan, ticket.eventId) && !plan.costs.some((cost) => cost.id === `ticket-${ticket.id}`)));
+}
+
+function TicketCostChoice({ plan, eventId, choice, onChange, disabled }: {
+  plan: PlanVersionClient; eventId: string; choice: string; onChange: (value: string) => void; disabled: boolean;
+}) {
+  const base = existingTicketCost(plan, eventId);
+  if (!base) return <p className="mt-3 text-sm leading-6 text-graphite">这张票单独记录票面费用；付款与退款仍在预算中核对。</p>;
+  const total = costItemLineTotals(base, budgetFactorsFromSnapshot(plan.requestSnapshot));
+  return <fieldset className="mt-3 rounded-md border border-sand bg-shell p-3">
+    <legend className="px-1 text-sm font-semibold">主票费用归属</legend>
+    <p className="text-sm leading-6">本次主交通已有费用：{money(total.minCents)}{total.maxCents !== total.minCents ? `～${money(total.maxCents)}` : ""}，{costPaymentLabels[base.paymentStatus]}。多人合计可能已包含这张票，请按实际付款核对。</p>
+    <label className="mt-2 block text-sm">这张票如何计费<select aria-label="这张票如何计费" className={inputStyle} value={choice} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
+      <option value="pending">暂不确定，保存票面后继续核对</option><option value={base.id}>已包含在上述既有费用中，不再加一笔</option><option value="separate">不在上述费用内，另记这张票的费用</option>
+    </select></label>
+    <p className="mt-2 text-xs leading-5 text-graphite">未决时费用保持待确认，不把票面金额重复计入。关联不会改写既有金额、付款或退款；多张同行票可共同关联同一笔总费用。</p>
+  </fieldset>;
+}
 
 function blankTicket(event: PlanEvent, direction: TicketDirection, mode: TicketMode): TicketDraft {
   return {
@@ -169,6 +202,8 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
   const [operation, setOperation] = useState<TicketOperation | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [operationAcknowledged, setOperationAcknowledged] = useState(false);
+  const [duplicateDecision, setDuplicateDecision] = useState<"" | "same" | "companion">("");
+  const [costChoice, setCostChoice] = useState("pending");
   const [busy, setBusy] = useState(false);
   const [importReview, setImportReview] = useState<ImportReview | null>(null);
   const [importKey, setImportKey] = useState(0);
@@ -181,6 +216,8 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
     if (previousPlan.current !== plan.id) {
       setAcknowledged(false);
       setOperationAcknowledged(false);
+      setDuplicateDecision("");
+      setCostChoice("pending");
       previousPlan.current = plan.id;
     }
   }, [plan.id]);
@@ -189,7 +226,10 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
   const edited = tickets.find((ticket) => ticket.id === editTicketId);
   const replacementValid = !replacementId || replaced?.status === "active";
   const editValid = !editTicketId || edited?.status === "draft" || edited?.status === "active";
-  const operationValid = operation?.kind === "cancel" ? target?.status === "active" : target?.status === "draft";
+  const operationValid = operation?.kind === "cancel" ? target?.status === "active" : operation?.kind === "resolve_cost" ? Boolean(target?.confirmedAt) : target?.status === "draft";
+  const draftDuplicates = operation?.kind === "activate_draft" && target?.importSource
+    ? ticketDuplicateHints(plan.tickets ?? [], target, target.importSource, target.id) : [];
+  const skipDuplicate = draftDuplicates.length > 0 && duplicateDecision === "same";
 
   const save = async (action: TicketAction) => {
     if (!plan.isCurrent || inFlight.current) return false;
@@ -220,6 +260,7 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
   const openEditor = (replacement?: Ticket, editDetails = false) => {
     if (!event) return;
     setImportReview(null);
+    setCostChoice("pending");
     if (replacement && editDetails) {
       if (editTicketId !== replacement.id || !draft) setDraft(ticketDraft(replacement, event));
       setEditTicketId(replacement.id);
@@ -248,8 +289,8 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
     if (!isDraft && !acknowledged) return;
     const imported = importReview ? { importSource: importReview.source, importResolution: importReview.resolution } : {};
     const action: TicketAction = editTicketId ? { action: "update_details", ticketId: editTicketId, ticket: core, acknowledged: true } : isDraft ? { action: "create_draft", ticket: core, ...imported } : replacementId
-      ? { action: "replace", ticketId: replacementId, replacement: core, acknowledged: true, ...imported }
-      : { action: "activate", ticket: core, acknowledged: true, ...imported };
+      ? { action: "replace", ticketId: replacementId, replacement: core, costAllocation: selectedCostAllocation(plan, event.id, costChoice), acknowledged: true, ...imported }
+      : { action: "activate", ticket: core, costAllocation: selectedCostAllocation(plan, event.id, costChoice), acknowledged: true, ...imported };
     if (await save(action)) {
       setDraft(null);
       setEditorOpen(false);
@@ -264,7 +305,7 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
       {plan.isCurrent ? <TicketImportPanel key={importKey} tickets={tickets} disabled={busy} onDiscard={() => { if (importReview) { setEditorOpen(false); setDraft(null); setImportReview(null); } setOperation(null); setAcknowledged(false); setOperationAcknowledged(false); }} onRefund={(ticketId) => { setOperation({ kind: "cancel", ticketId }); setOperationAcknowledged(false); setEditorOpen(false); requestAnimationFrame(() => operationPanel.current?.scrollIntoView({ behavior: "smooth", block: "center" })); }} onReview={(review) => {
         const fields = Object.fromEntries(Object.entries(review.fields).map(([key, value]) => [key, value === null ? "" : key === "fareCents" ? String(Number(value) / 100) : String(value)]));
         setDraft({ ...blankTicket(event, direction, "train"), ...fields });
-        setImportReview(review); setReplacementId(review.resolution === "replacement" ? review.targetId ?? null : null); setEditTicketId(null); setOperation(null); setAcknowledged(false); setEditorOpen(true);
+        setImportReview(review); setCostChoice("pending"); setReplacementId(review.resolution === "replacement" ? review.targetId ?? null : null); setEditTicketId(null); setOperation(null); setAcknowledged(false); setEditorOpen(true);
         requestAnimationFrame(() => editor.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
       }} /> : null}
       {active.length === 0 ? <div className="mt-3 rounded-md border border-sand bg-cream p-4">
@@ -283,21 +324,31 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
         <p className="mt-2 break-all text-xs leading-5 text-graphite">票据编号：{ticket.id}{ticket.confirmedAt ? ` · 票面确认于 ${new Date(ticket.confirmedAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}` : " · 尚未确认"}</p>
         {ticket.status === "active" && ticket.confirmedAt ? <JourneyChain ticket={ticket} events={plan.events} /> : null}
         {ticket.status === "draft" ? <p className="mt-2 text-sm leading-6 text-graphite">草稿不会固定日程，核对后才生效。</p> : null}
+        {ticket.costAllocation?.kind === "existing" ? <p className="mt-2 text-sm leading-6 text-graphite">票费已明确包含在既有主交通费用中，不另加一笔；退款仍须在预算中确认。</p> : null}
+        {needsCostReview(plan, ticket) ? <div className="mt-3 rounded-md bg-clay-soft p-3 text-sm leading-6"><p>{ticket.costAllocation ? "主票费用归属待核对，金额暂未重复计入。" : "旧版票费归属待核对，原费用金额保持不变。"}</p>{plan.isCurrent ? <button type="button" className={`${actionStyle} mt-2`} disabled={busy} onClick={() => { setOperation({ kind: "resolve_cost", ticketId: ticket.id }); setCostChoice("pending"); setOperationAcknowledged(false); setEditorOpen(false); requestAnimationFrame(() => operationPanel.current?.scrollIntoView({ behavior: "smooth", block: "center" })); }}>核对票费归属</button> : null}</div> : null}
         {ticket.status === "cancelled" || ticket.status === "replaced" ? <p className="mt-2 break-words text-sm leading-6 text-graphite">历史票面，不再参与当前交通约束。{ticket.replacedByTicketId ? `替换为：${ticket.replacedByTicketId}。` : ""}原已支付费用保留，退款请在预算中确认记录。</p> : null}
         {plan.isCurrent && (ticket.status === "active" || ticket.status === "draft") ? <div className="mt-3 flex flex-wrap gap-2">
           <button type="button" disabled={busy} onClick={() => openEditor(ticket, true)} className={actionStyle}>{ticket.status === "draft" ? "编辑草稿" : "补充资料"}</button>
-          <button type="button" disabled={busy} onClick={() => { setOperation({ kind: ticket.status === "draft" ? "activate_draft" : "cancel", ticketId: ticket.id }); setOperationAcknowledged(false); setEditorOpen(false); requestAnimationFrame(() => operationPanel.current?.scrollIntoView({ behavior: "smooth", block: "center" })); }} className={actionStyle}>{ticket.status === "draft" ? "确认这张草稿" : "记录已退票"}</button>
+          <button type="button" disabled={busy} onClick={() => { setOperation({ kind: ticket.status === "draft" ? "activate_draft" : "cancel", ticketId: ticket.id }); setOperationAcknowledged(false); setDuplicateDecision(""); setCostChoice("pending"); setEditorOpen(false); requestAnimationFrame(() => operationPanel.current?.scrollIntoView({ behavior: "smooth", block: "center" })); }} className={actionStyle}>{ticket.status === "draft" ? "确认这张草稿" : "记录已退票"}</button>
           {ticket.status === "active" ? <button type="button" disabled={busy} onClick={() => openEditor(ticket)} className={actionStyle}>替换这张票</button> : null}
         </div> : null}
       </article>)}</div> : null}
-      {operation && target ? <section ref={operationPanel} aria-label={operation.kind === "cancel" ? "退票事实确认" : "草稿票面确认"} className="mt-4 rounded-md border border-sage bg-cream p-4">
-        <h4 className="mb-3 text-base font-semibold">{operation.kind === "cancel" ? "核对指定退票" : "核对草稿票面"}</h4>
+      {operation && target ? <section ref={operationPanel} aria-label={operation.kind === "cancel" ? "退票事实确认" : operation.kind === "resolve_cost" ? "票费归属确认" : "草稿票面确认"} className="mt-4 rounded-md border border-sage bg-cream p-4">
+        <h4 className="mb-3 text-base font-semibold">{operation.kind === "cancel" ? "核对指定退票" : operation.kind === "resolve_cost" ? "核对票费归属" : "核对草稿票面"}</h4>
         <TicketDetails ticket={target} />
         <p className="mt-2 break-all text-xs text-graphite">指定票据：{target.id}</p>
-        <p className="mt-3 text-sm leading-6 text-graphite">{operation.kind === "cancel" ? "仅将这张票记为已退票，其他同行有效票继续保留。原付款不会自动清零；请在预算中记录已确认退款。" : "确认后成为有效票。接驳或票面资料不足时会保存事实并显示待补提醒。"}</p>
+        <p className="mt-3 text-sm leading-6 text-graphite">{operation.kind === "cancel" ? "仅将这张票记为已退票，其他同行有效票继续保留。原付款不会自动清零；请在预算中记录已确认退款。" : operation.kind === "resolve_cost" ? "只核对这张票的费用归属，原票状态、其他同行票及已有付款退款保持不变。" : "确认后成为有效票。接驳或票面资料不足时会保存事实并显示待补提醒。"}</p>
+        {draftDuplicates.length > 0 ? <div className="mt-3 rounded-md bg-clay-soft p-3 text-sm leading-6"><p>当前计划已有疑似同票，请重新核对本次关系：{draftDuplicates.map((hint) => hint.reason).join("；")}。</p><label className="mt-2 block">草稿与已有票的关系<select aria-label="草稿与已有票的关系" value={duplicateDecision} className={inputStyle} disabled={busy} onChange={(event) => { setDuplicateDecision(event.target.value as typeof duplicateDecision); setOperationAcknowledged(false); }}><option value="">请选择</option><option value="same">同一张票，跳过生效</option><option value="companion">不同同行者的独立票</option></select></label></div> : null}
+        {operation.kind !== "cancel" && !skipDuplicate ? <TicketCostChoice plan={plan} eventId={target.eventId} choice={costChoice} disabled={busy} onChange={(value) => { setCostChoice(value); setOperationAcknowledged(false); }} /> : null}
         {!operationValid ? <p className="mt-3 text-sm text-clay">该票状态已经变化，请关闭并重新选择。</p> : null}
-        <label className="mt-3 flex min-h-12 items-start gap-3 text-sm leading-6"><input type="checkbox" checked={operationAcknowledged} disabled={!plan.isCurrent || busy || !operationValid} onChange={(event) => setOperationAcknowledged(event.target.checked)} className="mt-1 size-5 shrink-0" />{operation.kind === "cancel" ? "我已在官方平台办妥这张票的退票" : "我已核对这张草稿，确认是已购有效票"}</label>
-        <div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={!plan.isCurrent || busy || !operationAcknowledged || !operationValid} onClick={async () => { if (await save({ action: operation.kind, ticketId: operation.ticketId, acknowledged: true })) setOperation(null); }} className={`${actionStyle} bg-sage text-white hover:bg-focus`}>{busy ? "正在保存…" : operation.kind === "cancel" ? "确认记录退票" : "确认草稿生效"}</button><button type="button" disabled={busy} onClick={() => { setOperation(null); setOperationAcknowledged(false); }} className={actionStyle}>取消操作</button></div>
+        {!skipDuplicate ? <label className="mt-3 flex min-h-12 items-start gap-3 text-sm leading-6"><input type="checkbox" checked={operationAcknowledged} disabled={!plan.isCurrent || busy || !operationValid} onChange={(event) => setOperationAcknowledged(event.target.checked)} className="mt-1 size-5 shrink-0" />{operation.kind === "cancel" ? "我已在官方平台办妥这张票的退票" : operation.kind === "resolve_cost" ? "我已核对这张票与所选费用的归属" : "我已核对这张草稿，确认是已购有效票"}</label> : null}
+        <div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={!plan.isCurrent || busy || !operationValid || !skipDuplicate && (!operationAcknowledged || draftDuplicates.length > 0 && !duplicateDecision)} onClick={async () => {
+          if (skipDuplicate) { setOperation(null); setOperationAcknowledged(false); setFeedback({ error: false, message: "已跳过同一张票。草稿保持未生效，票据与费用没有增加。" }); return; }
+          const action: TicketAction = operation.kind === "cancel" ? { action: "cancel", ticketId: target.id, acknowledged: true }
+            : operation.kind === "resolve_cost" ? { action: "resolve_cost", ticketId: target.id, costAllocation: selectedCostAllocation(plan, target.eventId, costChoice), acknowledged: true }
+            : { action: "activate_draft", ticketId: target.id, costAllocation: selectedCostAllocation(plan, target.eventId, costChoice), importResolution: duplicateDecision === "companion" ? "companion" : "new", acknowledged: true };
+          if (await save(action)) setOperation(null);
+        }} className={`${actionStyle} bg-sage text-white hover:bg-focus`}>{busy ? "正在保存…" : skipDuplicate ? "跳过这张草稿" : operation.kind === "cancel" ? "确认记录退票" : operation.kind === "resolve_cost" ? "确认费用归属" : "确认草稿生效"}</button><button type="button" disabled={busy} onClick={() => { setOperation(null); setOperationAcknowledged(false); }} className={actionStyle}>取消操作</button></div>
       </section> : null}
       {editorOpen && draft ? <section ref={editor} aria-label="手工票面" className="mt-4 min-w-0 rounded-md border border-sage bg-white p-4">
         <h4 className="text-base font-semibold">{importReview ? `核对识别的${directionLabels[direction]}票面` : editTicketId ? edited?.status === "draft" ? "编辑草稿资料" : "补充有效票资料" : replacementId ? "替换指定票面" : `手工录入${directionLabels[direction]}票面`}</h4>
@@ -306,6 +357,7 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
         {replacementId ? <div className="mt-4 rounded-md border border-sand bg-shell p-3" aria-label="指定原票预览"><h5 className="mb-2 text-sm font-semibold">指定原票 · 将记为已替换</h5>{replaced ? <TicketDetails ticket={replaced} /> : <p>原票已不存在。</p>}<p className="mt-2 break-all text-xs text-graphite">指定票据：{replacementId}</p></div> : null}
         <form onSubmit={submit} className="mt-4">
           <TicketFields draft={draft} setDraft={(next) => { setDraft(next); setAcknowledged(false); }} disabled={!plan.isCurrent || busy} activeTicket={editTicketId && edited?.status === "active" ? edited : undefined} />
+          {!editTicketId ? <TicketCostChoice plan={plan} eventId={event.id} choice={costChoice} disabled={busy} onChange={(value) => { setCostChoice(value); setAcknowledged(false); }} /> : null}
           <details className="mt-4 rounded-md bg-sage-soft/50 p-3" open={Boolean(replacementId)}><summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">{replacementId ? "新票预览 · 确认后生效" : "核对票面预览"}</summary><div className="mt-2" aria-label="新票预览"><TicketDetails ticket={draftCore(draft)} /></div></details>
           {replacementId ? <p className="mt-3 text-sm leading-6 text-graphite">只替换上述指定原票，其他同行票保持有效。旧已支付费用保留；新票票价与退款分别在预算中核对。</p> : null}
           {!replacementValid ? <p className="mt-3 text-sm text-clay">原票已不再有效，请关闭后重新选择要替换的票。</p> : null}

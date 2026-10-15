@@ -9,11 +9,12 @@ import { planFixture, requestFixture } from "../helpers/plan-fixtures";
 import { preparePlanForStorage } from "../../lib/plan";
 import { derivePlanCosts } from "../../lib/budget";
 import type { Ticket } from "../../lib/tickets";
+import { verificationEvidenceDirectory } from "../helpers/evidence-directory";
 
 process.env.SERENDIPITY_DATA_DIR = path.resolve("test-data/e2e");
 const prisma = new PrismaClient({ datasources: { db: { url: `file:${path.resolve("test-data/e2e/data/serendipity.db").replaceAll("\\", "/")}` } } });
 const ids: string[] = [];
-const evidence = path.resolve("docs/阶段验收/证据/阶段-16");
+const evidence = verificationEvidenceDirectory("phase16");
 const samples = path.resolve("test-data/phase16-samples");
 test.use({ actionTimeout: 10_000 });
 test.beforeAll(async () => {
