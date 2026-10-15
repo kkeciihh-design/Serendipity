@@ -208,6 +208,42 @@ describe("basic plan validation", () => {
     expect(result.errors).toContain("第 2 天必须且只能有一个返程交通安排。");
   });
 
+  it.each(["departure", "return"])("rejects destination activities outside the %s boundary even without overlapping events", (direction) => {
+    const plan = completePlan(2);
+    const transport = plan.events.find((item) => item.id === direction)!;
+    Object.assign(transport, direction === "departure"
+      ? { startTime: "15:00", endTime: "16:00" }
+      : { startTime: "05:00", endTime: "06:00" });
+    const result = validatePlan(plan, snapshotFor(2));
+    expect(result.errors.some((message) => message.includes(direction === "departure" ? "去程到达前" : "返程出发后"))).toBe(true);
+    expect(result.errors.some((message) => message.includes("时段重叠"))).toBe(false);
+    expect(result.status).toBe("invalid");
+  });
+
+  it("uses full dates when an overnight accommodation crosses the return departure", () => {
+    const plan = completePlan(2);
+    const hotel = plan.events.find((item) => item.type === "accommodation")!;
+    Object.assign(hotel, { endDate: futureDates(2).dates[1], endTime: "01:00" });
+    Object.assign(plan.events.find((item) => item.id === "return")!, { startTime: "00:30", endTime: "01:30" });
+    expect(validatePlan(plan, snapshotFor(2)).errors).toContain("住宿区域 在返程出发后结束，目的地活动和住宿必须安排在返程前。");
+  });
+
+  it("allows origin preparation and breakfast before departure and destination events at exact boundaries", () => {
+    const plan = completePlan(2);
+    Object.assign(plan.events.find((item) => item.id === "departure")!, { startTime: "09:00", endTime: "10:00" });
+    Object.assign(plan.events.find((item) => item.id === "return")!, { startTime: "12:00", endTime: "12:30" });
+    expect(validatePlan(plan, snapshotFor(2)).errors).toEqual([]);
+  });
+
+  it("does not use incomplete ticket placeholders as a known destination boundary", () => {
+    const plan = completePlan(2);
+    Object.assign(plan.events.find((item) => item.id === "departure")!, { startTime: "15:00", endTime: "16:00", ticketTimingPending: true });
+    const result = validatePlan(plan, snapshotFor(2));
+    expect(result.errors).toEqual([]);
+    expect(result.warnings.some((message) => message.includes("时刻尚不完整"))).toBe(true);
+    expect(result.status).toBe("needs_review");
+  });
+
   it("rejects overlapping events", () => {
     const plan = completePlan(2);
     const duplicate = {

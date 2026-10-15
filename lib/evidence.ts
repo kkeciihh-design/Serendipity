@@ -25,6 +25,8 @@ export type EvidenceEffectiveStatus =
   | "conflict"
   | "stale";
 
+export const CURRENT_EVIDENCE_EVALUATION_VERSION = 1;
+
 export type EvidenceFactClient = {
   id: string;
   planVersionId: string;
@@ -32,6 +34,7 @@ export type EvidenceFactClient = {
   targetId: string;
   field: EvidenceField;
   status: EvidenceStoredStatus;
+  evaluationVersion?: number;
   effectiveStatus: EvidenceEffectiveStatus;
   sourceTitle: string;
   sourceUrl: string;
@@ -69,11 +72,15 @@ export function effectiveEvidenceStatus(
   fact: Pick<
     EvidenceFactClient,
     "status" | "applicableUntil" | "lastRefreshStatus"
-  > & Partial<Pick<EvidenceFactClient, "applicableFrom" | "sourceDateStatus" | "extractedValue" | "contentQuote" | "sourceUrl">>,
+  > & Partial<Pick<EvidenceFactClient, "field" | "evaluationVersion" | "applicableFrom" | "sourceDateStatus" | "extractedValue" | "contentQuote" | "sourceUrl">>,
   now = new Date(),
 ): EvidenceEffectiveStatus {
   if (fact.status === "conflict") {
     return "conflict";
+  }
+  if (fact.status === "verified" && fact.field === "opening_hours" &&
+    (fact.evaluationVersion ?? 0) < CURRENT_EVIDENCE_EVALUATION_VERSION) {
+    return "stale";
   }
   if (["failed", "refreshing", "needs_review"].includes(fact.lastRefreshStatus ?? "")) {
     return "stale";
@@ -217,6 +224,23 @@ export type ExtractedEvidence = {
   price?: { cents: number; unit: "per_person" | "per_ticket" | "one_time" | null };
 };
 
+// A small grammar may verify a simple timetable, but must not silently ignore
+// extra access rules. Inspect the whole page, including separate paragraphs and
+// times without an "opening hours" label. Uninterpreted conditions are retained
+// for the user and prevent an automatic verified result.
+export function openingHoursConditions(text: string): string[] {
+  const weekday = "(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)";
+  const dayRule = `(?:daily|every day|每日|每天|${weekday}\\s*(?:to|through|[-–—])\\s*${weekday}|(?:周|星期)[一二三四五六日天]\\s*(?:至|到|[-–—])\\s*(?:周|星期)?[一二三四五六日天])`;
+  const time = "(?:[01]?\\d|2[0-3]):[0-5]\\d";
+  const simpleTimetable = new RegExp(`^(?:open(?:ing)? hours|opening times|开放时间|营业时间)\\s*[:：]?\\s*(?:from\\s+)?${dayRule}\\s*[,：:]?\\s*${time}\\s*(?:to|[-–—]|至)\\s*${time}$`, "i");
+  const conditionLanguage = /\b(?:closed|closures?|closing|not open|only|except|unless|restrictions?|exceptions?|suspended|unavailable|prohibited|forbidden|must|shall|cannot|can't|not allowed|last entry|last admission)\b|\b(?:entry|admission|entrance|access|visits?|visitors?)\b[^\n]{0,100}\b(?:end|ends|stop|stops|cease|until|before|after|limit|limited|leave|vacate|permit|permitted)\b|闭馆|闭园|休馆|休园|休息日|停业|不开放|暂停|停止|截止|限时|限流|例外|除外|仅限|谢绝|禁止|不得|须|必须|清场|离馆|离园/i;
+  const timeLanguage = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b|\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\d{1,2}\s*[点时]/i;
+  const expanded = text.replace(/[（(]([^()（）]*)[）)]/g, "\n$1\n");
+  return [...new Set(expanded.split(/[\n.;。；，]+/).map((clause) => clause.trim())
+    .filter((clause) => clause && !simpleTimetable.test(clause) &&
+      (conditionLanguage.test(clause) || timeLanguage.test(clause))))];
+}
+
 export function extractEvidence(
   field: EvidenceField,
   text: string,
@@ -227,7 +251,12 @@ export function extractEvidence(
     price: /free admission|admission fee|ticket price|price|门票|票价|免费/i,
     location: /\baddress\b|\blocation\b|地址|位置/i,
   };
-  const relevant = text.split(/\n+/).filter((line) => patterns[field].test(line)).join("\n");
+  const lines = text.split(/\n+/).filter((line) => patterns[field].test(line));
+  // Put restrictions before the ordinary timetable so a bounded quote cannot
+  // hide a limiting paragraph behind introductory or repeated opening text.
+  const relevant = [...new Set([
+    ...(field === "opening_hours" ? openingHoursConditions(text) : []), ...lines,
+  ])].join("\n");
   const quote = relevant.trim().slice(0, 600);
   const missing = { matched: false, value: "", quote };
   if (!relevant || relevant.length > 600 || /\b(?:may|might|subject to|seasonal|depending)\b|暂定|以现场为准|视情况/i.test(relevant)) return missing;

@@ -21,6 +21,7 @@
     "verify:phase13": "node scripts/verify-phase13.mjs",
     "verify:phase13-manual": "node scripts/verify-phase13-manual.mjs",
     "verify:phase16": "node scripts/verify-phase16-ocr.mjs",
+    "verify:ocr-offline": "node scripts/verify-ticket-ocr-offline.mjs",
     "capture:phase05": "node scripts/capture-phase05-screens.mjs",
     "capture:phase06": "node scripts/capture-phase06-screens.mjs",
     "postinstall": "prisma generate",

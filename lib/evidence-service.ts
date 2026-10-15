@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getDatabaseUrl } from "./data-directory";
 import { derivePlanCosts, planCostItemSchema } from "./budget";
 import {
+  CURRENT_EVIDENCE_EVALUATION_VERSION,
   effectiveEvidenceStatus,
   evidenceFieldSchema,
   normalizeOfficialHost,
@@ -74,6 +75,7 @@ function serializeFact(row: EvidenceFact, now = new Date()): EvidenceFactClient 
     targetId: row.targetId,
     field: row.field as EvidenceField,
     status: z.enum(["verified", "unverified", "conflict"]).parse(row.status),
+    evaluationVersion: row.evaluationVersion,
     effectiveStatus: "pending",
     sourceTitle: row.sourceTitle,
     sourceUrl: row.sourceUrl,
@@ -90,7 +92,10 @@ function serializeFact(row: EvidenceFact, now = new Date()): EvidenceFactClient 
     lastRefreshStatus: row.lastRefreshStatus,
     lastRefreshError: row.lastRefreshError,
     contentQuote: row.contentQuote,
-    conflictReason: row.conflictReason,
+    conflictReason: row.field === "opening_hours" && row.status === "verified" &&
+      row.evaluationVersion < CURRENT_EVIDENCE_EVALUATION_VERSION
+      ? [row.conflictReason, "原有摘录不足以复核入场及离场限制，请重新读取完整来源。"].filter(Boolean).join(" ")
+      : row.conflictReason,
   };
   fact.effectiveStatus = effectiveEvidenceStatus(fact, now);
   return fact;
@@ -239,6 +244,9 @@ export async function verifyEvidenceFact(
         where: { id: existing.id },
         data: {
           status,
+          // Only the full source collection path can advance this marker.
+          // Copying snapshots or rereading their quotes must preserve it.
+          evaluationVersion: result.readStatus === "read" ? CURRENT_EVIDENCE_EVALUATION_VERSION : 0,
           sourceTitle: result.sourceTitle,
           sourceUrl: result.sourceUrl,
           sourcePublisher: result.sourcePublisher,

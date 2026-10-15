@@ -52,6 +52,147 @@ async function pay(current: Record, costId: string, amount: number, paymentStatu
 }
 
 describe("atomic ticket fact persistence", () => {
+  const importSource: TicketImportSource = { engine: "tesseract-local", imageFingerprint: "a".repeat(64), cropFingerprint: "b".repeat(64), recognizedAt: "2026-10-15T08:00:00.000Z", documentKind: "ticket" };
+
+  it("rechecks stored OCR draft identity against the final plan and requires a fresh companion decision", async () => {
+    let current = await fixture();
+    const ticket = core(current, { seat: "05车08A", fareCents: 24300, accessMode: null, egressMode: null });
+    current = await act(current, { action: "create_draft", ticket, importSource, importResolution: "new" });
+    const draftId = current.tickets[0].id;
+    current = await act(current, { action: "activate", ticket, acknowledged: true });
+    await expect(act(current, { action: "activate_draft", ticketId: draftId, acknowledged: true })).rejects.toThrow("疑似重复");
+    expect((await plans.getPlanVersion(current.tripId, current.versionNumber)).costs).toEqual(current.costs);
+    expect((await plans.listPlanVersions(current.tripId))[0].versionNumber).toBe(current.versionNumber);
+    current = await act(current, { action: "update_details", ticketId: draftId, ticket: { ...ticket, seat: "05车08B" }, acknowledged: true });
+    await expect(act(current, { action: "activate_draft", ticketId: draftId, acknowledged: true })).rejects.toThrow("疑似重复");
+    const activated = await act(current, { action: "activate_draft", ticketId: draftId, importResolution: "companion", acknowledged: true });
+    expect(activated.tickets.filter((t) => t.status === "active")).toHaveLength(2);
+    expect(activated.tickets.find((t) => t.id === draftId)).toMatchObject({ seat: "05车08B", importSource });
+    expect(activated.costs.filter((cost) => cost.id.startsWith("ticket-")).reduce((sum, cost) => sum + (cost.unitAmountCents ?? 0), 0)).toBe(48600);
+  });
+
+  it("does not consider an OCR draft a duplicate of itself", async () => {
+    let current = await fixture();
+    current = await act(current, { action: "create_draft", ticket: core(current), importSource, importResolution: "new" });
+    const active = await act(current, { action: "activate_draft", ticketId: current.tickets[0].id, acknowledged: true });
+    expect(active.tickets[0].status).toBe("active");
+  });
+
+  it("keeps the OCR category while honoring explicit user correction and preserving refund/change confirmation gates", async () => {
+    const current = await fixture();
+    const source = { ...importSource, documentKind: "refund" as const };
+    await expect(act(current, { action: "activate", ticket: core(current), acknowledged: true, importSource: source })).rejects.toThrow("退票资料");
+    const saved = await act(current, { action: "activate", ticket: core(current), acknowledged: true,
+      importSource: { ...source, confirmedDocumentKind: "ticket" }, importResolution: "new" });
+    expect(saved.tickets[0].importSource).toMatchObject({ documentKind: "refund", confirmedDocumentKind: "ticket" });
+    await expect(act(saved, { action: "activate", ticket: core(saved), acknowledged: true,
+      importSource: { ...importSource, confirmedDocumentKind: "change" }, importResolution: "companion" })).rejects.toThrow("改签资料");
+  });
+
+  it.each(["per_ticket", "per_person", "one_time"] as const)("requires explicit attribution for an existing paid group fare (%s)", async (unit) => {
+    let current = await fixture();
+    current = await plans.savePlanCostEdit({ tripId: current.tripId, expectedPlanVersion: current.versionNumber,
+      edit: { costId: "cost-departure", unit, unitAmountCents: unit === "one_time" ? 48600 : 24300,
+        unitAmountMaxCents: null, quantity: unit === "per_ticket" ? 2 : null, paymentStatus: "paid" } });
+    const original = current;
+    const ticket = core(current, { seat: "05车08A", fareCents: null, accessMode: null, egressMode: null });
+    current = await act(current, { action: "create_draft", ticket, importSource, importResolution: "new" });
+    const firstId = current.tickets[0].id;
+    current = await act(current, { action: "activate_draft", ticketId: firstId, acknowledged: true });
+    expect(current.tickets[0].costAllocation).toEqual({ kind: "pending" });
+    current = await act(current, { action: "update_details", ticketId: firstId, ticket: { ...ticket, fareCents: 24300 }, acknowledged: true });
+    expect(current.costs.find((cost) => cost.id === `ticket-${firstId}`)?.unitAmountCents).toBeNull();
+    const beforeBinding = current;
+    current = await act(current, { action: "resolve_cost", ticketId: firstId, costAllocation: { kind: "existing", costId: "cost-departure" }, acknowledged: true });
+    expect(current.events).toEqual(beforeBinding.events); expect(current.routeLegs).toEqual(beforeBinding.routeLegs);
+    expect(current.tickets[0].confirmedAt).toBe(beforeBinding.tickets[0].confirmedAt);
+    current = await act(current, { action: "activate", ticket: { ...ticket, seat: "05车08B", fareCents: 24300 }, importSource, importResolution: "companion",
+      costAllocation: { kind: "existing", costId: "cost-departure" }, acknowledged: true });
+    const ticketCosts = current.costs.filter((cost) => cost.linkedEventId === "departure");
+    expect(ticketCosts).toHaveLength(1);
+    expect(ticketCosts[0]).toMatchObject({ id: "cost-departure", paymentStatus: "paid", unit: original.costs.find((cost) => cost.id === "cost-departure")!.unit,
+      unitAmountCents: original.costs.find((cost) => cost.id === "cost-departure")!.unitAmountCents });
+    expect(calculateBudgetSummary(current.costs, current.requestSnapshot).totalMinCents).toBe(calculateBudgetSummary(original.costs, original.requestSnapshot).totalMinCents);
+    const second = current.tickets[1];
+    current = await act(current, { action: "cancel", ticketId: firstId, acknowledged: true });
+    expect(current.tickets[1]).toEqual(second);
+    expect(current.costs.filter((cost) => cost.linkedEventId === "departure")).toEqual(ticketCosts);
+    const replaced = await act(current, { action: "replace", ticketId: second.id, replacement: { ...ticket, serviceNumber: "G789", fareCents: 30000 }, acknowledged: true });
+    const newTicket = replaced.tickets.find((t) => t.status === "active")!;
+    expect(newTicket.costAllocation).toEqual({ kind: "pending" });
+    expect(replaced.costs.find((cost) => cost.id === `ticket-${newTicket.id}`)?.unitAmountCents).toBeNull();
+    expect((await plans.getPlanVersion(original.tripId, original.versionNumber)).costs).toEqual(original.costs);
+  });
+
+  it("rejects invalid cost attribution, keeps payments, and allows only one version of a pending decision", async () => {
+    let current = await fixture();
+    current = await pay(current, "cost-departure", 48600);
+    current = await act(current, { action: "activate", ticket: core(current, { accessMode: null, egressMode: null }), acknowledged: true });
+    const ticketId = current.tickets[0].id;
+    for (const costId of ["cost-return", "another-trip-cost", `ticket-${ticketId}`]) {
+      await expect(act(current, { action: "resolve_cost", ticketId, costAllocation: { kind: "existing", costId }, acknowledged: true })).rejects.toThrow("只能关联");
+    }
+    const results = await Promise.allSettled([0, 1].map(() => act(current, { action: "resolve_cost", ticketId,
+      costAllocation: { kind: "existing", costId: "cost-departure" }, acknowledged: true })));
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const latest = (await plans.listPlanVersions(current.tripId))[0];
+    expect(latest.costs.find((cost) => cost.id === "cost-departure")).toMatchObject({ unitAmountCents: 48600, paymentStatus: "paid" });
+    await expect(act(current, { action: "resolve_cost", ticketId, costAllocation: { kind: "separate" }, acknowledged: true })).rejects.toThrow();
+    let separate = await fixture();
+    separate = await act(separate, { action: "activate", ticket: core(separate), acknowledged: true });
+    separate = await pay(separate, `ticket-${separate.tickets[0].id}`, 10000);
+    await expect(act(separate, { action: "resolve_cost", ticketId: separate.tickets[0].id, costAllocation: { kind: "pending" }, acknowledged: true })).rejects.toThrow("已确认费用");
+  });
+
+  it("preserves legacy implicit first-ticket payments without adding a price until explicit attribution", async () => {
+    let current = await fixture();
+    current = await pay(current, "cost-departure", 48600);
+    current = await act(current, { action: "activate", ticket: core(current, { accessMode: null, egressMode: null }),
+      costAllocation: { kind: "existing", costId: "cost-departure" }, acknowledged: true });
+    const legacyTickets = current.tickets.map(({ costAllocation, ...ticket }) => { void costAllocation; return ticket; });
+    await db.planVersion.update({ where: { id: current.id }, data: { tickets: JSON.stringify(legacyTickets) } });
+    const legacy = await plans.getPlanVersion(current.tripId, current.versionNumber);
+    current = await act(legacy, { action: "update_details", ticketId: legacy.tickets[0].id,
+      ticket: core(legacy, { accessMode: null, egressMode: null, note: "补充已知行李资料" }), acknowledged: true });
+    expect(current.costs.filter((cost) => cost.linkedEventId === "departure")).toHaveLength(1);
+    expect(current.costs.find((cost) => cost.id === "cost-departure")).toMatchObject({ unitAmountCents: 48600, paymentStatus: "paid" });
+    expect(current.tickets[0].costAllocation).toBeUndefined();
+    const bound = await act(current, { action: "resolve_cost", ticketId: current.tickets[0].id,
+      costAllocation: { kind: "existing", costId: "cost-departure" }, acknowledged: true });
+    expect(bound.tickets[0].costAllocation).toEqual({ kind: "existing", costId: "cost-departure" });
+    expect((await plans.getPlanVersion(legacy.tripId, legacy.versionNumber)).tickets).toEqual(legacy.tickets);
+  });
+
+  it("rolls back cost attribution and preserves paid group refunds on later ticket changes", async () => {
+    let current = await fixture();
+    current = await pay(current, "cost-departure", 48600);
+    current = await act(current, { action: "activate", ticket: core(current, { accessMode: null, egressMode: null }), acknowledged: true });
+    const ticketId = current.tickets[0].id;
+    await db.$executeRawUnsafe("CREATE TRIGGER ticket_binding_fail BEFORE UPDATE ON Trip BEGIN SELECT RAISE(ABORT, 'synthetic binding failure'); END");
+    try {
+      await expect(act(current, { action: "resolve_cost", ticketId, costAllocation: { kind: "existing", costId: "cost-departure" }, acknowledged: true })).rejects.toThrow();
+    } finally { await db.$executeRawUnsafe("DROP TRIGGER ticket_binding_fail"); }
+    const unchanged = (await plans.listPlanVersions(current.tripId))[0];
+    expect(unchanged.versionNumber).toBe(current.versionNumber); expect(unchanged.costs).toEqual(current.costs); expect(unchanged.tickets).toEqual(current.tickets);
+    current = await act(current, { action: "resolve_cost", ticketId, costAllocation: { kind: "existing", costId: "cost-departure" }, acknowledged: true });
+    current = await pay(current, "cost-departure", 1200, "not_paid");
+    current = await act(current, { action: "cancel", ticketId, acknowledged: true });
+    expect(current.costs.find((cost) => cost.id === "cost-departure")).toMatchObject({ unitAmountCents: 1200, paymentStatus: "not_paid" });
+  });
+
+  it("can confirm a pending ticket as separately paid without erasing that payment or treating an unknown fare as zero", async () => {
+    let current = await fixture();
+    current = await pay(current, "cost-departure", 48600);
+    current = await act(current, { action: "activate", ticket: core(current, { fareCents: null, accessMode: null, egressMode: null }), acknowledged: true });
+    const ticketId = current.tickets[0].id;
+    const separate = await act(current, { action: "resolve_cost", ticketId, costAllocation: { kind: "separate" }, acknowledged: true });
+    expect(separate.costs.find((cost) => cost.id === `ticket-${ticketId}`)).toMatchObject({ unitAmountCents: null, certainty: "pending_confirmation" });
+    expect(separate.costs.find((cost) => cost.id === `ticket-${ticketId}`)?.note).not.toContain("归属待核对");
+    current = await pay(separate, `ticket-${ticketId}`, 24300);
+    const saved = await act(current, { action: "resolve_cost", ticketId, costAllocation: { kind: "separate" }, acknowledged: true });
+    expect(saved.costs.find((cost) => cost.id === `ticket-${ticketId}`)).toMatchObject({ unitAmountCents: 24300, paymentStatus: "paid" });
+    await expect(act(saved, { action: "resolve_cost", ticketId, costAllocation: { kind: "existing", costId: "cost-departure" }, acknowledged: true })).rejects.toThrow("已确认费用");
+  });
   it("T30 imported tickets share manual redlines, preserve companions/payments and invalidate only active constraints", async () => {
     const original = await fixture();
     const date = original.requestSnapshot.startDate!;
@@ -242,15 +383,13 @@ describe("atomic ticket fact persistence", () => {
     await expect(plans.getPlanGenerationContext(current.tripId, current.requestRevision)).rejects.toThrow("已保留当前计划");
   });
 
-  it("explains first-ticket discrepancies while retaining the pre-existing paid cost and its stable identity", async () => {
+  it("binds a ticket to the pre-existing paid cost only after explicit attribution", async () => {
     let current = await fixture();
     current = await pay(current, "cost-departure", 3000);
-    const saved = await act(current, { action: "activate", acknowledged: true, ticket: core(current, { passengerCount: 2 }) });
+    const saved = await act(current, { action: "activate", acknowledged: true, ticket: core(current, { passengerCount: 2 }), costAllocation: { kind: "existing", costId: "cost-departure" } });
     const preserved = saved.costs.find((cost) => cost.id === "cost-departure")!;
     expect(preserved).toMatchObject({ unitAmountCents: 3000, paymentStatus: "paid", unit: "per_ticket", quantity: 1 });
-    expect(preserved.note).toContain("主票每人 100 元 × 2 人，合计 200 元");
-    expect(preserved.note).toContain("预算原记录 30 元");
-    expect(preserved.note).toContain("高 170 元");
+    expect(preserved.note).toContain("用户已确认关联票据包含在本笔费用中");
     expect(preserved.note!.length).toBeLessThanOrEqual(240);
     expect(saved.costs.some((cost) => cost.id === `ticket-${saved.tickets[0].id}`)).toBe(false);
   });

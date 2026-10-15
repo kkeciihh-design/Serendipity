@@ -3,7 +3,7 @@ import { PrismaClient, type EvidenceFact } from "@prisma/client";
 import type { APIRequestContext, Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { derivePlanCosts } from "../../lib/budget";
-import { effectiveEvidenceStatus, type EvidenceFactClient, type EvidenceField } from "../../lib/evidence";
+import { CURRENT_EVIDENCE_EVALUATION_VERSION, effectiveEvidenceStatus, type EvidenceFactClient, type EvidenceField } from "../../lib/evidence";
 import { planFixture, requestFixture } from "../helpers/plan-fixtures";
 
 const prisma = new PrismaClient({ datasources: { db: { url: `file:${path.resolve("test-data/e2e/data/serendipity.db").replaceAll("\\", "/")}` } } });
@@ -24,6 +24,7 @@ async function seed(request: APIRequestContext) {
   const fields: EvidenceField[] = ["opening_hours", "reservation", "price", "location"];
   for (const field of fields) await prisma.evidenceFact.create({ data: {
     tripId: trip.id, planVersionId: row.id, targetType: "event", targetId: "d1-activity", field, status: "verified",
+    evaluationVersion: CURRENT_EVIDENCE_EVALUATION_VERSION,
     sourceTitle: "Example Museum official visitor information", sourceUrl: "https://www.example.com/visit", sourcePublisher: "www.example.com",
     sourceDateStatus: "applicable", extractedValue: field === "opening_hours" ? "09:00–17:00" : `${field} supported value`,
     contentQuote: "Official source excerpt for this field, with explicit dates.",
@@ -49,6 +50,23 @@ async function openHours(page: Page) {
   await page.getByRole("button", { name: /^开放时间/ }).click();
   return page.getByRole("dialog");
 }
+
+test("old opening-hours verification shows needs-review after refresh without rewriting the stored fact", async ({ page, request }) => {
+  const { trip, row } = await seed(request);
+  await prisma.evidenceFact.updateMany({ where: { planVersionId: row.id, field: "opening_hours" }, data: { evaluationVersion: 0 } });
+  const before = await prisma.evidenceFact.findFirstOrThrow({ where: { planVersionId: row.id, field: "opening_hours" } });
+  await page.goto(`/trips/${trip.id}`);
+  const card = page.getByRole("button", { name: /Example Museum/ }).first();
+  await expect(card).toContainText("来源需复核");
+  await expect(card).not.toContainText("4 项来源字段已核验");
+  let drawer = await openHours(page);
+  await expect(drawer.getByText("需复核", { exact: true })).toBeVisible();
+  await expect(drawer.getByText(/原有摘录不足以复核入场及离场限制/)).toBeVisible();
+  await page.reload();
+  drawer = await openHours(page);
+  await expect(drawer.getByText("需复核", { exact: true })).toBeVisible();
+  expect(await prisma.evidenceFact.findUnique({ where: { id: before.id } })).toEqual(before);
+});
 
 test("shows traceable field values, unknown dates and conflicts without claiming the whole card is verified", async ({ page, request }) => {
   const { trip, row } = await seed(request);

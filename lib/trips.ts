@@ -150,39 +150,25 @@ export async function createTrip(input: unknown): Promise<Trip> {
 
 export async function updateTrip(id: string, input: unknown): Promise<Trip> {
   const parsed = parseOrThrow(updateTripSchema, input);
-  const existing = await store.trip.findUnique({
-    include: { request: true },
-    where: { id },
-  });
-  if (!existing) {
-    throw new TripNotFoundError();
-  }
-
-  const data: {
-    title?: string;
-    originalRequest?: string;
-    status?: string;
-  } = {};
-
-  if (parsed.title !== undefined) {
-    data.title = parsed.title;
-  }
-  const originalRequestChanged =
-    parsed.originalRequest !== undefined &&
-    parsed.originalRequest !== existing.request?.originalRequest;
-
-  if (parsed.originalRequest !== undefined) {
-    data.originalRequest = parsed.originalRequest;
-  }
-
-  if (originalRequestChanged) {
-    if (!existing.request || !parsed.expectedRequestRevision) {
-      throw new TripRevisionConflictError();
-    }
-  }
-
   try {
     return await prisma.$transaction(async (transaction) => {
+      const existing = await transaction.trip.findUnique({
+        include: { request: true },
+        where: { id },
+      });
+      if (!existing) throw new TripNotFoundError();
+      // Even a same-value submission belongs to the revision the user saw.
+      // Read, compare and write both copies under the same transaction.
+      if (parsed.originalRequest !== undefined &&
+        (!existing.request || existing.request.requestRevision !== parsed.expectedRequestRevision)) {
+        throw new TripRevisionConflictError();
+      }
+      const originalRequestChanged = parsed.originalRequest !== undefined &&
+        parsed.originalRequest !== existing.request?.originalRequest;
+      const data = {
+        ...(parsed.title !== undefined ? { title: parsed.title } : {}),
+        ...(originalRequestChanged ? { originalRequest: parsed.originalRequest } : {}),
+      };
       if (originalRequestChanged) {
         const revisionUpdate = await transaction.tripRequest.updateMany({
           where: {

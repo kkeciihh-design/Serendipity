@@ -334,6 +334,25 @@ export function validatePlan(
     errors.push(`第 ${dates.length} 天必须且只能有一个返程交通安排。`);
   }
 
+  // Activities and accommodation belong to the destination stay. Meals and
+  // preparation may legitimately happen at home before departure/after return.
+  // Unknown ticket times retain their placeholders for display only.
+  const departure = departureTransport.length === 1 ? departureTransport[0] : null;
+  const returning = returnTransport.length === 1 ? returnTransport[0] : null;
+  for (const event of plan.events.filter((item) => item.type === "activity" || item.type === "accommodation")) {
+    if (departure && !departure.ticketTimingPending &&
+      planEventStart(event).getTime() < planEventEnd(departure).getTime()) {
+      errors.push(`${event.title} 在去程到达前开始，目的地活动和住宿必须安排在到达后。`);
+    }
+    if (returning && !returning.ticketTimingPending &&
+      planEventEnd(event).getTime() > planEventStart(returning).getTime()) {
+      errors.push(`${event.title} 在返程出发后结束，目的地活动和住宿必须安排在返程前。`);
+    }
+  }
+  if (departure?.ticketTimingPending || returning?.ticketTimingPending) {
+    warnings.push("去返程票面时刻尚不完整，目的地活动与交通的先后关系待补齐时刻后复核。");
+  }
+
   for (let dayNumber = 1; dayNumber < dates.length; dayNumber += 1) {
     const accommodation = plan.events.filter(
       (event) =>

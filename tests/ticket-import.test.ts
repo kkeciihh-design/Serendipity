@@ -30,10 +30,16 @@ describe("ticket image parsing and privacy", () => {
     expect(parseTicketRecognition("第一段\n" + normal + "\n第二段\n" + normal.replace("G6012", "G6013")).segments).toHaveLength(2);
     expect(parseTicketRecognition(normal + "\n新票 G6013 10:30").segments[0].fields.serviceNumber).toBeNull();
   });
+  it("does not interpret refund rules, failures or negated changes as completed facts", () => {
+    for (const suffix of ["退票规则：发车前可退票", "退票失败，原票仍有效", "未改签，票面仍有效", "尚未办理退款"]) {
+      expect(parseTicketRecognition(`${normal}\n${suffix}`).documentKind).toBe("unknown");
+    }
+  });
   it("flags same image and same journey while preserving separate seat hints", () => {
     const core = ticketFixture("2026-10-29", { seat: "05车08A" });
     const ticket = { ...activateTicket(core), importSource: source };
     expect(ticketDuplicateHints([ticket], core, source)[0].reason).toBe("相同图片");
+    expect(ticketDuplicateHints([ticket], core, source, ticket.id)).toEqual([]);
     const differentImage = { ...source, imageFingerprint: "c".repeat(64), cropFingerprint: "d".repeat(64) };
     expect(ticketDuplicateHints([ticket], { ...core, seat: "05车08B" }, differentImage)[0].differentSeat).toBe(true);
     expect(ticketDuplicateHints([ticket], { ...core, fromName: "其他站" }, differentImage)).toEqual([]);

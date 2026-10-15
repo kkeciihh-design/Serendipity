@@ -18,6 +18,7 @@ export function TicketImportPanel({ tickets, disabled, onReview, onRefund, onDis
   const [crop, setCrop] = useState({ left: 0, top: 0, right: 100, bottom: 100 });
   const [fingerprint, setFingerprint] = useState("");
   const [result, setResult] = useState<Result | null>(null);
+  const [documentKind, setDocumentKind] = useState<TicketImportSource["documentKind"]>("unknown");
   const [segment, setSegment] = useState(0);
   const [resolution, setResolution] = useState<ImportResolution | "same" | "refund" | "">("");
   const [targetId, setTargetId] = useState("");
@@ -91,12 +92,12 @@ export function TicketImportPanel({ tickets, disabled, onReview, onRefund, onDis
       const payload = await response.json();
       if (run !== sequence.current) return;
       if (!response.ok || !payload.draft) throw new Error(payload.error ?? "识别失败，请重试。");
-      setResult(payload.draft); setSegment(0); setTargetId(""); setResolution("");
+      setResult(payload.draft); setDocumentKind(payload.draft.documentKind); setSegment(0); setTargetId(""); setResolution("");
     } catch (error) { if (run === sequence.current) setMessage(error instanceof Error && error.name === "AbortError" ? "识别已取消。" : error instanceof Error ? error.message : "识别失败。"); }
     finally { if (run === sequence.current) setBusy(false); element.width = element.height = 0; }
   };
   const selected = result?.segments[segment];
-  const source = result ? { engine: result.engine, recognizedAt: result.recognizedAt, documentKind: result.documentKind, cropFingerprint: result.cropFingerprint, imageFingerprint: fingerprint } : null;
+  const source = result ? { engine: result.engine, recognizedAt: result.recognizedAt, documentKind: result.documentKind, confirmedDocumentKind: documentKind, cropFingerprint: result.cropFingerprint, imageFingerprint: fingerprint } : null;
   const duplicates = selected && source ? ticketDuplicateHints(tickets, selected.fields, source) : [];
   const active = tickets.filter((ticket) => ticket.status === "active");
   const positions = { left: "左边界", top: "上边界", right: "右边界", bottom: "下边界" };
@@ -119,15 +120,19 @@ export function TicketImportPanel({ tickets, disabled, onReview, onRefund, onDis
       {selected && source ? <div className="space-y-3 rounded-md border border-sand bg-white p-3" aria-label="识别预览">
         <h5 className="font-semibold">识别完成 · 等待核对</h5>
         <p className="text-sm text-clay">{result!.documentKind === "refund" ? "检测到退票资料，需指定原票并确认已退事实。" : result!.documentKind === "change" ? "检测到改签资料，请裁剪新票，指定原票后确认替换。" : "识别不会自动生效，接下来可修正票面。"}</p>
+        <label className="block text-sm font-semibold">核对资料种类<select className={input} value={documentKind} disabled={disabled} onChange={(event) => { setDocumentKind(event.target.value as typeof documentKind); setResolution(""); setTargetId(""); onDiscard(); }}>
+          <option value="unknown">暂不确定，继续核对</option><option value="ticket">有效票面（包括退改未成功或仅有规则说明）</option><option value="refund">已办妥退票的资料</option><option value="change">已办妥改签的新票资料</option>
+        </select></label>
+        <p className="text-xs leading-5 text-graphite">识别种类可能出错，可按实际状态修正。退票、改签仍须核对指定原票并另行确认已办妥；规则、按钮或失败提示不是已退改事实。</p>
         {result!.segments.length > 1 ? <label className="block text-sm">选择导入的行程段<select className={input} value={segment} onChange={(event) => { setSegment(Number(event.target.value)); setResolution(""); onDiscard(); }}>{result!.segments.map((item, index) => <option key={index} value={index}>第 {index + 1} 段 · {item.fields.serviceNumber ?? "车次待补"}</option>)}</select></label> : null}
         <p className="break-words text-sm leading-6">{selected.fields.serviceNumber ?? "车次待补"} · {selected.fields.fromName ?? "站点待补"} → {selected.fields.toName ?? "站点待补"}<br />{selected.fields.date ?? "日期待补"} {selected.fields.departureTime ?? "时刻待补"} → {selected.fields.arrivalDate ?? "日期待补"} {selected.fields.arrivalTime ?? "时刻待补"}<br />{selected.fields.seat ?? "座位待补"} · {selected.fields.fareCents === null ? "票价待补" : `¥${selected.fields.fareCents / 100}`}</p>
         <ul className="list-disc space-y-1 pl-5 text-xs leading-5 text-graphite">{selected.notices.map((notice) => <li key={notice}>{notice}</li>)}</ul>
         {duplicates.length ? <div role="status" className="rounded-md bg-clay-soft p-3 text-sm leading-6">{duplicates.map((hint) => <p key={hint.ticketId}>{hint.reason} · {tickets.find((ticket) => ticket.id === hint.ticketId)?.seat ?? "座位未知"}</p>)}<p>同一张票不重复记账；同行票请确认人数与座位。</p></div> : null}
         <label className="block text-sm font-semibold">这张截图用于<select className={input} value={resolution} disabled={disabled} onChange={(event) => { setResolution(event.target.value as typeof resolution); setTargetId(""); onDiscard(); }}>
           <option value="">请选择处理方式</option>
-          {source.documentKind !== "refund" && source.documentKind !== "change" ? <><option value="new">我的新票</option><option value="companion">同行者的新票（独立费用）</option></> : null}
+          {documentKind !== "refund" && documentKind !== "change" ? <><option value="new">我的新票</option><option value="companion">同行者的新票（核对费用归属）</option></> : null}
           <option value="same">同一张票（不重复保存）</option>
-          {source.documentKind !== "refund" ? <option value="replacement">替换指定原票</option> : null}
+          {documentKind !== "refund" ? <option value="replacement">替换指定原票</option> : null}
           <option value="refund">记录指定原票已退票</option>
         </select></label>
         {resolution === "replacement" || resolution === "refund" ? <label className="block text-sm">指定原票<select aria-label="指定原票" value={targetId} className={input} onChange={(event) => { setTargetId(event.target.value); onDiscard(); }}><option value="">请选择当前方向的一张有效票</option>{active.map((ticket, index) => <option key={ticket.id} value={ticket.id}>票 {index + 1} · {ticket.serviceNumber} · {ticket.date} · {ticket.seat || "座位未知"} · {ticket.id.slice(-8)}</option>)}</select></label> : null}

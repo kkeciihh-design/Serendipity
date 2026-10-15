@@ -79,9 +79,17 @@ export type TicketCore = z.infer<typeof ticketCoreSchema>;
 // kept verbatim and reported by validation; they must never block that fact.
 export const activeTicketCoreSchema = ticketCoreSchema;
 
+export const ticketCostAllocationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("separate") }),
+  z.object({ kind: z.literal("existing"), costId: z.string().trim().min(1).max(96) }),
+  z.object({ kind: z.literal("pending") }),
+]);
+export type TicketCostAllocation = z.infer<typeof ticketCostAllocationSchema>;
+
 export const ticketSchema = ticketCoreSchema.extend({
   importSource: ticketImportSourceSchema.optional(),
   redlinePreferences: redlinePreferencesSchema.optional(),
+  costAllocation: ticketCostAllocationSchema.optional(),
   id: z.string().trim().min(1).max(80),
   status: ticketStatusSchema,
   confirmedAt: z.iso.datetime().nullable(),
@@ -96,6 +104,12 @@ export type Ticket = z.infer<typeof ticketSchema>;
 
 export const ticketActionSchema = z.discriminatedUnion("action", [
   z.object({
+    action: z.literal("resolve_cost"),
+    ticketId: z.string().trim().min(1).max(80),
+    costAllocation: ticketCostAllocationSchema,
+    acknowledged: z.literal(true, { error: "请核对票面与既有费用的归属。" }),
+  }),
+  z.object({
     action: z.literal("update_redline"),
     ticketId: z.string().trim().min(1).max(80),
     preferences: redlinePreferencesSchema,
@@ -108,6 +122,7 @@ export const ticketActionSchema = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("activate"),
+    costAllocation: ticketCostAllocationSchema.optional(),
     importSource: ticketImportSourceSchema.optional(),
     importResolution: importResolutionSchema.optional(),
     ticket: activeTicketCoreSchema,
@@ -125,6 +140,8 @@ export const ticketActionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("activate_draft"),
     ticketId: z.string().trim().min(1).max(80),
+    importResolution: z.enum(["new", "companion"]).optional(),
+    costAllocation: ticketCostAllocationSchema.optional(),
     acknowledged: z.literal(true, {
       error: "请确认本人已核对这张草稿票面。",
     }),
@@ -137,6 +154,7 @@ export const ticketActionSchema = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("replace"),
+    costAllocation: ticketCostAllocationSchema.optional(),
     importSource: ticketImportSourceSchema.optional(),
     importResolution: importResolutionSchema.optional(),
     ticketId: z.string().trim().min(1).max(80),
@@ -359,6 +377,9 @@ export function validateTickets(tickets: Ticket[], events: PlanEvent[]) {
     }
     if (ticket.status === "active" && ticket.confirmedAt === null) errors.push(`票据 ${ticket.id} 尚无用户确认时间，不能成为有效约束。`);
     warnings.push(...ticketWarnings(ticket, events));
+    if (ticket.confirmedAt && ticket.costAllocation?.kind === "pending") {
+      warnings.push(`${ticket.serviceNumber || "已确认票据"}：主票费用归属待核对；未将票面金额重复加入既有费用。`);
+    }
   }
 
   const replacedTargets = new Set(

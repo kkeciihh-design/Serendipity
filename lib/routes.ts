@@ -576,9 +576,15 @@ function parseAmapTransitPolyline(transit: unknown): Coordinate[] {
   });
 }
 
+function providerNonnegativeNumber(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string" || typeof value === "string" && !value.trim()) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
 export function parseAmapRoute(payload: unknown, mode: RouteMode): {
   available: boolean;
-  distanceMeters: number;
+  distanceMeters: number | null;
   durationSeconds: number;
   polyline: Coordinate[];
   steps: RouteStep[];
@@ -594,22 +600,22 @@ export function parseAmapRoute(payload: unknown, mode: RouteMode): {
   if (mode === "public_transit") {
     const transit = (route as { transits?: unknown[] }).transits?.[0] ??
       (route as { transit_path?: unknown }).transit_path;
-    const durationValue = Number((transit as { duration?: unknown } | undefined)?.duration);
-    const distanceValue = Number((transit as { walking_distance?: unknown; distance?: unknown } | undefined)?.walking_distance ??
+    const durationValue = providerNonnegativeNumber((transit as { duration?: unknown } | undefined)?.duration);
+    const distanceValue = providerNonnegativeNumber((transit as { walking_distance?: unknown; distance?: unknown } | undefined)?.walking_distance ??
       (transit as { distance?: unknown } | undefined)?.distance);
-    const costValue = Number((transit as { cost?: unknown } | undefined)?.cost);
+    const costValue = providerNonnegativeNumber((transit as { cost?: unknown } | undefined)?.cost);
     const steps = parseAmapSteps("public_transit", transit);
     const polyline = parseAmapTransitPolyline(transit);
     return {
-      available: steps.length > 0 && Number.isFinite(durationValue) && durationValue > 0,
-      distanceMeters: Number.isFinite(distanceValue) ? Math.round(distanceValue) : 0,
-      durationSeconds: Number.isFinite(durationValue) ? Math.round(durationValue) : 0,
+      available: steps.length > 0 && durationValue !== null && durationValue >= 1,
+      distanceMeters: distanceValue === null ? null : Math.round(distanceValue),
+      durationSeconds: durationValue === null ? 0 : Math.round(durationValue),
       polyline,
       steps,
       cost: {
-        minCents: Number.isFinite(costValue) ? Math.round(costValue * 100) : null,
-        maxCents: Number.isFinite(costValue) ? Math.round(costValue * 100) : null,
-        basis: Number.isFinite(costValue) ? "高德公交方案票价" : "公共交通票价未知",
+        minCents: costValue === null ? null : Math.round(costValue * 100),
+        maxCents: costValue === null ? null : Math.round(costValue * 100),
+        basis: costValue === null ? "公共交通票价未知" : "高德公交方案票价",
         source: "高德路径规划 Web 服务",
       },
       includedTimes: ["walking", "waiting", "riding", "transfer"],
@@ -628,19 +634,21 @@ export function parseAmapRoute(payload: unknown, mode: RouteMode): {
   const polyline = (record.steps ?? []).flatMap((step) =>
     parseAmapPolyline((step as { polyline?: unknown }).polyline),
   );
-  const tolls = Number(record.tolls ?? 0);
+  const tolls = providerNonnegativeNumber(record.tolls);
+  const duration = providerNonnegativeNumber(record.duration);
+  const distance = providerNonnegativeNumber(record.distance);
   return {
-    available: polyline.length > 1,
-    distanceMeters: Math.round(Number(record.distance ?? 0)),
-    durationSeconds: Math.round(Number(record.duration ?? 0)),
+    available: polyline.length > 1 && duration !== null && duration >= 1,
+    distanceMeters: distance === null ? null : Math.round(distance),
+    durationSeconds: duration === null ? 0 : Math.round(duration),
     polyline,
     steps: parseAmapSteps(mode, { paths: [record] }),
     cost: mode === "walking"
       ? { minCents: 0, maxCents: 0, basis: "步行无车费", source: "规则估算" }
       : {
-          minCents: Number.isFinite(tolls) && tolls > 0 ? Math.round(tolls * 100) : null,
-          maxCents: Number.isFinite(tolls) && tolls > 0 ? Math.round(tolls * 100) : null,
-          basis: "驾车道路耗时来自高德；打车等候和计价费用未知，需另行确认",
+          minCents: null,
+          maxCents: null,
+          basis: `驾车全段费用未知，需另行确认${tolls === null ? "" : `；仅查得通行费 ${tolls} 元，不代表全段车费`}`,
           source: "高德路径规划 Web 服务",
         },
     includedTimes: mode === "walking" ? ["walking"] : ["driving"],
