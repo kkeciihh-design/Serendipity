@@ -20,6 +20,7 @@
     "verify:phase12": "node scripts/verify-phase12.mjs",
     "verify:phase13": "node scripts/verify-phase13.mjs",
     "verify:phase13-manual": "node scripts/verify-phase13-manual.mjs",
+    "verify:phase16": "node scripts/verify-phase16-ocr.mjs",
     "capture:phase05": "node scripts/capture-phase05-screens.mjs",
     "capture:phase06": "node scripts/capture-phase06-screens.mjs",
     "postinstall": "prisma generate",
@@ -30,12 +31,15 @@
   },
   "dependencies": {
     "@prisma/client": "^6.12.0",
+    "@tesseract.js-data/chi_sim": "^1.0.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.53.0",
     "next": "16.4.0",
     "prisma": "^6.12.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "sharp": "^0.35.5",
+    "tesseract.js": "^7.0.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
