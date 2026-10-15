@@ -31,6 +31,7 @@ import { PlanBudget } from "./plan-budget";
 import { PlanTimeline } from "./plan-timeline";
 import { PlanMap, type MapLinkTarget } from "./plan-map";
 import { TransportOverview } from "./transport-overview";
+import { RedlinePanel } from "./redline-panel";
 import type { Place } from "@/lib/places";
 import type { RouteLeg } from "@/lib/routes";
 import type { Ticket } from "@/lib/tickets";
@@ -485,6 +486,7 @@ export function PlanOverview({
 
       {displayPlan ? (
         <>
+          <RedlinePanel key={displayPlan.id} tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} />
           {displayPlan.validationResults.warnings.length > 0 ? (
             <div className="mt-4 rounded-md bg-clay-soft p-4">
               <h3 className="text-base font-semibold text-clay">

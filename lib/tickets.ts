@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { redlinePreferencesSchema } from "./redline-preferences";
 import { planEventDurationSeconds, planEventEnd, planEventStart, sortPlanEvents, type PlanEvent } from "./plan";
 
 export const ticketModeSchema = z.enum(["train", "flight"]);
@@ -77,6 +78,7 @@ export type TicketCore = z.infer<typeof ticketCoreSchema>;
 export const activeTicketCoreSchema = ticketCoreSchema;
 
 export const ticketSchema = ticketCoreSchema.extend({
+  redlinePreferences: redlinePreferencesSchema.optional(),
   id: z.string().trim().min(1).max(80),
   status: ticketStatusSchema,
   confirmedAt: z.iso.datetime().nullable(),
@@ -90,6 +92,11 @@ export const ticketSchema = ticketCoreSchema.extend({
 export type Ticket = z.infer<typeof ticketSchema>;
 
 export const ticketActionSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("update_redline"),
+    ticketId: z.string().trim().min(1).max(80),
+    preferences: redlinePreferencesSchema,
+  }),
   z.object({
     action: z.literal("create_draft"),
     ticket: ticketCoreSchema,
@@ -221,7 +228,9 @@ export function updateTicketDetails(existing: Ticket, core: TicketCore, now = ne
       }
     }
   }
-  return ticketSchema.parse({ ...existing, ...core, updatedAt: now.toISOString() });
+  return ticketSchema.parse({ ...existing, ...core,
+    ...(existing.redlinePreferences ? { redlinePreferences: { ...existing.redlinePreferences, extraBufferSeconds: core.bufferMinutes * 60 } } : {}),
+    updatedAt: now.toISOString() });
 }
 
 function activeConstraintSignature(ticket: Ticket) {

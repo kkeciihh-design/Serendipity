@@ -306,7 +306,7 @@ export function PlanTimeline({
                 ) : null}
               </button>
               <div>
-                {event.type === "departure_transport" || event.type === "return_transport" ? <button type="button" onClick={() => onEventSelect(event.id, "transport", event.dayNumber)} className="mr-2 inline-flex min-h-11 items-center rounded-md border border-sage bg-white px-3 text-sm font-medium text-sage">查看交通票面</button> : null}
+                {event.type === "departure_transport" || event.type === "return_transport" ? <><button type="button" onClick={() => onEventSelect(event.id, "transport", event.dayNumber)} className="mr-2 inline-flex min-h-11 items-center rounded-md border border-sage bg-white px-3 text-sm font-medium text-sage">查看交通票面</button><a href="#time-redlines" className="mr-2 inline-flex min-h-11 items-center rounded-md border border-clay bg-white px-3 text-sm font-medium text-clay">查看时间红线</a></> : null}
                 <button
                   type="button"
                   onClick={() => onEventSelect(event.id, "map", day.dayNumber)}
