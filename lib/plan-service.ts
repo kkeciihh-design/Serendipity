@@ -1174,7 +1174,13 @@ export async function savePlanTicketEdit(input: {
       const now = new Date();
       let tickets: Ticket[];
       let actionEventId: string;
-      if (action.action === "create_draft") {
+      if (action.action === "update_redline") {
+        const target = current.tickets.find((ticket) => ticket.id === action.ticketId && isActiveTicket(ticket));
+        if (!target) throw new PlanValidationError("只能调整当前有效票的红线条件。");
+        tickets = current.tickets.map((ticket) => ticket.id === target.id
+          ? { ...ticket, redlinePreferences: action.preferences, bufferMinutes: action.preferences.extraBufferSeconds / 60, updatedAt: now.toISOString() } : ticket);
+        actionEventId = target.eventId;
+      } else if (action.action === "create_draft") {
         ticketEventForAction(current.events, action.ticket.eventId, action.ticket.direction);
         tickets = [...current.tickets, createDraftTicket(action.ticket, now)];
         actionEventId = action.ticket.eventId;
@@ -1231,7 +1237,7 @@ export async function savePlanTicketEdit(input: {
         actionEventId = target.eventId;
       }
 
-      const draftOnly = action.action === "create_draft" || action.action === "update_details" &&
+      const draftOnly = action.action === "update_redline" || action.action === "create_draft" || action.action === "update_details" &&
         current.tickets.find((ticket) => ticket.id === action.ticketId)?.status === "draft";
       const planAfterTickets = preparePlanForStorage({
         events: draftOnly ? current.events : applyTicketsToEvents(current.events, tickets, current.tickets),

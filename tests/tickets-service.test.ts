@@ -5,6 +5,9 @@ import { validatePlan } from "../lib/plan";
 import { planFixture, requestFixture } from "./helpers/plan-fixtures";
 import { isolatedDatabase } from "./helpers/test-database";
 import { ticketFixture } from "./helpers/ticket-fixtures";
+import { defaultRedlinePreferences } from "../lib/redline-preferences";
+import { buildPlanRedlines, ticketRedlineInput } from "../lib/redline-service";
+import { manualReferenceRoute, readCachedRoute } from "../lib/routes";
 
 let database: ReturnType<typeof isolatedDatabase>;
 let db: PrismaClient;
@@ -47,6 +50,63 @@ async function pay(current: Record, costId: string, amount: number, paymentStatu
 }
 
 describe("atomic ticket fact persistence", () => {
+  it("uses only time-applicable saved routes and never shifts a no-service finding to another time", async () => {
+    const original = await fixture();
+    const current = await act(original, { action: "activate", acknowledged: true,
+      ticket: core(original, { accessMode: "public_transit", accessDurationMinutes: 55, departureTime: "10:35", arrivalTime: "11:35", bufferMinutes: 10, chainOriginName: "早餐" }) });
+    const route = manualReferenceRoute({ tripId: current.tripId, date: current.requestSnapshot.startDate!, edit: {
+      fromEventId: "d1-breakfast", toEventId: "departure", departureTime: "08:45", manualReference: {
+        availability: "available", durationMinutes: 55, fareCents: null, instructions: "合成演示", sourceName: "独立测试资料", sourceUrl: null,
+        checkedAt: new Date().toISOString(), acknowledged: true,
+      },
+    } });
+    const plan = { ...current, routeLegs: [route] };
+    const result = (await buildPlanRedlines(plan, `${route.date}T00:45:00.000Z`))[0];
+    expect(result.suggestedAt).toBe(`${route.date}T00:55:00.000Z`);
+    expect(result.suggestedCheck?.routeApplicable).toBe(false); expect(result.currentCheck.routeApplicable).toBe(true);
+    expect(result.precision).toBe("pending_confirmation"); expect(readCachedRoute(route.cacheKey)).toBeNull();
+    const noService = { ...plan, routeLegs: [{ ...route, durationSeconds: null, status: "unavailable" as const }] };
+    expect((await buildPlanRedlines(noService, `${route.date}T00:45:00.000Z`))[0].currentCheck.status).toBe("infeasible");
+    expect((await buildPlanRedlines(noService, `${route.date}T01:05:00.000Z`))[0].currentCheck.status).toBe("unknown");
+  });
+  it("persists redline preferences in a new version, preserves facts and rejects stale writes", async () => {
+    const original = await fixture();
+    const current = await act(original, { action: "activate", acknowledged: true, ticket: core(original, { accessMode: "walking", accessDurationMinutes: 55, departureTime: "10:35", arrivalTime: "11:35", bufferMinutes: 10 }) });
+    const old = await buildPlanRedlines(current, `${current.requestSnapshot.startDate}T00:47:00.000Z`);
+    expect(old[0].suggestedAt?.slice(11, 16)).toBe("00:55");
+    const preferences = { ...defaultRedlinePreferences(15), firstVisit: true, baggage: "none" as const };
+    const saved = await act(current, { action: "update_redline", ticketId: current.tickets[0].id, preferences });
+    expect(saved.versionNumber).toBe(current.versionNumber + 1);
+    expect(saved.events).toEqual(current.events); expect(saved.costs).toEqual(current.costs); expect(saved.routeLegs).toEqual(current.routeLegs);
+    expect(saved.tickets[0].departureTime).toBe("10:35"); expect(saved.tickets[0].redlinePreferences).toEqual(preferences);
+    const reread = await plans.getPlanVersion(saved.tripId, saved.versionNumber);
+    expect(reread.tickets[0].redlinePreferences).toEqual(preferences);
+    const result = await buildPlanRedlines(reread, `${current.requestSnapshot.startDate}T00:47:00.000Z`);
+    expect(result[0].suggestedAt?.slice(11, 16)).toBe("00:45");
+    expect(result[0].calculationVersion).not.toBe(old[0].calculationVersion);
+    await expect(act(current, { action: "update_redline", ticketId: current.tickets[0].id, preferences })).rejects.toThrow("计划已变化");
+    const cancelled = await act(saved, { action: "cancel", ticketId: saved.tickets[0].id, acknowledged: true });
+    expect(await buildPlanRedlines(cancelled)).toEqual([]);
+    await expect(act(cancelled, { action: "update_redline", ticketId: saved.tickets[0].id, preferences })).rejects.toThrow("当前有效票");
+  });
+
+  it("uses the return origin, honors baggage applicability and preserves unknown airline cutoffs", async () => {
+    const original = await fixture();
+    let current = await act(original, { action: "activate", acknowledged: true, ticket: core(original, { eventId: "return", direction: "return", mode: "flight",
+      chainOriginName: "返程住宿点", date: original.requestSnapshot.endDate, arrivalDate: original.requestSnapshot.endDate,
+      departureTime: "17:00", arrivalTime: "18:30", accessMode: "walking", checkInCutoffMinutes: 45, bagDropCutoffMinutes: null, boardingCutoffMinutes: 20 }) });
+    let result = await buildPlanRedlines(current);
+    expect(result[0].input.origin).toBe("返程住宿点"); expect(result[0].precision).toBe("pending_confirmation");
+    current = await act(current, { action: "update_redline", ticketId: current.tickets[0].id, preferences: { ...defaultRedlinePreferences(5), baggage: "none" } });
+    result = await buildPlanRedlines(current);
+    expect(result[0].input.steps.some((s) => s.id === "bag")).toBe(false);
+    expect(result[0].input.deadlines.map((d) => d.id)).toEqual(["checkin", "boarding"]);
+    const changed = await act(current, { action: "update_details", acknowledged: true, ticketId: current.tickets[0].id,
+      ticket: { ...current.tickets[0], chainOriginName: "返程新地点", accessDurationMinutes: 60, bufferMinutes: 20 } });
+    expect(ticketRedlineInput(changed, changed.tickets[0]).origin).toBe("返程新地点");
+    expect(changed.tickets[0].redlinePreferences?.extraBufferSeconds).toBe(1200);
+    expect((await buildPlanRedlines(changed))[0].suggestedAt).not.toBe(result[0].suggestedAt);
+  });
   it("saves drafts without changing routes, costs or constraints, then activates the same stable ID", async () => {
     const original = await fixture();
     const draft = await act(original, { action: "create_draft", ticket: core(original) });

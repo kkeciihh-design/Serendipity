@@ -85,9 +85,9 @@ function JourneyChain({ ticket, events }: { ticket: Ticket; events: PlanEvent[] 
     return `${mode ? accessLabels[mode] : "方式待补"} · ${minutes === null ? "耗时待补" : `${minutes} 分钟`} · ${money(fare)}${note ? ` · ${note}` : ""}`;
   };
   const steps = [
-    { label: ticket.direction === "departure" ? "从出发点启程" : "离开住宿 / 活动点", title: ticket.chainOriginName || "门到门起点待补", detail: `估算出发：${localTime(times.originDepartureAt)}` },
+    { label: ticket.direction === "departure" ? "从出发点启程" : "离开住宿 / 活动点", title: ticket.chainOriginName || "门到门起点待补", detail: "建议出发时刻见上方时间红线，包含办理耗时与适用时刻复核。" },
     { label: "前往车站 / 机场", title: access("access"), detail: "人工记录的全段耗时需包含步行、候车与换乘。" },
-    { label: flight ? "到机场办理" : "进站与安检", title: [ticket.fromName || "出发站点待补", ticket.fromDetail].filter(Boolean).join(" · "), detail: `估算抵达站点：${localTime(times.hubReadyAt)}（预留办理与安全余量）` },
+    { label: flight ? "到机场办理" : "进站与安检", title: [ticket.fromName || "出发站点待补", ticket.fromDetail].filter(Boolean).join(" · "), detail: "到站、办理与到检票口时刻见红线详情，各个截止分别检查。" },
     { label: "城际主交通", title: `${ticket.serviceNumber || "班次待补"} · ${modeLabels[ticket.mode]}`, detail: `${dateTime(ticket.date, ticket.departureTime)} → ${dateTime(ticket.arrivalDate, ticket.arrivalTime)}` },
     { label: flight ? "落地、取行李与出机场" : "到站与出站", title: [ticket.toName || "到达站点待补", ticket.toDetail].filter(Boolean).join(" · "), detail: flight ? "取行李和出机场时间计入后段接驳，勿遗漏。" : "出站、步行与候车时间计入后段接驳。" },
     { label: ticket.direction === "return" ? "返家接驳" : "抵达后的接驳", title: access("egress"), detail: "公交 / 地铁需按实际到达日期与时刻核对末班。" },
