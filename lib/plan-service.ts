@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { syncPlanChecklist } from "./checklist-store";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import {
@@ -273,7 +274,7 @@ export async function getPlanGenerationContext(
 ): Promise<PlanCapture> {
   const trip = await prisma.trip.findUnique({
     where: { id: tripId },
-    include: { request: true, currentPlanVersion: true },
+    include: { request: true, currentPlanVersion: true, checklist: true },
   });
   if (!trip) {
     throw new PlanConflictError("没有找到这趟旅行。");
@@ -298,6 +299,7 @@ export async function getPlanGenerationContext(
     tripId,
     expectedRequestRevision,
     expectedPlanVersion: trip.currentPlanVersion?.versionNumber ?? null,
+    expectedChecklistRevision: trip.checklist?.revision ?? 0,
     requestSnapshot: parseSnapshot(trip.request.confirmedRequest),
     originalRequest: trip.request.originalRequest,
   };
@@ -347,7 +349,7 @@ export async function savePlanVersion(input: {
 
       const trip = await transaction.trip.findUnique({
         where: { id: capture.tripId },
-        include: { request: true, currentPlanVersion: true },
+        include: { request: true, currentPlanVersion: true, checklist: true },
       });
       if (!trip?.request) {
         throw new PlanConflictError("没有找到这趟旅行或需求记录。");
@@ -371,6 +373,11 @@ export async function savePlanVersion(input: {
         );
       }
       assertRegenerationPreservesFacts(trip.currentPlanVersion);
+      if ((trip.checklist?.revision ?? 0) < capture.expectedChecklistRevision) {
+        throw new PlanConflictError("清单版本已变化，请重新读取后生成。");
+      }
+      // Newer checklist edits are merged from this transaction's latest state
+      // by syncPlanChecklist below; never write the captured progress back.
 
       const versionNumber = (capture.expectedPlanVersion ?? 0) + 1;
       const inheritedTickets = parseStoredTickets(trip.currentPlanVersion?.tickets)
@@ -409,7 +416,9 @@ export async function savePlanVersion(input: {
       if (!row) {
         throw new PlanConflictError();
       }
-      return serializePlan(row);
+      const result = serializePlan(row);
+      await syncPlanChecklist(transaction, result);
+      return result;
     });
   } catch (error) {
     if (
@@ -570,7 +579,9 @@ export async function savePlanEventEdit(input: {
       if (!saved) {
         throw new PlanConflictError();
       }
-      return serializePlan(saved);
+      const result = serializePlan(saved);
+      await syncPlanChecklist(transaction, result);
+      return result;
     });
   } catch (error) {
     if (
@@ -691,7 +702,9 @@ export async function savePlanCostEdit(input: {
       if (!saved) {
         throw new PlanConflictError();
       }
-      return serializePlan(saved);
+      const result = serializePlan(saved);
+      await syncPlanChecklist(transaction, result);
+      return result;
     });
   } catch (error) {
     if (
@@ -765,7 +778,9 @@ export async function savePlanPlaceEdit(input: {
       } });
       const saved = await transaction.planVersion.findUnique({ where: { id: created.id }, include: { trip: { select: { currentPlanVersionId: true } } } });
       if (!saved) throw new PlanConflictError();
-      return serializePlan(saved);
+      const result = serializePlan(saved);
+      await syncPlanChecklist(transaction, result);
+      return result;
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new PlanConflictError("计划已变化，请刷新后重试。");
@@ -1003,7 +1018,9 @@ export async function savePlanRouteEdit(input: {
       } });
       const saved = await transaction.planVersion.findUnique({ where: { id: created.id }, include: { trip: { select: { currentPlanVersionId: true } } } });
       if (!saved) throw new PlanConflictError();
-      return serializePlan(saved);
+      const result = serializePlan(saved);
+      await syncPlanChecklist(transaction, result);
+      return result;
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new PlanConflictError("计划已变化，请刷新后重试。");
@@ -1077,7 +1094,9 @@ export async function savePlanRecommendationEdit(input: {
       const saved = await transaction.planVersion.findUnique({ where: { id: created.id }, include: { trip: { select: { currentPlanVersionId: true } } } });
       if (!saved) throw new PlanConflictError();
       assertActive();
-      return serializePlan(saved);
+      const result = serializePlan(saved);
+      await syncPlanChecklist(transaction, result);
+      return result;
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034", "P2028"].includes(error.code)) throw new PlanConflictError("计划已变化，请重新预览后重试。");
@@ -1478,7 +1497,9 @@ export async function savePlanTicketEdit(input: {
         include: { trip: { select: { currentPlanVersionId: true } } },
       });
       if (!saved) throw new PlanConflictError();
-      return serializePlan(saved);
+      const result = serializePlan(saved);
+      await syncPlanChecklist(transaction, result);
+      return result;
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

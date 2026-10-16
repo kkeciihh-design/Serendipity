@@ -33,6 +33,7 @@ import { PlanMap, type MapLinkTarget } from "./plan-map";
 import { TransportOverview } from "./transport-overview";
 import { RedlinePanel } from "./redline-panel";
 import { AccommodationPanel } from "./accommodation-panel";
+import { ChecklistPanel } from "./checklist-panel";
 import type { Place } from "@/lib/places";
 import type { RouteLeg } from "@/lib/routes";
 import type { Ticket } from "@/lib/tickets";
@@ -113,10 +114,11 @@ export function PlanOverview({
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [pendingTimelineScrollEventId, setPendingTimelineScrollEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "timeline" | "transport" | "budget" | "map" | "accommodation"
+    "timeline" | "transport" | "budget" | "map" | "accommodation" | "checklist"
   >("timeline");
   const [hasOpenedMap, setHasOpenedMap] = useState(false);
   const [hasOpenedBudget, setHasOpenedBudget] = useState(false);
+  const [hasOpenedChecklist, setHasOpenedChecklist] = useState(false);
   const [transportDirection, setTransportDirection] = useState<"departure" | "return">("departure");
   const [isGenerating, setIsGenerating] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -130,7 +132,15 @@ export function PlanOverview({
   useEffect(() => {
     if (activeTab === "map") setHasOpenedMap(true);
     if (activeTab === "budget") setHasOpenedBudget(true);
+    if (activeTab === "checklist") setHasOpenedChecklist(true);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (new URL(window.location.href).searchParams.get("view") === "checklist") {
+      setActiveTab("checklist");
+      document.getElementById("plan-views")?.scrollIntoView({ block: "start" });
+    }
+  }, []);
 
   useEffect(() => {
     if (!isGenerating) {
@@ -514,12 +524,12 @@ export function PlanOverview({
             </div>
           ) : null}
 
-          <div className="mt-5">
+          <div id="plan-views" className="mt-5 scroll-mt-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div
                 role="tablist"
                 aria-label="计划视图"
-                className="grid max-w-full grid-cols-2 gap-1 rounded-md border border-sand bg-cream p-1 sm:inline-flex"
+                className="grid max-w-full grid-cols-2 gap-1 rounded-md border border-sand bg-cream p-1 sm:flex sm:flex-wrap"
               >
                 <button
                   type="button"
@@ -564,6 +574,8 @@ export function PlanOverview({
                   className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "accommodation" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>住宿推荐</button>
                 <button type="button" role="tab" aria-selected={activeTab === "map"} onClick={() => setActiveTab("map")}
                   className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "map" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>地图</button>
+                <button type="button" role="tab" aria-selected={activeTab === "checklist"} onClick={() => setActiveTab("checklist")}
+                  className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "checklist" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>出发前清单</button>
               </div>
               <p className="text-sm text-graphite">
                 共 {days.length} 天｜{displayPlan.events.length} 个日程｜
@@ -618,6 +630,10 @@ export function PlanOverview({
               ) : null}
             </div>
             {activeTab === "accommodation" && <div role="tabpanel" aria-label="住宿推荐"><AccommodationPanel key={displayPlan.id} tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} /></div>}
+            <div hidden={activeTab !== "checklist"} role="tabpanel" aria-label="出发前清单">
+              {(hasOpenedChecklist || activeTab === "checklist") && <ChecklistPanel key={displayPlan.id} tripId={tripId} plan={displayPlan} onEvent={handleEventSelect} />}
+            </div>
+            {activeTab !== "checklist" && <button type="button" className="fixed right-4 bottom-4 z-30 inline-flex min-h-12 items-center gap-2 rounded-full bg-sage px-4 py-3 font-semibold text-white shadow-lg sm:hidden" onClick={() => { setActiveTab("checklist"); document.getElementById("plan-views")?.scrollIntoView({ block: "start" }); }}><ListChecks className="size-5" aria-hidden="true" />打开出发前清单</button>}
             <div hidden={activeTab !== "transport"} role="tabpanel" aria-label="门到门交通">
               <TransportOverview
                 tripId={tripId}

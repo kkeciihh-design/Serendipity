@@ -145,6 +145,7 @@ export type PlanCapture = {
   tripId: string;
   expectedRequestRevision: number;
   expectedPlanVersion: number | null;
+  expectedChecklistRevision: number;
   requestSnapshot: RequestSnapshot;
   originalRequest: string;
 };
