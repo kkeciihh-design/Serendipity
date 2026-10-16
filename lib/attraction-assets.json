@@ -1,0 +1,111 @@
+{
+  "images": [
+    {
+      "id": "hunan-museum-photo",
+      "url": "/attractions/hunan-museum.webp",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:New_building_of_Hunan_Museum_20230403a.jpg",
+      "originalUrl": "https://upload.wikimedia.org/wikipedia/commons/c/c4/New_building_of_Hunan_Museum_20230403a.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "author": "Huangdan2060",
+      "license": "CC BY 3.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/3.0",
+      "entityName": "湖南博物院",
+      "city": "长沙",
+      "entryId": "hunan-museum",
+      "width": 960,
+      "height": 640,
+      "displayAllowed": true,
+      "exportAllowed": true,
+      "retrievedAt": "2026-10-15T05:03:24.384Z",
+      "modification": "实景资料图，非实时现场；仅缩小尺寸、转换为 WebP 并移除图片元数据，衍生图沿用原许可。"
+    },
+    {
+      "id": "yuelu-academy-photo",
+      "url": "/attractions/yuelu-academy.webp",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Lecture_Hall_of_Yuelu_Academy_20251018.jpg",
+      "originalUrl": "https://upload.wikimedia.org/wikipedia/commons/0/08/Lecture_Hall_of_Yuelu_Academy_20251018.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "author": "颐园居",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "entityName": "岳麓书院",
+      "city": "长沙",
+      "entryId": "yuelu-academy",
+      "width": 960,
+      "height": 640,
+      "displayAllowed": true,
+      "exportAllowed": true,
+      "retrievedAt": "2026-10-15T05:03:28.862Z",
+      "modification": "实景资料图，非实时现场；仅缩小尺寸、转换为 WebP 并移除图片元数据，衍生图沿用原许可。"
+    },
+    {
+      "id": "orange-isle-photo",
+      "url": "/attractions/orange-isle.webp",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:China_(13964243839).jpg",
+      "originalUrl": "https://upload.wikimedia.org/wikipedia/commons/7/77/China_%2813964243839%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "author": "Joe Hart from Southampton, United Kingdom",
+      "license": "CC BY 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/2.0",
+      "entityName": "橘子洲",
+      "city": "长沙",
+      "entryId": "orange-isle",
+      "width": 960,
+      "height": 641,
+      "displayAllowed": true,
+      "exportAllowed": true,
+      "retrievedAt": "2026-10-15T05:03:31.987Z",
+      "modification": "实景资料图，非实时现场；仅缩小尺寸、转换为 WebP 并移除图片元数据，衍生图沿用原许可。"
+    }
+  ],
+  "locations": [
+    {
+      "entryId": "hunan-museum",
+      "candidate": {
+        "provider": "osm",
+        "poiId": "way:269856520",
+        "name": "湖南省博物馆",
+        "city": "长沙市",
+        "district": "开福区",
+        "address": "湖南省博物馆, 德雅路, 清水塘街道, 开福区, 长沙市, 湖南省, 410073, 中国",
+        "adcode": "",
+        "category": "tourism:museum",
+        "longitude": 112.9883389,
+        "latitude": 28.215391,
+        "coordinateSystem": "WGS84",
+        "retrievedAt": "2026-10-15T05:03:26.359Z"
+      }
+    },
+    {
+      "entryId": "yuelu-academy",
+      "candidate": {
+        "provider": "osm",
+        "poiId": "way:272516791",
+        "name": "岳麓书院",
+        "city": "长沙市",
+        "district": "岳麓区",
+        "address": "岳麓书院, 登高路, 湖南大学社区, 桔子洲街道, 岳麓区, 湘江新区, 岳麓区, 长沙市, 湖南省, 410082, 中国",
+        "adcode": "",
+        "category": "tourism:attraction",
+        "longitude": 112.9351255,
+        "latitude": 28.1839094,
+        "coordinateSystem": "WGS84",
+        "retrievedAt": "2026-10-15T05:03:29.557Z"
+      }
+    },
+    {
+      "entryId": "orange-isle",
+      "candidate": {
+        "provider": "osm",
+        "poiId": "relation:16734076",
+        "name": "橘子洲",
+        "city": "长沙市",
+        "district": "岳麓区",
+        "address": "橘子洲, 桔子洲街道, 岳麓区, 湘江新区, 岳麓区, 长沙市, 湖南省, 中国",
+        "adcode": "",
+        "category": "place:island",
+        "longitude": 112.9561264,
+        "latitude": 28.1896845,
+        "coordinateSystem": "WGS84",
+        "retrievedAt": "2026-10-15T05:03:33.147Z"
+      }
+    }
+  ]
+}
