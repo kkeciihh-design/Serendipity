@@ -18,9 +18,21 @@ model Trip {
   request              TripRequest?
   planVersions         PlanVersion[]  @relation("TripPlanVersions")
   evidenceFacts        EvidenceFact[]
+  checklist            ChecklistState?
   currentPlanVersion   PlanVersion?   @relation("CurrentPlanVersion", fields: [currentPlanVersionId], references: [id])
 
   @@map("Trip")
+}
+
+model ChecklistState {
+  tripId       String   @id
+  trip         Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  revision     Int      @default(1)
+  planVersion  Int
+  items        String
+  updatedAt    DateTime @updatedAt
+
+  @@map("ChecklistState")
 }
 
 model TripRequest {
