@@ -34,6 +34,7 @@ import { TransportOverview } from "./transport-overview";
 import { RedlinePanel } from "./redline-panel";
 import { AccommodationPanel } from "./accommodation-panel";
 import { ChecklistPanel } from "./checklist-panel";
+import { AdvisoryPanel, AdvisorySummary, useAdvisories } from "./advisory-panel";
 import type { Place } from "@/lib/places";
 import type { RouteLeg } from "@/lib/routes";
 import type { Ticket } from "@/lib/tickets";
@@ -114,11 +115,12 @@ export function PlanOverview({
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [pendingTimelineScrollEventId, setPendingTimelineScrollEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "timeline" | "transport" | "budget" | "map" | "accommodation" | "checklist"
+    "timeline" | "transport" | "budget" | "map" | "accommodation" | "checklist" | "advisories"
   >("timeline");
   const [hasOpenedMap, setHasOpenedMap] = useState(false);
   const [hasOpenedBudget, setHasOpenedBudget] = useState(false);
   const [hasOpenedChecklist, setHasOpenedChecklist] = useState(false);
+  const [checklistFocusId, setChecklistFocusId] = useState<string | null>(null);
   const [transportDirection, setTransportDirection] = useState<"departure" | "return">("departure");
   const [isGenerating, setIsGenerating] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -136,6 +138,10 @@ export function PlanOverview({
   }, [activeTab]);
 
   useEffect(() => {
+    if (new URL(window.location.href).searchParams.get("view") === "advisories") {
+      setActiveTab("advisories");
+      document.getElementById("plan-views")?.scrollIntoView({ block: "start" });
+    }
     if (new URL(window.location.href).searchParams.get("view") === "checklist") {
       setActiveTab("checklist");
       document.getElementById("plan-views")?.scrollIntoView({ block: "start" });
@@ -161,6 +167,8 @@ export function PlanOverview({
   }, []);
 
   const displayPlan = previewPlan ?? selectedPlan;
+  const advisoryData = useAdvisories(tripId, displayPlan);
+  const openAdvisories = () => { setActiveTab("advisories"); document.getElementById("plan-views")?.scrollIntoView({ block: "start" }); };
   const canGenerate =
     !isGenerating && requestState.confirmed && !requestState.hasUnsavedEdits;
   const days = useMemo(
@@ -498,6 +506,7 @@ export function PlanOverview({
       {displayPlan ? (
         <>
           <RedlinePanel key={displayPlan.id} tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} />
+          {displayPlan.isCurrent && <AdvisorySummary data={advisoryData} onOpen={openAdvisories} />}
           {displayPlan.validationResults.warnings.length > 0 ? (
             <div className="mt-4 rounded-md bg-clay-soft p-4">
               <h3 className="text-base font-semibold text-clay">
@@ -576,6 +585,7 @@ export function PlanOverview({
                   className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "map" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>地图</button>
                 <button type="button" role="tab" aria-selected={activeTab === "checklist"} onClick={() => setActiveTab("checklist")}
                   className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "checklist" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>出发前清单</button>
+                <button type="button" role="tab" aria-selected={activeTab === "advisories"} onClick={() => setActiveTab("advisories")} className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "advisories" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>行程提醒</button>
               </div>
               <p className="text-sm text-graphite">
                 共 {days.length} 天｜{displayPlan.events.length} 个日程｜
@@ -620,6 +630,8 @@ export function PlanOverview({
                       onSaved={handlePlanSaved}
                       selectedEventId={selectedEventId}
                       onEventSelect={handleEventSelect}
+                      advisories={advisoryData.view?.items ?? []}
+                      onAdvisories={openAdvisories}
                     />
                   </>
                 ) : null}
@@ -631,8 +643,9 @@ export function PlanOverview({
             </div>
             {activeTab === "accommodation" && <div role="tabpanel" aria-label="住宿推荐"><AccommodationPanel key={displayPlan.id} tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} /></div>}
             <div hidden={activeTab !== "checklist"} role="tabpanel" aria-label="出发前清单">
-              {(hasOpenedChecklist || activeTab === "checklist") && <ChecklistPanel key={displayPlan.id} tripId={tripId} plan={displayPlan} onEvent={handleEventSelect} />}
+              {(hasOpenedChecklist || activeTab === "checklist") && <ChecklistPanel key={displayPlan.id} tripId={tripId} plan={displayPlan} onEvent={handleEventSelect} advisories={advisoryData.view?.items ?? []} onAdvisories={openAdvisories} focusId={checklistFocusId} />}
             </div>
+            {activeTab === "advisories" && <div role="tabpanel" aria-label="行程提醒"><AdvisoryPanel data={advisoryData} plan={displayPlan} onEvent={handleEventSelect} onChecklist={(id) => { setChecklistFocusId(id); setActiveTab("checklist"); }} /></div>}
             {activeTab !== "checklist" && <button type="button" className="fixed right-4 bottom-4 z-30 inline-flex min-h-12 items-center gap-2 rounded-full bg-sage px-4 py-3 font-semibold text-white shadow-lg sm:hidden" onClick={() => { setActiveTab("checklist"); document.getElementById("plan-views")?.scrollIntoView({ block: "start" }); }}><ListChecks className="size-5" aria-hidden="true" />打开出发前清单</button>}
             <div hidden={activeTab !== "transport"} role="tabpanel" aria-label="门到门交通">
               <TransportOverview

@@ -2,6 +2,7 @@ import { MapServiceError } from "./amap";
 import { RouteServiceError } from "./route-service";
 import { PlanConflictError, PlanNotFoundError, PlanValidationError } from "./plan-service";
 import { SettingsValidationError } from "./settings";
+import { WeatherError } from "./weather";
 
 export function mapApiError(error: unknown) {
   if (error instanceof PlanConflictError) return Response.json({ error: error.message }, { status: 409 });
@@ -9,5 +10,6 @@ export function mapApiError(error: unknown) {
   if (error instanceof SettingsValidationError || error instanceof PlanValidationError || error instanceof SyntaxError) return Response.json({ error: error instanceof SyntaxError ? "请求格式不正确。" : error.message }, { status: 400 });
   if (error instanceof MapServiceError) return Response.json({ error: error.message }, { status: error.status });
   if (error instanceof RouteServiceError) return Response.json({ error: error.message }, { status: error.status });
+  if (error instanceof WeatherError) return Response.json({ error: error.message }, { status: error.status });
   return Response.json({ error: "地图操作失败，已有计划和配置保持不变，请重试。" }, { status: 503 });
 }

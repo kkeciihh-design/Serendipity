@@ -112,6 +112,12 @@ export type SafeSettings = {
     checkedAt: string | null;
     error: string | null;
   };
+  weather: {
+    provider: "open-meteo";
+    status: "not_tested" | "connected" | "failed";
+    checkedAt: string | null;
+    error: string | null;
+  };
 };
 
 type PrismaStore = {
@@ -277,6 +283,15 @@ export async function getSafeSettings(): Promise<SafeSettings> {
       status: record.searchStatus ?? "not_tested",
       checkedAt: record.searchCheckedAt?.toISOString() ?? null,
       error: record.searchError,
+    },
+    weather: {
+      provider: "open-meteo",
+      status:
+        record.weatherStatus === "connected" || record.weatherStatus === "failed"
+          ? record.weatherStatus
+          : "not_tested",
+      checkedAt: record.weatherCheckedAt?.toISOString() ?? null,
+      error: record.weatherError,
     },
   };
 }
