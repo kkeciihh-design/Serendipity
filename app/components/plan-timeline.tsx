@@ -33,6 +33,7 @@ import { effectiveEvidenceStatus, evidenceFieldLabels, evidenceStatusLabels, sum
 import { numberPlanEvents } from "@/lib/map-link";
 import { RouteSummary } from "./route-summary";
 import { EvidenceDrawer } from "./evidence-drawer";
+import type { AdvisoryItem } from "@/lib/advisories";
 import { AttractionTimelineCard } from "./attraction-card";
 import { RestaurantTimelineCard } from "./restaurant-card";
 import type { MapLinkTarget } from "./plan-map";
@@ -133,6 +134,8 @@ export function PlanTimeline({
   onSaved,
   selectedEventId,
   onEventSelect,
+  advisories = [],
+  onAdvisories,
 }: {
   tripId: string;
   plan: PlanVersionClient;
@@ -140,6 +143,8 @@ export function PlanTimeline({
   onSaved: (plan: PlanVersionClient) => void;
   selectedEventId: string | null;
   onEventSelect: (eventId: string, target: MapLinkTarget, dayNumber: number) => void;
+  advisories?: AdvisoryItem[];
+  onAdvisories?: () => void;
 }) {
   const selectedEvent = plan.events.find((event) => event.id === selectedEventId);
   const sourceDraft = useMemo(() => selectedEvent ? createDraft(selectedEvent) : null, [selectedEvent]);
@@ -288,7 +293,7 @@ export function PlanTimeline({
                   <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-graphite">
                     <span>{eventTypeLabels[event.type]}</span>
                     <span>
-                      {eventStatusLabels[event.status ?? "suggested"]}
+                      {advisories.some((a) => a.eventIds.includes(event.id) && a.category === "opening_hours" && a.severity === "action") ? "开放冲突 · 需调整" : eventStatusLabels[event.status ?? "suggested"]}
                     </span>
                     <span>{sourceStatus}</span>
                     {event.locationName ? <span>{event.locationName}</span> : null}
@@ -307,6 +312,7 @@ export function PlanTimeline({
                   </span>
                 ) : null}
               </button>
+              {advisories.filter((a) => a.eventIds.includes(event.id) && (!a.acknowledged || a.severity === "action")).map((a) => <button key={a.id} type="button" onClick={onAdvisories} className="block min-h-11 w-full rounded-md bg-clay-soft px-3 py-2 text-left text-sm leading-6 text-clay">行程提醒：{a.title}{a.acknowledged ? "（已知，限制仍适用）" : ""}</button>)}
               {event.type === "activity" ? <AttractionTimelineCard key={`${scope}/${event.id}`} tripId={tripId} plan={plan} event={event} visitLabel={visitLabel} onSaved={(savedPlan) => { if (activeScope.current === scope && plan.isCurrent) onSaved(savedPlan); }} /> : null}
               {event.type === "meal" ? <RestaurantTimelineCard key={`${scope}/${event.id}`} tripId={tripId} plan={plan} event={event} visitLabel={visitLabel} onSaved={(savedPlan) => { if (activeScope.current === scope && plan.isCurrent) onSaved(savedPlan); }} /> : null}
               <div>
@@ -602,6 +608,7 @@ export function PlanTimeline({
             });
           }}
           onSaved={(fact) => {
+            window.dispatchEvent(new Event("serendipity:advisories-changed"));
             if (activeScope.current !== scope || fact.planVersionId !== plan.id ||
               fact.targetId !== selectedEvent.id || fact.field !== drawerField || !plan.isCurrent) return;
             setEvidenceFacts((facts) => [

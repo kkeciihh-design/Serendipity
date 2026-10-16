@@ -19,6 +19,7 @@ model Trip {
   planVersions         PlanVersion[]  @relation("TripPlanVersions")
   evidenceFacts        EvidenceFact[]
   checklist            ChecklistState?
+  advisories           AdvisoryState?
   currentPlanVersion   PlanVersion?   @relation("CurrentPlanVersion", fields: [currentPlanVersionId], references: [id])
 
   @@map("Trip")
@@ -33,6 +34,18 @@ model ChecklistState {
   updatedAt    DateTime @updatedAt
 
   @@map("ChecklistState")
+}
+
+model AdvisoryState {
+  tripId      String   @id
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  revision    Int      @default(0)
+  planVersion Int
+  items       String
+  weather     String
+  updatedAt   DateTime @updatedAt
+
+  @@map("AdvisoryState")
 }
 
 model TripRequest {
@@ -139,6 +152,10 @@ model AppSettings {
   mapCheckedAt        DateTime?
   mapCapabilities     String?
   mapProvider         String          @default("osm")
+  weatherProvider     String?         @default("open-meteo")
+  weatherStatus       String?         @default("not_tested")
+  weatherCheckedAt    DateTime?
+  weatherError        String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 

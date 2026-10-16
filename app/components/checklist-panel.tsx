@@ -5,13 +5,14 @@ import { CheckCheck, ExternalLink, Plus, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { checklistGroups, type ChecklistAction, type ChecklistFields, type ChecklistItem, type ChecklistView } from "@/lib/checklist";
 import type { PlanVersionClient } from "./plan-overview";
+import type { AdvisoryItem } from "@/lib/advisories";
 
 const button = "inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-sand px-3 py-2 text-sm font-semibold text-sage hover:bg-sage-soft disabled:opacity-50";
 const input = "mt-1 min-h-11 w-full min-w-0 rounded-md border border-sand bg-white px-3 py-2 text-base text-charcoal";
 const blank: ChecklistFields = { title: "", group: "essentials", note: "", date: null, eventId: null };
 const displayTime = (time: string) => new Date(time).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
 
-export function ChecklistPanel({ tripId, plan, onEvent }: { tripId: string; plan: PlanVersionClient; onEvent: (eventId: string, target: "timeline" | "transport", dayNumber: number) => void }) {
+export function ChecklistPanel({ tripId, plan, onEvent, advisories = [], onAdvisories, focusId }: { tripId: string; plan: PlanVersionClient; onEvent: (eventId: string, target: "timeline" | "transport", dayNumber: number) => void; advisories?: AdvisoryItem[]; onAdvisories?: () => void; focusId?: string | null }) {
   const [view, setView] = useState<ChecklistView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -38,6 +39,7 @@ export function ChecklistPanel({ tripId, plan, onEvent }: { tripId: string; plan
   }, [plan.isCurrent, plan.versionNumber, url]);
 
   useEffect(() => { void load(); return () => { const pending = controller.current; controller.current = null; pending?.abort(); lock.current = false; }; }, [load]);
+  useEffect(() => { if (focusId && view) document.getElementById(`checklist-${focusId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }); }, [focusId, view]);
 
   async function save(change: ChecklistAction) {
     if (lock.current || !view) return;
@@ -51,6 +53,7 @@ export function ChecklistPanel({ tripId, plan, onEvent }: { tripId: string; plan
       if (!response.ok) throw new Error(body.error || "保存失败，请重新读取核对后重试。");
       if (controller.current !== abort) return;
       setView(body.checklist); setMessage(change.action === "sync" ? "已按当前计划更新；仍相关的勾选、自建和删除记录均保留。" : "已保存到本机。");
+      window.dispatchEvent(new Event("serendipity:advisories-changed"));
       if (change.action === "add" || change.action === "edit") setEditing(null);
     } catch (e) {
       if (controller.current !== abort) return;
@@ -66,7 +69,7 @@ export function ChecklistPanel({ tripId, plan, onEvent }: { tripId: string; plan
 
   function row(item: ChecklistItem, archivedRow = false) {
     const linked = plan.events.filter((e) => item.eventIds.includes(e.id));
-    return <li key={item.id} data-checklist-id={item.id} className="rounded-lg border border-sand bg-white p-4">
+    return <li key={item.id} id={`checklist-${item.id}`} data-checklist-id={item.id} className="rounded-lg border border-sand bg-white p-4">
       <div className="flex items-start gap-2">
         <label className="-ml-2 -mt-1 flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
           <input type="checkbox" className="size-5 accent-sage" aria-label={item.title} checked={item.completed} disabled={busy || archivedRow}
@@ -82,6 +85,7 @@ export function ChecklistPanel({ tripId, plan, onEvent }: { tripId: string; plan
         </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
+        {!archivedRow && advisories.some((a) => a.checklistItemId === item.id) && <button type="button" className={button} onClick={onAdvisories}>查看关联提醒</button>}
         {!archivedRow && linked.map((event) => <button key={event.id} type="button" className={button} onClick={() => onEvent(event.id, "timeline", event.dayNumber)}>查看相关活动{linked.length > 1 ? ` · 第${event.dayNumber}天` : ""}</button>)}
         {!archivedRow && item.group === "transport" && linked[0] && <button type="button" className={button} onClick={() => onEvent(linked[0].id, "transport", linked[0].dayNumber)}>查看关联票据</button>}
         {!archivedRow && item.officialUrl && <a href={item.officialUrl} target="_blank" rel="noopener noreferrer" className={button}>前往官方入口<ExternalLink className="size-3" aria-hidden="true" /></a>}

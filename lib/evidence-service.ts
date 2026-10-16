@@ -67,7 +67,7 @@ if (process.env.NODE_ENV !== "production") {
   prismaGlobal.serendipityEvidencePrisma = prisma;
 }
 
-function serializeFact(row: EvidenceFact, now = new Date()): EvidenceFactClient {
+export function serializeFact(row: EvidenceFact, now = new Date()): EvidenceFactClient {
   const fact: EvidenceFactClient = {
     id: row.id,
     planVersionId: row.planVersionId,
