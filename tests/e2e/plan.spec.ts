@@ -872,7 +872,7 @@ test("budget tab shows totals from the plan snapshot and persists confirmed amou
     await expect(page.getByText("预计费用")).toBeVisible();
     await expect(page.getByText("1286 元").first()).toBeVisible();
     await expect(
-      page.getByText(/人均 643 元｜2 人｜1 间房｜1 晚/),
+      page.getByText(/人均 643 元｜2 人｜1 间房（默认）｜1 晚/),
     ).toBeVisible();
     await expect(page.getByText("未知金额 9 项不计入合计")).toBeVisible();
 

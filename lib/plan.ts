@@ -55,6 +55,21 @@ export const planEventSchema = z.object({
   locked: z.boolean().optional(),
   ticketManaged: z.boolean().optional(),
   ticketTimingPending: z.boolean().optional(),
+  accommodationSelection: z.object({
+    stayId: z.string().min(1).max(80),
+    areaId: z.string().min(1).max(120),
+    areaName: z.string().min(1).max(160),
+    kind: z.enum(["area", "hotel"]),
+    checkIn: planDate, checkOut: planDate,
+    roomCount: z.number().int().min(1).max(100),
+    nightCount: z.number().int().min(1).max(3),
+    morningDepartureTime: planTime,
+    checkInFrom: planTime.nullable(), checkOutBy: planTime.nullable(),
+    luggageStorage: z.enum(["unknown", "available", "unavailable"]),
+    conditionNote: z.string().trim().max(240),
+    selectedAt: z.iso.datetime(),
+    invalidatedAccessOrigins: z.array(z.object({ ticketId: z.string().min(1).max(120), originName: z.string().min(1).max(160) })).max(64).optional(),
+  }).optional(),
   attractionSelection: z.object({
     catalogId: z.string().min(1).max(120).nullable(),
     action: z.enum(["keep", "replace"]),
@@ -106,7 +121,7 @@ export type PlanContent = z.infer<typeof planContentSchema>;
 
 // The model DTO has no user confirmation, lock or payment authority. Unknown
 // fields (including event/root costs and payment fields) are stripped by Zod.
-const aiEventSchema = planEventSchema.omit({ status: true, locked: true, order: true, placeId: true, ticketManaged: true, ticketTimingPending: true, attractionSelection: true, restaurantSelection: true }).extend({
+const aiEventSchema = planEventSchema.omit({ status: true, locked: true, order: true, placeId: true, ticketManaged: true, ticketTimingPending: true, attractionSelection: true, restaurantSelection: true, accommodationSelection: true }).extend({
   costStatus: planCostStatusSchema.transform((status) =>
     status === "user_confirmed" ? "pending_confirmation" as const : status),
 });
@@ -248,6 +263,10 @@ export function validatePlan(
 
   const eventIds = new Set<string>();
   for (const event of plan.events) {
+    const stay = event.accommodationSelection;
+    if (stay && (event.type !== "accommodation" || event.date < stay.checkIn || event.date >= stay.checkOut ||
+      Math.round((Date.parse(stay.checkOut) - Date.parse(stay.checkIn)) / 86_400_000) !== stay.nightCount)) errors.push("住宿日期与入住资料不一致，请重新确认住宿。");
+    if (stay && event.date === stay.checkIn && stay.checkInFrom && event.startTime < stay.checkInFrom && stay.luggageStorage === "unavailable") errors.push("未到入住时间且酒店不可寄存行李，请调整到店时刻或酒店。");
     if (eventIds.has(event.id)) {
       errors.push(`事件 ID 重复：${event.id}。`);
     }

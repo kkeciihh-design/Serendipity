@@ -7,6 +7,7 @@ import { buildPlanOverviewDays } from "@/lib/plan-overview";
 import { buildMapMarkers, buildMapRoutes, numberPlanEvents } from "@/lib/map-link";
 import type { RouteMode } from "@/lib/routes";
 import { cityRouteOriginIssue } from "@/lib/route-origin";
+import { routeDayEvents } from "@/lib/route-day";
 import { buildAmapTransitLink } from "@/lib/transit-reference";
 import type { PlanVersionClient } from "./plan-overview";
 import { MapCanvas } from "./map-canvas";
@@ -46,7 +47,7 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
   const [feedback, setFeedback] = useState("");
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
-  const events = useMemo(() => numberPlanEvents(plan.events.filter((event) => event.dayNumber === day)), [plan.events, day]);
+  const events = useMemo(() => numberPlanEvents(routeDayEvents(plan.events, plan.events.find((event) => event.dayNumber === day)?.date ?? "")), [plan.events, day]);
   const dayPlaces = (plan.places ?? []).filter((place) => events.some((item) => item.event.placeId === place.id));
   const cities = [...new Set(dayPlaces.map((place) => place.city))];
   const filter = cities.includes(cityFilter) ? cityFilter : "";
@@ -139,6 +140,7 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
     </div>
     <MapCanvas markers={markers} routes={mapRoutes} focusEventId={selectedEventId} onEventSelect={selectEvent} />
     <p className="mt-2 text-sm leading-6 text-graphite">实心点：已确认地点；空心点：区域参考点。{dayPlaces.length === 0 ? "当天还没有已确认的地点，地图中不会放置推测标记。" : "可拖动地图，使用加减按钮或双指缩放。"}</p>
+    {events.some((item) => item.visitLabel === "宿") && <p className="mt-2 text-sm text-graphite">“宿”表示从前晚住宿出发，不占用当天日程编号；查看日程会返回对应住宿那一晚。</p>}
     <p className="mt-1 text-xs leading-6 text-graphite">免费地图 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline">OpenStreetMap contributors</a> · 搜索 Nominatim。公共服务需联网，可能限流；请用公共地标代替私人住址。</p>
     {(plan.tickets ?? []).some((ticket) => ticket.status === "active" && ticket.confirmedAt) ? <section aria-label="跨城交通示意" className="mt-4 rounded-md border border-sand bg-cream p-4">
       <h4 className="text-sm font-semibold">跨城交通 · 站点示意</h4>

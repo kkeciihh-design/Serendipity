@@ -12,12 +12,13 @@ export function formatVisitNumber(number: number) {
   return circledNumbers[number - 1] ?? `${number}`;
 }
 
-export function numberPlanEvents(events: PlanEvent[]) {
-  return sortPlanEvents(events).map((event, index) => ({
-    event,
-    visitNumber: index + 1,
-    visitLabel: formatVisitNumber(index + 1),
-  }));
+export function numberPlanEvents(events: (PlanEvent & { routeCarryOver?: boolean })[]) {
+  let count = 0;
+  return sortPlanEvents(events).map((event) => {
+    const carried = events.find((item) => item.id === event.id)?.routeCarryOver;
+    const visitNumber = carried ? 64 : ++count;
+    return { event, visitNumber, visitLabel: carried ? "宿" : formatVisitNumber(visitNumber) };
+  });
 }
 
 export function planEventVisitNumber(events: PlanEvent[], eventId: string) {
@@ -27,6 +28,7 @@ export function planEventVisitNumber(events: PlanEvent[], eventId: string) {
 export const mapMarkerEventSchema = z.object({
   id: z.string().min(1).max(80),
   visitNumber: z.number().int().min(1).max(64),
+  visitLabel: z.literal("宿").optional(),
   title: z.string().min(1).max(120),
   timeRange: z.string().min(1).max(40),
 });
@@ -61,7 +63,7 @@ export type MapRoute = z.infer<typeof mapRouteSchema>;
 export type MapMarkerEvent = z.infer<typeof mapMarkerEventSchema>;
 export type MapMarker = z.infer<typeof mapMarkerSchema>;
 
-export function buildMapMarkers(events: PlanEvent[], places: Place[]): MapMarker[] {
+export function buildMapMarkers(events: (PlanEvent & { routeCarryOver?: boolean })[], places: Place[]): MapMarker[] {
   const numbered = numberPlanEvents(events);
   const grouped = new Map<string, { place: Place; events: MapMarkerEvent[] }>();
   for (const item of numbered) {
@@ -74,6 +76,7 @@ export function buildMapMarkers(events: PlanEvent[], places: Place[]): MapMarker
     marker.events.push({
       id: item.event.id,
       visitNumber: item.visitNumber,
+      ...(item.visitLabel === "宿" ? { visitLabel: "宿" as const } : {}),
       title: item.event.title,
       timeRange: `${item.event.startTime}–${item.event.endTime}`,
     });
@@ -122,7 +125,7 @@ export function routeArrowRotation(points: { latitude: number; longitude: number
 }
 
 export function markerLabel(marker: Pick<MapMarker, "events">) {
-  return marker.events.map((event) => formatVisitNumber(event.visitNumber)).join("");
+  return marker.events.map((event) => event.visitLabel ?? formatVisitNumber(event.visitNumber)).join("");
 }
 
 export function sortMarkerEvents(marker: MapMarker) {

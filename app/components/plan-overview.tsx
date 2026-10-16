@@ -32,6 +32,7 @@ import { PlanTimeline } from "./plan-timeline";
 import { PlanMap, type MapLinkTarget } from "./plan-map";
 import { TransportOverview } from "./transport-overview";
 import { RedlinePanel } from "./redline-panel";
+import { AccommodationPanel } from "./accommodation-panel";
 import type { Place } from "@/lib/places";
 import type { RouteLeg } from "@/lib/routes";
 import type { Ticket } from "@/lib/tickets";
@@ -112,7 +113,7 @@ export function PlanOverview({
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [pendingTimelineScrollEventId, setPendingTimelineScrollEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "timeline" | "transport" | "budget" | "map"
+    "timeline" | "transport" | "budget" | "map" | "accommodation"
   >("timeline");
   const [hasOpenedMap, setHasOpenedMap] = useState(false);
   const [hasOpenedBudget, setHasOpenedBudget] = useState(false);
@@ -559,6 +560,8 @@ export function PlanOverview({
                 >
                   门到门交通
                 </button>
+                <button type="button" role="tab" aria-selected={activeTab === "accommodation"} onClick={() => setActiveTab("accommodation")}
+                  className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "accommodation" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>住宿推荐</button>
                 <button type="button" role="tab" aria-selected={activeTab === "map"} onClick={() => setActiveTab("map")}
                   className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "map" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>地图</button>
               </div>
@@ -614,6 +617,7 @@ export function PlanOverview({
               <PlanMap tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} selectedDayNumber={selectedDayNumber} onDayChange={handleDayChange} selectedEventId={selectedEventId} onEventSelect={handleEventSelect} />
               ) : null}
             </div>
+            {activeTab === "accommodation" && <div role="tabpanel" aria-label="住宿推荐"><AccommodationPanel key={displayPlan.id} tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} /></div>}
             <div hidden={activeTab !== "transport"} role="tabpanel" aria-label="门到门交通">
               <TransportOverview
                 tripId={tripId}

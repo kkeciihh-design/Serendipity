@@ -1,4 +1,5 @@
-import { formatPlanDate, planEventEnd, planEventStart, sortPlanEvents, type PlanEvent } from "./plan";
+import { formatPlanDate, planEventEnd, planEventStart, type PlanEvent } from "./plan";
+import { isRoutePair, routeDayEvents } from "./route-day";
 import { applyRouteCost, PlanConflictError, updateRoutesAfterEventChange, type PlanVersionRecord } from "./plan-service";
 import { queryPlanRoute } from "./route-service";
 import { invalidateRouteReference, routeConflict, type RouteLeg } from "./routes";
@@ -11,9 +12,7 @@ export function occupiedEnd(event: PlanEvent, minutes: number) {
 }
 
 function routeStillAdjacent(plan: PlanVersionRecord, route: RouteLeg) {
-  const events = sortPlanEvents(plan.events.filter((event) => event.date === route.date && event.placeId));
-  const from = events.findIndex((event) => event.id === route.fromEventId);
-  return from >= 0 && events[from + 1]?.id === route.toEventId;
+  return isRoutePair(plan.events, route.fromEventId, route.toEventId);
 }
 
 export async function replacementRoutes(plan: PlanVersionRecord, proposed: PlanVersionRecord, eventId: string, signal?: AbortSignal) {
@@ -34,8 +33,8 @@ export async function replacementRoutes(plan: PlanVersionRecord, proposed: PlanV
   for (const prior of invalidated.routeLegs) {
     assertActive(signal);
     if (prior.fromEventId !== eventId && prior.toEventId !== eventId) { routeLegs.push(prior); continue; }
-    const from = proposed.events.find((event) => event.id === prior.fromEventId)!;
     const to = proposed.events.find((event) => event.id === prior.toEventId)!;
+    const from = routeDayEvents(proposed.events, to.date).find((event) => event.id === prior.fromEventId)!;
     const departureTime = prior.fromEventId === eventId ? from.endTime : (plan.routeLegs.find((route) => route.id === prior.id)?.departureTime ?? from.endTime);
     const departure = Date.parse(`${from.date}T${departureTime}:00+08:00`) >= planEventEnd(from).getTime() ? departureTime : from.endTime;
     let route: RouteLeg;

@@ -29,7 +29,7 @@ function createPopup(marker: MapMarker, selectEvent: (eventId: string) => void) 
     const button = document.createElement("button");
     button.type = "button";
     button.className = "serendipity-map-popup-event";
-    button.textContent = `${event.visitNumber}. ${event.timeRange}｜${event.title}`;
+    button.textContent = `${event.visitLabel ?? event.visitNumber}. ${event.timeRange}｜${event.title}`;
     button.addEventListener("click", () => selectEvent(event.id));
     popup.append(button);
   }
@@ -215,7 +215,7 @@ export function MapFrame() {
               const button = document.createElement("button");
               button.type = "button";
               button.className = "serendipity-map-popup-event serendipity-map-popup-event-inline";
-              button.textContent = `${event.visitNumber}. ${event.title}`;
+              button.textContent = `${event.visitLabel ?? event.visitNumber}. ${event.title}`;
               button.addEventListener("click", () => selectEvent(event.id));
               pin.append(button);
             }
