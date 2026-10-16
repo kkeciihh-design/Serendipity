@@ -99,6 +99,7 @@ export const planCostItemSchema = z.object({
   // Explicit participants for this meal only; absent legacy rows retain the
   // plan snapshot's traveler count. A meal row always represents one occasion.
   dinerCount: z.number().int().min(1).max(100).optional(),
+  roomCount: z.number().int().min(1).max(100).optional(),
   transferSide: z.enum(["access", "egress"]).optional(),
   // Absent on legacy snapshots: retain their original whole-trip night basis.
   // New daily accommodation rows explicitly cover one night.
@@ -245,7 +246,7 @@ export function budgetTargetCentsFromSnapshot(snapshot: RequestSnapshot) {
 }
 
 export function costItemQuantity(
-  item: Pick<PlanCostItem, "unit" | "quantity" | "nightCount" | "dinerCount">,
+  item: Pick<PlanCostItem, "unit" | "quantity" | "nightCount" | "dinerCount" | "roomCount">,
   factors: BudgetFactors,
 ) {
   switch (item.unit) {
@@ -254,7 +255,7 @@ export function costItemQuantity(
     case "per_person":
       return item.dinerCount ?? factors.travelerCount;
     case "per_room_per_night":
-      return factors.roomCount * (item.nightCount ?? factors.nightCount);
+      return (item.roomCount ?? factors.roomCount) * (item.nightCount ?? factors.nightCount);
     case "per_night":
       return item.nightCount ?? factors.nightCount;
     case "per_ticket":
@@ -263,7 +264,7 @@ export function costItemQuantity(
 }
 
 export function costItemQuantityDescription(
-  item: Pick<PlanCostItem, "unit" | "quantity" | "nightCount" | "dinerCount">,
+  item: Pick<PlanCostItem, "unit" | "quantity" | "nightCount" | "dinerCount" | "roomCount">,
   factors: BudgetFactors,
 ) {
   const quantity = costItemQuantity(item, factors);
@@ -273,7 +274,7 @@ export function costItemQuantityDescription(
     case "per_person":
       return `${quantity} 人`;
     case "per_room_per_night":
-      return `${factors.roomCount} 房 × ${item.nightCount ?? factors.nightCount} 晚`;
+      return `${item.roomCount ?? factors.roomCount} 房 × ${item.nightCount ?? factors.nightCount} 晚`;
     case "per_night":
       return `${quantity} 晚`;
     case "per_ticket":
@@ -464,6 +465,7 @@ export function validatePlanCosts(
   const costIds = new Set<string>();
 
   for (const cost of costs) {
+    if (cost.roomCount !== undefined && (cost.category !== "accommodation" || cost.unit !== "per_room_per_night" || !Number.isInteger(cost.roomCount) || cost.roomCount < 1 || cost.roomCount > 100)) errors.push("房数只适用于按房每晚的住宿费用。");
     if (cost.dinerCount !== undefined && (cost.category !== "meal" || cost.unit !== "per_person" ||
       !Number.isInteger(cost.dinerCount) || cost.dinerCount < 1 || cost.dinerCount > 100)) {
       errors.push(`费用 ${cost.id} 的本餐人数只适用于按人计价的餐饮，且须为 1 到 100 的整数。`);
@@ -578,6 +580,7 @@ export function applyPlanCostEdit(
           ...cost,
           unit: input.unit,
           dinerCount: input.unit === "per_person" ? cost.dinerCount : undefined,
+          roomCount: input.unit === "per_room_per_night" ? (events.find((event) => event.id === cost.linkedEventId)?.accommodationSelection?.roomCount ?? cost.roomCount) : undefined,
           unitAmountCents: input.unitAmountCents,
           unitAmountMaxCents: input.unitAmountMaxCents ?? null,
           quantity:

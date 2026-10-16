@@ -248,7 +248,7 @@ export function PlanBudget({
             <p className="mt-1 text-sm leading-6 text-graphite">
               人均 {perPersonRange ?? "待确认"}｜
               {summary.factors.travelerCount} 人｜
-              {summary.factors.roomCount} 间房｜
+              {plan.costs.some((cost) => cost.roomCount !== undefined) ? "房数按各笔住宿" : `${summary.factors.roomCount} 间房（默认）`}｜
               {summary.factors.nightCount} 晚
             </p>
           </div>
@@ -289,8 +289,9 @@ export function PlanBudget({
             : ""}
         </p>
         <p className="mt-2 text-sm leading-6 text-graphite">
-          人数、房间、晚数和预算目标读取本计划版本的需求修订{" "}
+          人数与预算目标读取本计划版本的需求修订{" "}
           {plan.requestRevision} 快照；修改需求请先在需求确认区保存并确认，再生成新计划版本后重算。
+          住宿明确填写的房数与每笔晚数优先，未填写时使用默认推算。
         </p>
       </section>
 

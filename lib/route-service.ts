@@ -22,6 +22,7 @@ import {
 } from "./routes";
 import { planEventEnd, sortPlanEvents, type PlanEvent } from "./plan";
 import { cityRouteOriginIssue } from "./route-origin";
+import { routeDayEvents } from "./route-day";
 
 export const routeQuerySchema = z.object({
   fromEventId: z.string().min(1).max(80),
@@ -163,13 +164,15 @@ export async function queryPlanRoute(plan: Pick<PlanVersionRecord, "tripId" | "e
   const parsed = routeQuerySchema.safeParse(input);
   if (!parsed.success) throw new PlanValidationError(parsed.error.issues[0]?.message ?? "路线查询格式不正确。");
   const tripId = plan.tripId;
-  const from = plan.events.find((event) => event.id === parsed.data.fromEventId);
   const to = plan.events.find((event) => event.id === parsed.data.toEventId);
+  const dayEvents = to ? routeDayEvents(plan.events, to.date) : [];
+  const from = dayEvents.find((event) => event.id === parsed.data.fromEventId);
   if (!from || !to) throw new PlanValidationError("没有找到路线连接的两个地点。");
-  assertAdjacentRoutePair(plan.events.filter((event) => event.date === from.date), from, to);
+  assertAdjacentRoutePair(dayEvents, from, to);
   const fromPlace = plan.places.find((place) => place.id === from.placeId);
   const toPlace = plan.places.find((place) => place.id === to.placeId);
   if (!fromPlace || !toPlace) throw new PlanValidationError("两个安排都必须先确认地点。");
+  if ([from, to].some((event) => event.accommodationSelection?.kind === "area")) throw new PlanValidationError("住宿区域尚未确定具体酒店，请在住宿推荐确认酒店后查询精确路线。");
   const departureTime = parsed.data.departureTime ?? from.endTime;
   if (planEventEnd(from).getTime() > Date.parse(`${from.date}T${departureTime}:00+08:00`)) throw new PlanValidationError("出发时刻不能早于上一项结束时间。");
 
@@ -302,10 +305,12 @@ export async function saveManualPlanRoute(tripId: string, version: number, input
   if (!parsed.success) throw new PlanValidationError(parsed.error.issues[0]?.message ?? "人工路线记录格式不正确。");
   const plan = await getPlanVersion(tripId, version);
   if (!plan.isCurrent) throw new PlanConflictError("计划已变化，请刷新后重新记录路线。");
-  const from = plan.events.find((event) => event.id === parsed.data.fromEventId);
   const to = plan.events.find((event) => event.id === parsed.data.toEventId);
+  const dayEvents = to ? routeDayEvents(plan.events, to.date) : [];
+  const from = dayEvents.find((event) => event.id === parsed.data.fromEventId);
   if (!from || !to) throw new PlanValidationError("没有找到路线连接的两个地点。");
-  assertAdjacentRoutePair(plan.events.filter((event) => event.date === from.date), from, to);
+  assertAdjacentRoutePair(dayEvents, from, to);
+  if ([from, to].some((event) => event.accommodationSelection?.kind === "area")) throw new PlanValidationError("住宿区域尚未确定具体酒店，请先确认酒店再记录接驳。");
   if (!plan.places.some((place) => place.id === from.placeId) || !plan.places.some((place) => place.id === to.placeId)) {
     throw new PlanValidationError("两个安排都必须先确认地点。");
   }

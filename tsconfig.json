@@ -37,7 +37,9 @@
     ".next-phase17/types/**/*.ts",
     ".next-phase17/dev/types/**/*.ts",
     ".next-phase18/types/**/*.ts",
-    ".next-phase18/dev/types/**/*.ts"
+    ".next-phase18/dev/types/**/*.ts",
+    ".next-phase19/types/**/*.ts",
+    ".next-phase19/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

@@ -4,19 +4,19 @@ import { openingHoursConditions, reservationRequirement, type EvidenceField, typ
 
 export type EvidenceTarget = {
   event: Pick<PlanEvent, "id" | "title" | "locationName" | "date" | "endDate" | "startTime" | "endTime" | "note">;
-  price: Pick<PlanCostItem, "category" | "currency" | "unit" | "unitAmountCents" | "unitAmountMaxCents" | "quantity" | "dinerCount"> | null;
+  price: Pick<PlanCostItem, "category" | "currency" | "unit" | "unitAmountCents" | "unitAmountMaxCents" | "quantity" | "dinerCount" | "roomCount" | "nightCount"> | null;
 };
 
 export function evidenceTarget(event: PlanEvent, costs: PlanCostItem[]): EvidenceTarget {
   // Include the meal pricing basis in invalidation even when the automatic
   // source evaluator cannot verify a menu. Separate route fares are excluded.
-  const matches = costs.filter((cost) => cost.linkedEventId === event.id && !cost.eventRemoved && cost.category === (event.type === "meal" ? "meal" : "ticket"));
+  const matches = costs.filter((cost) => cost.linkedEventId === event.id && !cost.eventRemoved && cost.category === (event.type === "meal" ? "meal" : event.type === "accommodation" ? "accommodation" : "ticket"));
   const cost = matches.length === 1 ? matches[0] : null;
   return {
     event: { id: event.id, title: event.title, locationName: event.locationName, date: event.date,
       endDate: formatPlanDate(planEventEnd(event)), startTime: event.startTime, endTime: event.endTime, note: event.note },
     price: cost ? { category: cost.category, currency: cost.currency, unit: cost.unit, unitAmountCents: cost.unitAmountCents,
-      unitAmountMaxCents: cost.unitAmountMaxCents, quantity: cost.quantity, ...(cost.dinerCount !== undefined ? { dinerCount: cost.dinerCount } : {}) } : null,
+      unitAmountMaxCents: cost.unitAmountMaxCents, quantity: cost.quantity, ...(cost.dinerCount !== undefined ? { dinerCount: cost.dinerCount } : {}), ...(cost.roomCount !== undefined ? { roomCount: cost.roomCount } : {}), ...(cost.nightCount !== undefined ? { nightCount: cost.nightCount } : {}) } : null,
   };
 }
 

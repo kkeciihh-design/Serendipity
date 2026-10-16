@@ -23,7 +23,6 @@ import {
   planValidationResultsSchema,
   preparePlanForStorage,
   planEventEnd,
-  sortPlanEvents,
   normalizePlanOutput,
   validatePlan,
   type PlanContent,
@@ -44,6 +43,7 @@ import { requestSnapshotSchema, type RequestSnapshot } from "./trip-request";
 import { placeSchema, placeIdentity, validatePlaceReferences, type Place, type PlaceCandidate } from "./places";
 import { invalidateRouteReference, routeConflict, routeCostPricingUnit, routeLegSchema, routeModeLabels, type RouteLeg } from "./routes";
 import { cityRouteOriginIssue } from "./route-origin";
+import { isRoutePair, routeDayEvents } from "./route-day";
 import {
   activeTicketCoreSchema,
   activateTicket,
@@ -617,6 +617,8 @@ export async function savePlanCostEdit(input: {
 
       const currentPlan = serializePlan(row);
       let editedCosts: PlanCostItem[];
+      const editedCost = currentPlan.costs.find((cost) => cost.id === input.edit.costId);
+      if (editedCost && currentPlan.events.find((event) => event.id === editedCost.linkedEventId)?.accommodationSelection && input.edit.nightCount !== undefined && input.edit.nightCount !== 1) throw new PlanValidationError("已关联入住的住宿费用每行仅计一晚；日期和房数请在住宿推荐修改。");
       try {
         editedCosts = applyPlanCostEdit(currentPlan.costs, input.edit, currentPlan.events);
       } catch (error) {
@@ -721,6 +723,7 @@ export async function savePlanPlaceEdit(input: {
       const current = serializePlan(row);
       const event = current.events.find((item) => item.id === input.eventId);
       if (!event) throw new PlanValidationError("没有找到对应日程。");
+      if (event.accommodationSelection) throw new PlanConflictError("此住宿已关联入住资料，请从住宿推荐确认酒店或区域，以便一起重算费用和交通。");
       if (event.locked || event.status === "confirmed") throw new PlanConflictError("这项安排已锁定或确认，请先在时间轴解除后再修改地点。");
       const candidate = input.candidate;
       const precision = input.precision;
@@ -795,7 +798,7 @@ function safeCityRouteOrigins(routeLegs: RouteLeg[], events: PlanEvent[], origin
 }
 
 function routeTransportEventIds(route: RouteLeg, events: PlanEvent[]) {
-  const ordered = sortPlanEvents(events.filter((event) => event.date === route.date));
+  const ordered = routeDayEvents(events, route.date);
   const fromIndex = ordered.findIndex((event) => event.id === route.fromEventId);
   const toIndex = ordered.findIndex((event) => event.id === route.toEventId);
   return fromIndex >= 0 && toIndex >= fromIndex
@@ -868,12 +871,7 @@ export function applyRouteCost(route: RouteLeg, events: PlanEvent[], costs: Plan
 }
 
 function adjacentRoutePair(events: PlanEvent[], fromEventId: string, toEventId: string) {
-  const from = events.find((event) => event.id === fromEventId);
-  const to = events.find((event) => event.id === toEventId);
-  if (!from || !to || from.date !== to.date) return false;
-  const placed = sortPlanEvents(events.filter((event) => event.date === from.date && event.placeId));
-  const index = placed.findIndex((event) => event.id === from.id);
-  return index >= 0 && placed[index + 1]?.id === to.id;
+  return isRoutePair(events, fromEventId, toEventId);
 }
 
 function routeRelevantEventChanged(before: PlanEvent | undefined, after: PlanEvent, endpoint: "from" | "to") {
@@ -926,7 +924,8 @@ export function updateRoutesAfterEventChange(routeLegs: RouteLeg[], events: Plan
       routeTransportChanged(previousEvents?.find((event) => event.id === changedEventId), events.find((event) => event.id === changedEventId))
     );
     if (endpointChanged || transportChanged) {
-      const invalidated = invalidateRouteReference(associated, from.date, from.endTime);
+      const departure = routeDayEvents(events, to.date).find((event) => event.id === from.id) ?? from;
+      const invalidated = invalidateRouteReference(associated, departure.date, departure.endTime);
       routes.push(invalidated);
       costs = applyRouteCost(invalidated, events, costs);
     } else {
@@ -953,7 +952,7 @@ export async function savePlanRouteEdit(input: {
       if (!row) throw new PlanNotFoundError();
       if (row.trip.currentPlanVersionId !== row.id) throw new PlanConflictError("计划已变化，请刷新后重新查询路线；历史版本保持只读。");
       const current = serializePlan(row);
-      const from = current.events.find((event) => event.id === input.route.fromEventId);
+      const from = routeDayEvents(current.events, input.route.date).find((event) => event.id === input.route.fromEventId);
       const to = current.events.find((event) => event.id === input.route.toEventId);
       if (!from || !to) throw new PlanValidationError("路线关联的日程不存在，请刷新后重试。");
       const originIssue = cityRouteOriginIssue(from);
@@ -1016,7 +1015,8 @@ export async function savePlanRouteEdit(input: {
 // before this commit, which rechecks identity, version and protected facts.
 export async function savePlanRecommendationEdit(input: {
   tripId: string; expectedPlanVersion: number; eventId: string;
-  targetType: "activity" | "meal"; action: "keep" | "replace" | "adjust"; event: PlanEvent; places: Place[];
+  targetType: "activity" | "meal" | "accommodation"; action: "keep" | "replace" | "adjust"; event: PlanEvent; places: Place[];
+  relatedEvents?: PlanEvent[];
   routeLegs: RouteLeg[]; costs: PlanCostItem[]; pendingItems: PlanPendingItem[];
   warnings: string[]; abortSignal?: AbortSignal;
 }) {
@@ -1033,15 +1033,19 @@ export async function savePlanRecommendationEdit(input: {
       const current = serializePlan(row);
       const before = current.events.find((event) => event.id === input.eventId);
       if (!before || before.type !== input.targetType || input.event.type !== input.targetType || input.event.id !== before.id) throw new PlanValidationError("没有找到对应推荐活动。");
-      if (input.action !== "keep" && (before.locked || before.status === "confirmed" ||
-        current.tickets.some((ticket) => isActiveTicket(ticket) && ticket.eventId === before.id))) {
+      const edits = input.targetType === "accommodation" ? [input.event, ...(input.relatedEvents ?? [])] : [input.event];
+      const originals = edits.map((edit) => current.events.find((e) => e.id === edit.id));
+      if (new Set(edits.map((e) => e.id)).size !== edits.length || originals.some((e) => !e || e.type !== input.targetType)) throw new PlanValidationError("关联住宿事件不完整。");
+      if (input.action !== "keep" && (originals.some((e) => e!.locked || e!.status === "confirmed") ||
+        current.tickets.some((ticket) => isActiveTicket(ticket) && edits.some((e) => e.id === ticket.eventId)))) {
         throw new PlanConflictError("当前活动已锁定、确认或受有效票据约束，不能替换。");
       }
-      if (input.action !== "keep" && current.costs.some((cost) => cost.linkedEventId === before.id && !cost.id.startsWith("route-") && hasProtectedCostFact(cost))) {
+      if (input.action !== "keep" && current.costs.some((cost) => edits.some((e) => e.id === cost.linkedEventId) && !cost.id.startsWith("route-") && hasProtectedCostFact(cost))) {
         throw new PlanConflictError("原活动有已确认或已支付费用，请先核对原费用，不能自动改成新推荐费用。");
       }
       const event = planEventSchema.parse(input.action === "keep" ? { ...before, attractionSelection: input.event.attractionSelection } : input.event);
-      const events = current.events.map((item) => item.id === event.id ? event : item);
+      const events = current.events.map((item) => item.id === event.id ? event :
+        input.targetType === "accommodation" && edits.some((e) => e.id === item.id) ? planEventSchema.parse(edits.find((e) => e.id === item.id)) : item);
       const places = input.action === "keep" ? current.places : z.array(placeSchema).parse(input.places);
       const costs = input.action === "keep" ? current.costs : z.array(planCostItemSchema).parse(input.costs);
       const routeLegs = input.action === "keep" ? current.routeLegs : z.array(routeLegSchema).parse(input.routeLegs);
@@ -1052,7 +1056,7 @@ export async function savePlanRecommendationEdit(input: {
       // Confirmed and paid route facts may receive a caution note, never new amounts.
       for (const cost of current.costs.filter(hasProtectedCostFact)) {
         const after = costs.find((item) => item.id === cost.id);
-        if (!after || ["unit", "unitAmountCents", "unitAmountMaxCents", "quantity", "dinerCount", "nightCount", "certainty", "paymentStatus", "source"].some((key) =>
+        if (!after || ["unit", "unitAmountCents", "unitAmountMaxCents", "quantity", "dinerCount", "roomCount", "nightCount", "certainty", "paymentStatus", "source"].some((key) =>
           after[key as keyof PlanCostItem] !== cost[key as keyof PlanCostItem])) throw new PlanConflictError("已确认或已支付费用必须保留。");
       }
       const validationResults = validationWithTickets(validatePlan({ events, pendingItems }, current.requestSnapshot, costs), current.tickets, events);
