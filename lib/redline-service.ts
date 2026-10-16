@@ -23,9 +23,11 @@ export function ticketRedlineInput(plan: PlanVersionRecord, ticket: Ticket): Red
   const originEvent = incoming && plan.events.find((e) => e.id === incoming.fromEventId);
   const routeMatchesOrigin = originEvent?.locationName === ticket.chainOriginName && !cityRouteOriginIssue(originEvent);
   const linked = incoming && routeMatchesOrigin ? incoming : undefined;
+  const replacedMealOrigin = !linked && plan.events.some((event) => event.restaurantSelection?.invalidatedAccessOrigins?.some((origin) =>
+    origin.ticketId === ticket.id && origin.originName === ticket.chainOriginName && event.locationName !== origin.originName));
   const route: TimingRoute = linked ? routeTiming(linked) : {
     kind: ticket.accessMode === "walking" ? "fixed" : "timed",
-    durationSeconds: ticket.accessDurationMinutes === null ? null : ticket.accessDurationMinutes * 60,
+    durationSeconds: replacedMealOrigin || ticket.accessDurationMinutes === null ? null : ticket.accessDurationMinutes * 60,
     status: ticket.accessMode === "public_transit" ? "pending_confirmation" : "estimated",
     source: `手工接驳参考：${ticket.accessNote || "未提供路线依据"}`,
     applicableAt: null, validFrom: null, validUntil: null, futureCapability: false,
@@ -66,6 +68,7 @@ export function ticketRedlineInput(plan: PlanVersionRecord, ticket: Ticket): Red
   if (p.slowWalking) buffers.push({ id: "slow", label: "步行较慢", seconds: 300, reason: "相对路线预计步速额外预留 5 分钟，不重复整段步行" });
   if (p.baggage === "checked") buffers.push({ id: "luggage", label: "携带大件 / 托运行李", seconds: 300, reason: "搬运行李额外预留 5 分钟；托运办理耗时另列" });
   const blockers: string[] = [];
+  if (replacedMealOrigin) blockers.push("原接驳起点的餐厅已替换，请更新门到门起点并重新核对接驳；旧餐厅耗时不再适用。");
   if (!ticket.chainOriginName || !ticket.fromName || !departureAt || !ticket.accessMode) blockers.push("起点、站点、票面日期时刻或接驳方式待补。");
   const peers = plan.tickets.filter((t) => isActiveTicket(t) && t.eventId === ticket.eventId);
   if (peers.some((t) => [t.date, t.departureTime, t.serviceNumber, t.fromName, t.fromDetail].join() !== [ticket.date, ticket.departureTime, ticket.serviceNumber, ticket.fromName, ticket.fromDetail].join())) blockers.push("同一主交通存在不同的有效班次，当前单线行程无法同时衔接。");

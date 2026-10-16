@@ -10,7 +10,7 @@ export type AttractionSource = {
   publisher: string;
   retrievedAt: string;
   quote: string;
-  kind: "official" | "commons" | "osm";
+  kind: "official" | "commons" | "osm" | "community";
 };
 
 export type AttractionFact = {
