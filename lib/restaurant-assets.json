@@ -1,0 +1,57 @@
+{
+  "images": [
+    {
+      "id": "huogongdian-pozi-photo",
+      "entryId": "huogongdian-pozi",
+      "entityName": "火宫殿坡子街总店",
+      "city": "长沙",
+      "url": "/restaurants/huogongdian-pozi.webp",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:%E7%81%AB%E5%AE%AB%E6%AE%BF.jpg",
+      "originalUrl": "https://upload.wikimedia.org/wikipedia/commons/4/40/%E7%81%AB%E5%AE%AB%E6%AE%BF.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "author": "EditQ",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "width": 960,
+      "height": 720,
+      "displayAllowed": true,
+      "exportAllowed": true,
+      "retrievedAt": "2026-10-16T03:05:25.278Z",
+      "modification": "2022年门店院落实景资料图，非当前现场或菜品图；仅缩小、转换WebP并移除元数据，衍生图沿用原许可。"
+    }
+  ],
+  "locations": [
+    {
+      "entryId": "xinyuloudong-wanjiali",
+      "candidate": {
+        "provider": "osm",
+        "poiId": "way:273730025",
+        "name": "新玉楼东",
+        "city": "长沙市",
+        "district": "芙蓉区",
+        "address": "新玉楼东, 115, 万家丽中路, 东屯渡街道, 长沙市, 芙蓉区, 长沙市, 湖南省, 410001, 中国",
+        "adcode": "",
+        "category": "amenity:restaurant",
+        "longitude": 113.0256581,
+        "latitude": 28.1926535,
+        "coordinateSystem": "WGS84",
+        "retrievedAt": "2026-10-16T03:05:27.481Z"
+      }
+    }
+  ],
+  "sources": {
+    "official": [
+      {
+        "url": "https://www.huogongdian.com/stores.html",
+        "retrievedAt": "2026-10-16T03:05:21.422Z"
+      },
+      {
+        "url": "https://www.huogongdian.com/hunan.html",
+        "retrievedAt": "2026-10-16T03:05:21.528Z"
+      }
+    ],
+    "voyage": {
+      "url": "https://en.wikivoyage.org/wiki/Changsha#Eat",
+      "retrievedAt": "2026-10-16T03:05:22.681Z"
+    }
+  }
+}

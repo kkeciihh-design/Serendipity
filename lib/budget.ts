@@ -96,6 +96,9 @@ export const planCostItemSchema = z.object({
     .max(2_000_000_000)
     .nullable(),
   quantity: z.number().int().min(1).max(100).nullable(),
+  // Explicit participants for this meal only; absent legacy rows retain the
+  // plan snapshot's traveler count. A meal row always represents one occasion.
+  dinerCount: z.number().int().min(1).max(100).optional(),
   transferSide: z.enum(["access", "egress"]).optional(),
   // Absent on legacy snapshots: retain their original whole-trip night basis.
   // New daily accommodation rows explicitly cover one night.
@@ -242,14 +245,14 @@ export function budgetTargetCentsFromSnapshot(snapshot: RequestSnapshot) {
 }
 
 export function costItemQuantity(
-  item: Pick<PlanCostItem, "unit" | "quantity" | "nightCount">,
+  item: Pick<PlanCostItem, "unit" | "quantity" | "nightCount" | "dinerCount">,
   factors: BudgetFactors,
 ) {
   switch (item.unit) {
     case "one_time":
       return 1;
     case "per_person":
-      return factors.travelerCount;
+      return item.dinerCount ?? factors.travelerCount;
     case "per_room_per_night":
       return factors.roomCount * (item.nightCount ?? factors.nightCount);
     case "per_night":
@@ -260,7 +263,7 @@ export function costItemQuantity(
 }
 
 export function costItemQuantityDescription(
-  item: Pick<PlanCostItem, "unit" | "quantity" | "nightCount">,
+  item: Pick<PlanCostItem, "unit" | "quantity" | "nightCount" | "dinerCount">,
   factors: BudgetFactors,
 ) {
   const quantity = costItemQuantity(item, factors);
@@ -461,6 +464,10 @@ export function validatePlanCosts(
   const costIds = new Set<string>();
 
   for (const cost of costs) {
+    if (cost.dinerCount !== undefined && (cost.category !== "meal" || cost.unit !== "per_person" ||
+      !Number.isInteger(cost.dinerCount) || cost.dinerCount < 1 || cost.dinerCount > 100)) {
+      errors.push(`费用 ${cost.id} 的本餐人数只适用于按人计价的餐饮，且须为 1 到 100 的整数。`);
+    }
     if (costIds.has(cost.id)) errors.push(`费用 ${cost.id} 重复。`);
     costIds.add(cost.id);
     const routeCost = cost.id.startsWith("route-");
@@ -570,6 +577,7 @@ export function applyPlanCostEdit(
       ? {
           ...cost,
           unit: input.unit,
+          dinerCount: input.unit === "per_person" ? cost.dinerCount : undefined,
           unitAmountCents: input.unitAmountCents,
           unitAmountMaxCents: input.unitAmountMaxCents ?? null,
           quantity:
