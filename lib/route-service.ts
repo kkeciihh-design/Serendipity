@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { z } from "zod";
 import { getMapConfiguration } from "./map-settings";
 import { getSettingsRecord } from "./settings";
-import { getPlanVersion, PlanConflictError, PlanValidationError, savePlanRouteEdit } from "./plan-service";
+import { getPlanVersion, PlanConflictError, PlanValidationError, savePlanRouteEdit, type PlanVersionRecord } from "./plan-service";
 import { toGcj02, toWgs84 } from "./places";
 import {
   arrivalForRoute,
@@ -150,10 +150,19 @@ function routeIdentity(input: {
 }
 
 export async function searchAndSavePlanRoute(tripId: string, version: number, input: unknown, signal?: AbortSignal) {
-  const parsed = routeQuerySchema.safeParse(input);
-  if (!parsed.success) throw new PlanValidationError(parsed.error.issues[0]?.message ?? "路线查询格式不正确。");
   const plan = await getPlanVersion(tripId, version);
   if (!plan.isCurrent) throw new PlanConflictError("计划已变化，请刷新后重新查询路线。");
+  const route = await queryPlanRoute(plan, input, signal);
+  return savePlanRouteEdit({ tripId, expectedPlanVersion: version, route, abortSignal: signal });
+}
+
+// Read-only route adapter: replacement previews query their complete proposed
+// snapshot before the single version transaction commits any state.
+export async function queryPlanRoute(plan: Pick<PlanVersionRecord, "tripId" | "events" | "places">, input: unknown, signal?: AbortSignal): Promise<RouteLeg> {
+  if (signal?.aborted) throw new PlanConflictError("本次路线查询已取消。");
+  const parsed = routeQuerySchema.safeParse(input);
+  if (!parsed.success) throw new PlanValidationError(parsed.error.issues[0]?.message ?? "路线查询格式不正确。");
+  const tripId = plan.tripId;
   const from = plan.events.find((event) => event.id === parsed.data.fromEventId);
   const to = plan.events.find((event) => event.id === parsed.data.toEventId);
   if (!from || !to) throw new PlanValidationError("没有找到路线连接的两个地点。");
@@ -178,7 +187,7 @@ export async function searchAndSavePlanRoute(tripId: string, version: number, in
   const id = routeIdentity({ tripId, fromEventId: from.id, toEventId: to.id, date: from.date, departureTime, mode, cacheKey });
   const cached = readCachedRoute(cacheKey);
   if (cached && cached.fromEventId === from.id && cached.toEventId === to.id) {
-    return savePlanRouteEdit({ tripId, expectedPlanVersion: version, route: cached, abortSignal: signal });
+    return cached;
   }
 
   const common = { id, fromEventId: from.id, toEventId: to.id, date: from.date, departureTime, mode, cacheKey };
@@ -285,7 +294,7 @@ export async function searchAndSavePlanRoute(tripId: string, version: number, in
   route = routeLegSchema.parse(route);
   if (signal?.aborted) throw new PlanConflictError("本次路线查询已取消。");
   writeCachedRoute(cacheKey, route);
-  return savePlanRouteEdit({ tripId, expectedPlanVersion: version, route, abortSignal: signal });
+  return route;
 }
 
 export async function saveManualPlanRoute(tripId: string, version: number, input: unknown, signal?: AbortSignal) {

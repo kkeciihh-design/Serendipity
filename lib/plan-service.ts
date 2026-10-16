@@ -1012,6 +1012,75 @@ export async function savePlanRouteEdit(input: {
   }
 }
 
+// One atomic commit for a reviewed attraction choice. External POI/route reads
+// belong to attraction-service; this transaction rechecks the captured version.
+export async function savePlanAttractionEdit(input: {
+  tripId: string; expectedPlanVersion: number; eventId: string;
+  action: "keep" | "replace"; event: PlanEvent; places: Place[];
+  routeLegs: RouteLeg[]; costs: PlanCostItem[]; pendingItems: PlanPendingItem[];
+  warnings: string[]; abortSignal?: AbortSignal;
+}) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      const assertActive = () => { if (input.abortSignal?.aborted) throw new PlanConflictError("本次景点选择已取消，旧计划保持不变。"); };
+      assertActive();
+      const row = await transaction.planVersion.findUnique({
+        where: { tripId_versionNumber: { tripId: input.tripId, versionNumber: input.expectedPlanVersion } },
+        include: { trip: { select: { currentPlanVersionId: true } } },
+      });
+      if (!row) throw new PlanNotFoundError();
+      if (row.trip.currentPlanVersionId !== row.id) throw new PlanConflictError("计划已变化，请重新打开景点预览；历史版本保持只读。");
+      const current = serializePlan(row);
+      const before = current.events.find((event) => event.id === input.eventId);
+      if (!before || before.type !== "activity" || input.event.id !== before.id) throw new PlanValidationError("没有找到对应景点活动。");
+      if (input.action === "replace" && (before.locked || before.status === "confirmed" ||
+        current.tickets.some((ticket) => isActiveTicket(ticket) && ticket.eventId === before.id))) {
+        throw new PlanConflictError("当前活动已锁定、确认或受有效票据约束，不能替换。");
+      }
+      if (input.action === "replace" && current.costs.some((cost) => cost.linkedEventId === before.id && !cost.id.startsWith("route-") && hasProtectedCostFact(cost))) {
+        throw new PlanConflictError("原活动有已确认或已支付费用，请先核对原费用，不能自动改成新景点门票。");
+      }
+      const event = planEventSchema.parse(input.action === "keep" ? { ...before, attractionSelection: input.event.attractionSelection } : input.event);
+      const events = current.events.map((item) => item.id === event.id ? event : item);
+      const places = input.action === "keep" ? current.places : z.array(placeSchema).parse(input.places);
+      const costs = input.action === "keep" ? current.costs : z.array(planCostItemSchema).parse(input.costs);
+      const routeLegs = input.action === "keep" ? current.routeLegs : z.array(routeLegSchema).parse(input.routeLegs);
+      const pendingItems = input.action === "keep" ? current.pendingItems : z.array(planPendingItemSchema).max(24).parse(input.pendingItems);
+      validatePlaceReferences(events, places);
+      const costErrors = validatePlanCosts(costs, events);
+      if (costErrors.length) throw new PlanValidationError(costErrors[0]);
+      // Confirmed and paid route facts may receive a caution note, never new amounts.
+      for (const cost of current.costs.filter(hasProtectedCostFact)) {
+        const after = costs.find((item) => item.id === cost.id);
+        if (!after || ["unit", "unitAmountCents", "unitAmountMaxCents", "quantity", "certainty", "paymentStatus", "source"].some((key) =>
+          after[key as keyof PlanCostItem] !== cost[key as keyof PlanCostItem])) throw new PlanConflictError("已确认或已支付费用必须保留。");
+      }
+      const validationResults = validationWithTickets(validatePlan({ events, pendingItems }, current.requestSnapshot, costs), current.tickets, events);
+      if (input.action === "replace" && validationResults.errors.length) throw new PlanValidationError(validationResults.errors[0]);
+      validationResults.warnings = [...new Set([...validationResults.warnings, ...input.warnings])];
+      validationResults.status = validationResults.errors.length ? "invalid" : validationResults.warnings.length ? "needs_review" : "valid";
+      assertActive();
+      const created = await transaction.planVersion.create({ data: {
+        tripId: row.tripId, versionNumber: row.versionNumber + 1, requestRevision: row.requestRevision, requestSnapshot: row.requestSnapshot,
+        events: JSON.stringify(events), places: JSON.stringify(places), costs: JSON.stringify(costs), routeLegs: JSON.stringify(routeLegs),
+        tickets: JSON.stringify(current.tickets), pendingItems: JSON.stringify(pendingItems), validationResults: JSON.stringify(validationResults), requirementUpToDate: row.requirementUpToDate,
+      } });
+      await copyEvidenceFacts(transaction, row.id, created.id, current, { events, costs });
+      assertActive();
+      await transaction.trip.update({ where: { id: row.tripId }, data: {
+        currentPlanVersionId: created.id, status: !row.requirementUpToDate ? "plan_needs_update" : validationResults.status !== "valid" ? "plan_needs_review" : "planned",
+      } });
+      const saved = await transaction.planVersion.findUnique({ where: { id: created.id }, include: { trip: { select: { currentPlanVersionId: true } } } });
+      if (!saved) throw new PlanConflictError();
+      assertActive();
+      return serializePlan(saved);
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034", "P2028"].includes(error.code)) throw new PlanConflictError("计划已变化，请重新预览后重试。");
+    throw error;
+  }
+}
+
 function updateRoutesAfterTicketChange(input: {
   routeLegs: RouteLeg[];
   previousEvents: PlanEvent[];

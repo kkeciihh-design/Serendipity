@@ -33,6 +33,7 @@ import { effectiveEvidenceStatus, evidenceFieldLabels, evidenceStatusLabels, sum
 import { numberPlanEvents } from "@/lib/map-link";
 import { RouteSummary } from "./route-summary";
 import { EvidenceDrawer } from "./evidence-drawer";
+import { AttractionTimelineCard } from "./attraction-card";
 import type { MapLinkTarget } from "./plan-map";
 import { useVersionedDraft } from "./use-versioned-draft";
 
@@ -305,6 +306,7 @@ export function PlanTimeline({
                   </span>
                 ) : null}
               </button>
+              {event.type === "activity" ? <AttractionTimelineCard key={`${scope}/${event.id}`} tripId={tripId} plan={plan} event={event} visitLabel={visitLabel} onSaved={(savedPlan) => { if (activeScope.current === scope && plan.isCurrent) onSaved(savedPlan); }} /> : null}
               <div>
                 {event.type === "departure_transport" || event.type === "return_transport" ? <><button type="button" onClick={() => onEventSelect(event.id, "transport", event.dayNumber)} className="mr-2 inline-flex min-h-11 items-center rounded-md border border-sage bg-white px-3 text-sm font-medium text-sage">查看交通票面</button><a href="#time-redlines" className="mr-2 inline-flex min-h-11 items-center rounded-md border border-clay bg-white px-3 text-sm font-medium text-clay">查看时间红线</a></> : null}
                 <button
