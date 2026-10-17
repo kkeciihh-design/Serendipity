@@ -117,7 +117,7 @@ export async function previewAccommodation(tripId: string, version: number, even
     }
   }
   if (!pairMap.size) warnings.push("相邻活动或住宿缺少定位；请补齐地图地点，当前无法计算进出酒店的交通。");
-  const validation = validatePlan({ events, pendingItems }, plan.requestSnapshot, proposed.costs);
+  const validation = validatePlan({ events, pendingItems }, plan.requestSnapshot, proposed.costs, plan.validationResults.scope);
   conflicts.push(...validation.errors); warnings.push(...validation.warnings);
   const afterBudget = calculateBudgetSummary(proposed.costs, plan.requestSnapshot), hardBudget = confirmedBudgetLimit(plan);
   if (hardBudget !== null && afterBudget.totalMinCents > hardBudget) conflicts.push("住宿调整后已知费用下限超过明确预算上限。");

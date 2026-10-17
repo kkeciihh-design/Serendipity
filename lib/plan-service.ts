@@ -187,7 +187,7 @@ function validationWithTickets(
   };
 }
 
-function serializePlan(record: PlanVersionRow): PlanVersionRecord {
+export function serializePlan(record: PlanVersionRow): PlanVersionRecord {
   try {
     const events = z.array(planEventSchema).parse(JSON.parse(record.events));
     const places = z.array(placeSchema).parse(JSON.parse(record.places));
@@ -204,7 +204,7 @@ function serializePlan(record: PlanVersionRow): PlanVersionRecord {
     // Re-evaluate old plans under current rules using their own snapshot. A
     // previously saved success must not hide a newly detected timing conflict.
     // This projection never rewrites historical facts or stored validation.
-    const currentValidation = validatePlan({ events, pendingItems }, requestSnapshot, costs);
+    const currentValidation = validatePlan({ events, pendingItems }, requestSnapshot, costs, storedValidation.scope);
     // Derived display metadata may be refreshed without rewriting historical
     // snapshots. Preserve any non-budget findings from the stored validation.
     const warnings = [...new Set([
@@ -433,7 +433,7 @@ export async function savePlanVersion(input: {
   }
 }
 
-async function copyEvidenceFacts(
+export async function copyEvidenceFacts(
   transaction: Prisma.TransactionClient,
   sourcePlanVersionId: string,
   destinationPlanVersionId: string,
@@ -531,6 +531,7 @@ export async function savePlanEventEdit(input: {
         editedPlan,
         currentPlan.requestSnapshot,
         editedCosts,
+        currentPlan.validationResults.scope,
       ), currentPlan.tickets, editedPlan.events);
       if (validationResults.errors.length > 0) {
         throw new PlanValidationError(validationResults.errors[0]);
@@ -654,6 +655,7 @@ export async function savePlanCostEdit(input: {
         sourcePlan,
         currentPlan.requestSnapshot,
         editedCosts,
+        currentPlan.validationResults.scope,
       ), currentPlan.tickets, sourcePlan.events);
       // A ticket can reveal an existing timing conflict. Money already paid
       // or refunded remains recordable while that schedule is being repaired.
@@ -756,7 +758,7 @@ export async function savePlanPlaceEdit(input: {
       const costErrors = validatePlanCosts(costs, events);
       if (costErrors.length > 0) throw new PlanValidationError(costErrors[0]);
       const validationResults = validationWithTickets(
-        validatePlan({ events, pendingItems: current.pendingItems }, current.requestSnapshot, costs),
+        validatePlan({ events, pendingItems: current.pendingItems }, current.requestSnapshot, costs, current.validationResults.scope),
         current.tickets,
         events,
       );
@@ -990,7 +992,7 @@ export async function savePlanRouteEdit(input: {
       const costErrors = validatePlanCosts(costs, current.events);
       if (costErrors.length > 0) throw new PlanValidationError(costErrors[0]);
       const validationResults = validationWithTickets(
-        validatePlan({ events: current.events, pendingItems: current.pendingItems }, current.requestSnapshot, costs),
+        validatePlan({ events: current.events, pendingItems: current.pendingItems }, current.requestSnapshot, costs, current.validationResults.scope),
         current.tickets,
         current.events,
       );
@@ -1076,7 +1078,7 @@ export async function savePlanRecommendationEdit(input: {
         if (!after || ["unit", "unitAmountCents", "unitAmountMaxCents", "quantity", "dinerCount", "roomCount", "nightCount", "certainty", "paymentStatus", "source"].some((key) =>
           after[key as keyof PlanCostItem] !== cost[key as keyof PlanCostItem])) throw new PlanConflictError("已确认或已支付费用必须保留。");
       }
-      const validationResults = validationWithTickets(validatePlan({ events, pendingItems }, current.requestSnapshot, costs), current.tickets, events);
+      const validationResults = validationWithTickets(validatePlan({ events, pendingItems }, current.requestSnapshot, costs, current.validationResults.scope), current.tickets, events);
       if (input.action !== "keep" && validationResults.errors.length) throw new PlanValidationError(validationResults.errors[0]);
       validationResults.warnings = [...new Set([...validationResults.warnings, ...input.warnings])];
       validationResults.status = validationResults.errors.length ? "invalid" : validationResults.warnings.length ? "needs_review" : "valid";
@@ -1454,7 +1456,7 @@ export async function savePlanTicketEdit(input: {
       const ticketValidation = validateTickets(tickets, planAfterTickets.events);
       if (ticketValidation.errors.length > 0) throw new PlanValidationError(ticketValidation.errors[0]);
       const validationResults = validationWithTickets(
-        validatePlan(planAfterTickets, current.requestSnapshot, ticketCosts),
+        validatePlan(planAfterTickets, current.requestSnapshot, ticketCosts, current.validationResults.scope),
         tickets,
         planAfterTickets.events,
       );
