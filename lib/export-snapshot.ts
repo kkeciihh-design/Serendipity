@@ -18,6 +18,11 @@ export const mobileExportWriteSchema = z.object({
   expectedPlanVersion: z.number().int().positive(),
   options: mobileExportOptionsSchema,
 }).strict();
+export const exportFormatSchema = z.enum(["mobile-html", "plain-text", "markdown"]);
+export type ExportFormat = z.infer<typeof exportFormatSchema>;
+export type TextExportFormat = Exclude<ExportFormat, "mobile-html">;
+export const exportWriteSchema = mobileExportWriteSchema.extend({ format: exportFormatSchema.default("mobile-html") });
+export const exportFormatLabels: Record<ExportFormat, string> = { "mobile-html": "手机 HTML", "plain-text": "纯文字", markdown: "Markdown" };
 export type MobileExportOptions = z.infer<typeof mobileExportOptionsSchema>;
 export type ExportSnapshot = {
   schemaVersion: 1; id: string; generatedAt: string;
@@ -31,6 +36,7 @@ export type ExportSnapshot = {
   redlines: RedlineResult[];
 };
 export type ExportFileSummary = {
+  format: ExportFormat;
   id: string; planVersion: number; requestRevision: number; checklistRevision: number; executionRevision: number;
   requirementUpToDate: boolean; generatedAt: string; options: MobileExportOptions; filename: string; sha256: string;
 };

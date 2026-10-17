@@ -9,7 +9,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const { id, fileId } = await params, file = await getExportFile(id, fileId);
     const disposition = new URL(request.url).searchParams.get("download") === "1" ? "attachment" : "inline";
-    return new Response(file.html, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store",
+    const mime = file.format === "mobile-html" ? "text/html" : file.format === "markdown" ? "text/markdown" : "text/plain";
+    return new Response(file.html, { headers: { "Content-Type": `${mime}; charset=utf-8`, "Cache-Control": "no-store",
       "Content-Disposition": `${disposition}; filename="${file.filename}"`, "Content-Security-Policy": `${MOBILE_HTML_CSP}; frame-ancestors 'self'; sandbox`,
       "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" } });
   } catch (error) {

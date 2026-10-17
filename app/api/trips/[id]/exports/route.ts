@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { appWriteAccessError, hasAppAccess, unauthorizedResponse } from "@/lib/access";
 import { ExportError } from "@/lib/export-snapshot";
-import { createMobileExport, getExportPanel } from "@/lib/export-service";
+import { createExport, getExportPanel } from "@/lib/export-service";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string }> };
@@ -13,13 +13,16 @@ function failure(error: unknown) {
 }
 export async function GET(request: Request, context: Context) {
   if (!hasAppAccess(request)) return unauthorizedResponse();
-  try { return json(await getExportPanel((await context.params).id)); } catch (error) { return failure(error); }
+  try {
+    const kind = z.enum(["mobile-html", "text"]).parse(new URL(request.url).searchParams.get("kind") ?? "mobile-html");
+    return json(await getExportPanel((await context.params).id, kind));
+  } catch (error) { return failure(error); }
 }
 export async function POST(request: Request, context: Context) {
   const denied = appWriteAccessError(request); if (denied) return denied;
   try {
     const body = await request.text();
     if (body.length > 2000) throw new ExportError("导出选项过长。");
-    return json({ file: await createMobileExport((await context.params).id, JSON.parse(body), request.signal) }, 201);
+    return json({ file: await createExport((await context.params).id, JSON.parse(body), request.signal) }, 201);
   } catch (error) { return failure(error); }
 }

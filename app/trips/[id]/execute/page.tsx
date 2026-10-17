@@ -15,6 +15,7 @@ export default async function ExecutePage({ params }: { params: Promise<{ id: st
       <h1 className="mt-2 text-2xl font-semibold text-charcoal sm:text-3xl">旅行执行模式</h1>
       <p className="mt-2 break-words text-graphite">{trip.title}</p>
       {trip.currentPlanVersionId && <Link href={`/trips/${id}/mobile`} className="mt-3 inline-flex min-h-11 items-center rounded-lg border border-sage px-4 text-sage">手机一页版 · 离线保存</Link>}
+      {trip.currentPlanVersionId && <Link href={`/trips/${id}/text`} className="mt-3 ml-3 inline-flex min-h-11 items-center rounded-lg border border-sage px-4 text-sage">文字导出</Link>}
       {trip.currentPlanVersionId ? <ExecutionPanel tripId={id} /> : <p className="mt-6 rounded-xl bg-white p-5">还没有旅行计划。返回旅行确认需求并生成计划后即可开始。</p>}
     </div>
   </main>;

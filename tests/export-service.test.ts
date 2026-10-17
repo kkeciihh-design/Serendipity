@@ -16,6 +16,28 @@ async function seed() {
   return trip.id;
 }
 describe("durable coherent export records", () => {
+  it("text formats reuse snapshots, retain exact bytes, isolate history and reject unsupported formats", async () => {
+    const id = await seed();
+    const html = await service.createMobileExport(id, { expectedPlanVersion: 1, options: {} });
+    for (const format of ["plain-text", "markdown"] as const) {
+      const file = await service.createExport(id, { expectedPlanVersion: 1, format, options: {} });
+      expect(file.format).toBe(format); expect(file.filename.endsWith(format === "markdown" ? ".md" : ".txt")).toBe(true);
+      const original = await service.getExportFile(id, file.id);
+      expect(original.html).toContain("计划待更新"); expect(original.html).toContain("4 人"); expect(original.html).toContain("已手动完成"); expect(original.html).not.toContain("2040");
+      const stored = await db.exportFile.findUniqueOrThrow({ where: { id: file.id } });
+      const snapshot = JSON.parse(stored.snapshot);
+      const { renderTextExport } = await import("../lib/text-export");
+      expect(renderTextExport(snapshot, file.options, format)).toBe(original.html);
+      expect(file.sha256).toBe(createHash("sha256").update(original.html, "utf8").digest("hex"));
+      await service.closeExportStore(); expect(await service.getExportFile(id, file.id)).toEqual(original);
+    }
+    expect((await service.getExportPanel(id)).files.map((f) => f.id)).toEqual([html.id]);
+    expect((await service.getExportPanel(id, "text")).files).toHaveLength(2);
+    await expect(service.createExport(id, { expectedPlanVersion: 1, format: "pdf", options: {} })).rejects.toThrow();
+    await expect(service.createExport(id, { expectedPlanVersion: 99, format: "plain-text", options: {} })).rejects.toThrow("计划已更新");
+    await expect(service.createExport(id, { expectedPlanVersion: 1, format: "markdown", options: {} }, AbortSignal.abort())).rejects.toThrow("取消");
+    expect(await db.exportFile.count({ where: { tripId: id } })).toBe(3);
+  });
   it("T29 captures old R/date/travellers/budget with preparation and execution, persists exact bytes on reconnect", async () => {
     const id = await seed(), file = await service.createMobileExport(id, { expectedPlanVersion: 1, options: {} });
     expect(file).toMatchObject({ planVersion: 1, requestRevision: 2, executionRevision: 4, requirementUpToDate: false });
