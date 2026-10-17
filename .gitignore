@@ -24,6 +24,7 @@ data/
 test-data/
 test-results/
 playwright-report/
+output/pdf/
 
 # environment
 .env

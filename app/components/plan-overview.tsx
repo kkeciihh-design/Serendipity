@@ -465,6 +465,8 @@ export function PlanOverview({
         {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/execute`} className="inline-flex min-h-12 items-center justify-center rounded-lg bg-sage px-5 py-3 font-semibold text-white">进入旅行执行模式</Link>}
         {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/mobile`} className="inline-flex min-h-12 items-center justify-center rounded-lg border border-sage px-5 py-3 font-semibold text-sage">手机一页版 · 离线保存</Link>}
         {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/text`} className="inline-flex min-h-12 items-center justify-center rounded-lg border border-sage px-5 py-3 font-semibold text-sage">文字导出 · 复制与下载</Link>}
+        {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/pdf`} className="inline-flex min-h-12 items-center justify-center rounded-lg border border-sage px-5 py-3 font-semibold text-sage">PDF旅行手册 · 保存与打印</Link>}
+        {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/image`} className="inline-flex min-h-12 items-center justify-center rounded-lg border border-sage px-5 py-3 font-semibold text-sage">旅行长图 · 保存图片</Link>}
         <button
           type="button"
           onClick={generatePlan}

@@ -4,6 +4,9 @@ import type { ChecklistView } from "./checklist";
 import type { ExecutionView } from "./execution";
 import type { EvidenceEffectiveStatus, EvidenceField } from "./evidence";
 import type { RedlineResult } from "./redlines";
+import { imageContentSchema, type ImageContentOptions, type ImagePart } from "./long-image";
+import { pdfContentSchema, type PdfContentOptions, type PdfMetadata } from "./pdf";
+import type { AdvisoryItem } from "./advisories";
 
 export class ExportError extends Error {
   constructor(message: string, public status = 400) { super(message); this.name = "ExportError"; }
@@ -18,13 +21,14 @@ export const mobileExportWriteSchema = z.object({
   expectedPlanVersion: z.number().int().positive(),
   options: mobileExportOptionsSchema,
 }).strict();
-export const exportFormatSchema = z.enum(["mobile-html", "plain-text", "markdown"]);
+export const exportFormatSchema = z.enum(["mobile-html", "plain-text", "markdown", "long-image", "pdf"]);
 export type ExportFormat = z.infer<typeof exportFormatSchema>;
-export type TextExportFormat = Exclude<ExportFormat, "mobile-html">;
-export const exportWriteSchema = mobileExportWriteSchema.extend({ format: exportFormatSchema.default("mobile-html") });
-export const exportFormatLabels: Record<ExportFormat, string> = { "mobile-html": "手机 HTML", "plain-text": "纯文字", markdown: "Markdown" };
+export type TextExportFormat = "plain-text" | "markdown";
+export const exportWriteSchema = mobileExportWriteSchema.extend({ format: exportFormatSchema.default("mobile-html"), imageContent: imageContentSchema.optional(), pdfContent: pdfContentSchema.optional() });
+export const exportFormatLabels: Record<ExportFormat, string> = { "mobile-html": "手机 HTML", "plain-text": "纯文字", markdown: "Markdown", "long-image": "旅行长图", pdf: "PDF旅行手册" };
 export type MobileExportOptions = z.infer<typeof mobileExportOptionsSchema>;
 export type ExportSnapshot = {
+  advisories?: { revision: number; items: AdvisoryItem[] };
   schemaVersion: 1; id: string; generatedAt: string;
   plan: PlanVersionRecord;
   latestRequestRevision: number | null;
@@ -36,6 +40,8 @@ export type ExportSnapshot = {
   redlines: RedlineResult[];
 };
 export type ExportFileSummary = {
+  pdfContent?: PdfContentOptions; pdf?: PdfMetadata;
+  imageContent?: ImageContentOptions; parts?: ImagePart[];
   format: ExportFormat;
   id: string; planVersion: number; requestRevision: number; checklistRevision: number; executionRevision: number;
   requirementUpToDate: boolean; generatedAt: string; options: MobileExportOptions; filename: string; sha256: string;

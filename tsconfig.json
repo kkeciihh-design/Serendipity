@@ -61,7 +61,17 @@
     ".next-phase24-final/types/**/*.ts",
     ".next-phase24-final/dev/types/**/*.ts",
     ".next-phase25/types/**/*.ts",
-    ".next-phase25/dev/types/**/*.ts"
+    ".next-phase25/dev/types/**/*.ts",
+    ".next-phase26/types/**/*.ts",
+    ".next-phase26/dev/types/**/*.ts",
+    ".next-phase26-final/types/**/*.ts",
+    ".next-phase26-final/dev/types/**/*.ts",
+    ".next-phase27/types/**/*.ts",
+    ".next-phase27/dev/types/**/*.ts",
+    ".next-phase27-final/types/**/*.ts",
+    ".next-phase27-final/dev/types/**/*.ts",
+    ".next-phase27-release/types/**/*.ts",
+    ".next-phase27-release/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"
