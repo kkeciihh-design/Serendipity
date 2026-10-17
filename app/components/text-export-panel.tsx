@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { exportFormatLabels, type ExportFileSummary, type TextExportFormat } from "@/lib/export-snapshot";
 import { formatRedlineTime } from "@/lib/redlines";
@@ -15,7 +16,7 @@ export function TextExportPanel({ tripId }: { tripId: string }) {
   const endpoint = `/api/trips/${tripId}/exports`;
 
   const loadFile = useCallback(async (file: ExportFileSummary, signal: AbortSignal) => {
-    const response = await fetch(`${endpoint}/${file.id}`, { cache: "no-store", signal });
+    const response = await businessFetch(`${endpoint}/${file.id}`, { cache: "no-store", signal });
     if (!response.ok) throw new Error((await response.json()).error ?? "文件读取失败，请重试。");
     const text = await response.text();
     if (signal.aborted) return;
@@ -26,7 +27,7 @@ export function TextExportPanel({ tripId }: { tripId: string }) {
     const controller = new AbortController(); active.current = controller; setBusy(true); setError("");
     const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
-      const response = await fetch(`${endpoint}?kind=text`, { cache: "no-store", signal: controller.signal });
+      const response = await businessFetch(`${endpoint}?kind=text`, { cache: "no-store", signal: controller.signal });
       const body = await response.json(); if (!response.ok) throw new Error(body.error);
       if (controller.signal.aborted) return;
       setData(body);
@@ -51,7 +52,7 @@ export function TextExportPanel({ tripId }: { tripId: string }) {
     const controller = new AbortController(); active.current = controller; setBusy(true); setError("");
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
-      const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+      const response = await businessFetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify({ expectedPlanVersion: data.plan.versionNumber, format, options: { dates: date === "all" ? null : [date], includePrivateAddress, includeSeats, publicLandmark } }) });
       const body = await response.json(); if (!response.ok) throw new Error(body.error);
       if (controller.signal.aborted) return;

@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import {
   ArrowDown,
@@ -208,7 +209,7 @@ export function PlanTimeline({
     const unlocking = originalLocked && !draft.locked;
     const submitted = unlocking && sourceDraft ? { ...sourceDraft, locked: false } : draft;
     try {
-      const response = await fetch(
+      const response = await businessFetch(
         `/api/trips/${tripId}/plans/${plan.versionNumber}`,
         {
           method: "PATCH",

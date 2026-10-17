@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useForegroundRefresh, useTravelClock } from "./use-travel-clock";
@@ -54,7 +55,7 @@ function Preferences({ ticket, result, tripId, plan, onSaved, onDirty }: {
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError("");
     try {
-      const response = await fetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/tickets`, { method: "POST", headers: { "Content-Type": "application/json" },
+      const response = await businessFetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/tickets`, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "update_redline", ticketId: ticket.id, preferences: draft }) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "保存失败，请重试。");
@@ -103,7 +104,7 @@ export function RedlinePanel({ tripId, plan, onSaved }: { tripId: string; plan: 
     const sequence = ++serial.current;
     const sent = Date.now();
     try {
-      const response = await fetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/redlines`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+      const response = await businessFetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/redlines`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
       const payload = await response.json();
       if (sequence !== serial.current) return;
       if (!response.ok) throw new Error(payload.error || "红线计算失败。");

@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell, CloudSun, RefreshCw } from "lucide-react";
@@ -20,7 +21,7 @@ export function useAdvisories(tripId: string, plan: PlanVersionClient | null) {
     const abort = new AbortController(); controller.current = abort;
     const timeout = window.setTimeout(() => abort.abort(), 50_000);
     try {
-      const response = await fetch(`/api/trips/${tripId}/advisories${body ? "" : `?planVersion=${version}`}`, {
+      const response = await businessFetch(`/api/trips/${tripId}/advisories${body ? "" : `?planVersion=${version}`}`, {
         method: body ? "POST" : "GET", cache: "no-store", signal: abort.signal,
         ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) });
       const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "提醒暂不可用。");

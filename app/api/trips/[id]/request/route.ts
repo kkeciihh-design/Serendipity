@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { NextResponse } from "next/server";
 import { hasAppAccess, unauthorizedResponse, appWriteAccessError } from "@/lib/access";
 import {
@@ -31,7 +33,7 @@ function requestErrorResponse(error: unknown) {
   );
 }
 
-export async function GET(request: Request, context: RouteContext) {
+export const GET = businessRoute(async function GET(request: Request, context: RouteContext) {
   if (!hasAppAccess(request)) {
     return unauthorizedResponse();
   }
@@ -41,11 +43,12 @@ export async function GET(request: Request, context: RouteContext) {
     const tripRequest = await getTripRequestRecord(id);
     return NextResponse.json({ request: tripRequest });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     return requestErrorResponse(error);
   }
-}
+});
 
-export async function PATCH(request: Request, context: RouteContext) {
+export const PATCH = businessRoute(async function PATCH(request: Request, context: RouteContext) {
   const accessError = appWriteAccessError(request);
   if (accessError) return accessError;
 
@@ -55,6 +58,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     const tripRequest = await saveRequestDraft(id, body);
     return NextResponse.json({ request: tripRequest });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     if (error instanceof SyntaxError) {
       return NextResponse.json(
         { error: "请求格式不正确，请重新保存。" },
@@ -63,4 +67,4 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
     return requestErrorResponse(error);
   }
-}
+});

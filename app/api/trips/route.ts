@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { NextResponse } from "next/server";
 import {
   TripValidationError,
@@ -32,7 +34,7 @@ function tripErrorResponse(error: unknown, fallbackStatus: number) {
   );
 }
 
-export async function GET(request: Request) {
+export const GET = businessRoute(async function GET(request: Request) {
   if (!hasAppAccess(request)) {
     return unauthorizedResponse();
   }
@@ -41,11 +43,12 @@ export async function GET(request: Request) {
     const trips = await listTrips();
     return NextResponse.json({ trips });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     return tripErrorResponse(error, 503);
   }
-}
+});
 
-export async function POST(request: Request) {
+export const POST = businessRoute(async function POST(request: Request) {
   const accessError = appWriteAccessError(request);
   if (accessError) return accessError;
 
@@ -54,6 +57,7 @@ export async function POST(request: Request) {
     const trip = await createTrip(body);
     return NextResponse.json({ trip }, { status: 201 });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     if (error instanceof SyntaxError) {
       return NextResponse.json(
         { error: "请求格式不正确，请重新提交。" },
@@ -62,4 +66,4 @@ export async function POST(request: Request) {
     }
     return tripErrorResponse(error, 500);
   }
-}
+});

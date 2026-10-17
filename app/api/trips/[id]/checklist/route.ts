@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { z } from "zod";
 import { appWriteAccessError, hasAppAccess, unauthorizedResponse } from "@/lib/access";
 import { ChecklistError } from "@/lib/checklist";
@@ -16,21 +18,23 @@ function failure(error: unknown) {
   if (error instanceof SyntaxError) return json({ error: "请求格式不正确。" }, 400);
   return json({ error: "清单暂时无法保存或读取。请重新读取核对是否已保存，再重试；当前输入仍保留。" }, 503);
 }
-export async function GET(request: Request, context: Context) {
+export const GET = businessRoute(async function GET(request: Request, context: Context) {
   if (!hasAppAccess(request)) return unauthorizedResponse();
   try {
     const { id } = await context.params;
     const raw = new URL(request.url).searchParams.get("planVersion"), version = Number(raw);
     if (!Number.isSafeInteger(version) || version < 1 || String(version) !== raw) throw new ChecklistError("计划版本不正确。");
     return json({ checklist: await getChecklist(id, version) });
-  } catch (error) { return failure(error); }
-}
-export async function POST(request: Request, context: Context) {
+  } catch (error) {
+    if (error instanceof RestoreGuardError) throw error; return failure(error); }
+});
+export const POST = businessRoute(async function POST(request: Request, context: Context) {
   const denied = appWriteAccessError(request); if (denied) return denied;
   try {
     const { id } = await context.params;
     const body = await request.text();
     if (body.length > 8000) throw new ChecklistError("清单请求过长。");
     return json({ checklist: await saveChecklist(id, JSON.parse(body), request.signal) });
-  } catch (error) { return failure(error); }
-}
+  } catch (error) {
+    if (error instanceof RestoreGuardError) throw error; return failure(error); }
+});

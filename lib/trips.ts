@@ -1,3 +1,4 @@
+import { businessOperation, businessTransaction } from "./business-guard";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z, type ZodType } from "zod";
 import { getDatabaseUrl } from "./data-directory";
@@ -113,26 +114,26 @@ function parseOrThrow<T>(
   return result.data;
 }
 
-export async function listTrips(): Promise<Trip[]> {
+export const listTrips = businessOperation(async function listTrips(): Promise<Trip[]> {
   return store.trip.findMany({
     include: { request: true },
     orderBy: {
       updatedAt: "desc",
     },
   });
-}
+});
 
-export async function getTrip(id: string): Promise<Trip | null> {
+export const getTrip = businessOperation(async function getTrip(id: string): Promise<Trip | null> {
   return store.trip.findUnique({
     include: { request: true },
     where: { id },
   });
-}
+});
 
-export async function createTrip(input: unknown): Promise<Trip> {
+export const createTrip = businessOperation(async function createTrip(input: unknown): Promise<Trip> {
   const { originalRequest } = parseOrThrow(createTripSchema, input);
 
-  return store.trip.create({
+  return businessTransaction(prisma, (tx) => tx.trip.create({
     include: { request: true },
     data: {
       title: deriveTripTitle(originalRequest),
@@ -145,13 +146,13 @@ export async function createTrip(input: unknown): Promise<Trip> {
         },
       },
     },
-  });
-}
+  }));
+});
 
-export async function updateTrip(id: string, input: unknown): Promise<Trip> {
+export const updateTrip = businessOperation(async function updateTrip(id: string, input: unknown): Promise<Trip> {
   const parsed = parseOrThrow(updateTripSchema, input);
   try {
-    return await prisma.$transaction(async (transaction) => {
+    return await businessTransaction(prisma, async (transaction) => {
       const existing = await transaction.trip.findUnique({
         include: { request: true },
         where: { id },
@@ -212,14 +213,14 @@ export async function updateTrip(id: string, input: unknown): Promise<Trip> {
     }
     throw error;
   }
-}
+});
 
-export async function deleteTrip(id: string): Promise<Trip> {
+export const deleteTrip = businessOperation(async function deleteTrip(id: string): Promise<Trip> {
   try {
-    return await store.trip.delete({
+    return await businessTransaction(prisma, (tx) => tx.trip.delete({
       include: { request: true },
       where: { id },
-    });
+    }));
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -229,7 +230,7 @@ export async function deleteTrip(id: string): Promise<Trip> {
     }
     throw error;
   }
-}
+});
 
 export async function closeTripStore() {
   await prisma.$disconnect();

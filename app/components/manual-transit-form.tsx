@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import { useState, type FormEvent } from "react";
 import type { RouteLeg } from "@/lib/routes";
@@ -47,7 +48,7 @@ export function ManualTransitForm({ tripId, plan, fromEventId, toEventId, date, 
     if (availability === "available" && fare && !/^\d+(?:\.\d{1,2})?$/.test(fare)) { setFeedback("票价最多填写两位小数，未知时请留空。"); return; }
     setSaving(true); setFeedback("正在保存人工参考…");
     try {
-      const response = await fetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/routes`, {
+      const response = await businessFetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/routes`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

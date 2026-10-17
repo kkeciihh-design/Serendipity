@@ -7,6 +7,26 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Instance metadata is deliberately excluded from every travel/technical restore.
+model InstanceState {
+  id              String @id @default("singleton")
+  dataGeneration  String
+  activeRestoreId String?
+}
+
+model RestoreOperation {
+  id           String @id
+  phase        String
+  source       String
+  ownerPid     Int?
+  baselineHash String
+  safetyPath   String?
+  safetyHash   String?
+  message      String
+  startedAt    String
+  finishedAt   String?
+}
+
 model Trip {
   id                   String         @id @default(uuid())
   title                String

@@ -7,6 +7,7 @@ import { getSafeSettings, isPasswordConfigured } from "@/lib/settings";
 import { PasswordSetupForm } from "./components/password-setup-form";
 import { SettingsLoginForm } from "./components/settings-login-form";
 import { SettingsWorkspace } from "./components/settings-workspace";
+import { BackupManager } from "./components/backup-manager";
 
 export const dynamic = "force-dynamic";
 
@@ -28,10 +29,10 @@ export default async function SettingsPage() {
     pageContent = <SettingsLoginForm />;
   } else {
     pageContent = (
-      <SettingsWorkspace
+      <><SettingsWorkspace
         initialSettings={await getSafeSettings()}
         csrfToken={csrfToken}
-      />
+      /><BackupManager csrfToken={csrfToken} /></>
     );
   }
 
@@ -52,7 +53,7 @@ export default async function SettingsPage() {
               个人设置
             </p>
             <h1 className="mt-2 text-3xl font-bold leading-9 text-charcoal">
-              AI 服务连接
+              AI 服务与旅行数据
             </h1>
           </div>
         </header>

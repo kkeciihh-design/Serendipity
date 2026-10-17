@@ -1,3 +1,4 @@
+import { businessOperation, capturedGeneration, assertCapturedGeneration } from "./business-guard";
 import { z } from "zod";
 import { searchAmapPlaces } from "./amap";
 import { getMapConfiguration } from "./map-settings";
@@ -12,7 +13,7 @@ export const mapSearchSchema = z.object({
   keywords: z.string().trim().min(1, "请填写地点名称。").max(120),
 });
 
-export async function searchPlanPlaces(tripId: string, version: number, input: unknown, signal?: AbortSignal) {
+export const searchPlanPlaces = businessOperation(async function searchPlanPlaces(tripId: string, version: number, input: unknown, signal?: AbortSignal) {
   const parsed = mapSearchSchema.safeParse(input);
   if (!parsed.success) throw new PlanValidationError(parsed.error.issues[0]?.message ?? "地点查询格式不正确。");
   const { eventId, city, keywords } = parsed.data;
@@ -31,11 +32,11 @@ export async function searchPlanPlaces(tripId: string, version: number, input: u
   await assertCurrent();
   if (signal?.aborted) throw new PlanConflictError("本次地点查询已取消。");
   return candidates.map((candidate) => ({ ...candidate, selectionToken: createSignedPayload({
-    scope: "place-selection", tripId, version, eventId, city, keywords, candidate, exp: Date.now() + 10 * 60 * 1000,
+    scope: "place-selection", dataGeneration: capturedGeneration(), tripId, version, eventId, city, keywords, candidate, exp: Date.now() + 10 * 60 * 1000,
   }) }));
-}
+});
 
-export async function confirmPlanPlace(tripId: string, version: number, input: unknown, signal?: AbortSignal) {
+export const confirmPlanPlace = businessOperation(async function confirmPlanPlace(tripId: string, version: number, input: unknown, signal?: AbortSignal) {
   const parsed = z.object({ eventId: z.string().min(1).max(80), selectionToken: z.string().max(6000).nullable(),
     precision: z.enum(["poi", "area_reference"]),
   }).strict().safeParse(input);
@@ -47,6 +48,7 @@ export async function confirmPlanPlace(tripId: string, version: number, input: u
     if (!token || token.scope !== "place-selection" || token.tripId !== tripId || token.version !== version || token.eventId !== eventId || typeof token.exp !== "number" || token.exp <= Date.now()) {
       throw new PlanConflictError("候选地点已过期或不属于当前安排，请重新搜索。");
     }
+    assertCapturedGeneration(token.dataGeneration);
     const result = placeCandidateSchema.safeParse(token.candidate);
     if (!result.success) throw new PlanValidationError("候选地点不完整，请重新搜索。");
     candidate = result.data;
@@ -55,4 +57,4 @@ export async function confirmPlanPlace(tripId: string, version: number, input: u
     }
   }
   return savePlanPlaceEdit({ tripId, expectedPlanVersion: version, eventId, candidate, precision, abortSignal: signal });
-}
+});

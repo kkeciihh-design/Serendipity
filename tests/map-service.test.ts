@@ -1,3 +1,5 @@
+import { readInstanceState } from "../scripts/restore-core.mjs";
+import { getDatabasePath } from "../lib/data-directory";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, afterEach, expect, it, vi } from "vitest";
 import { isolatedDatabase } from "./helpers/test-database";
@@ -34,7 +36,7 @@ async function seed() {
   return { trip, saved };
 }
 function token(tripId: string, version: number, eventId = "d1-activity", place = candidate, exp = Date.now() + 60000) {
-  return security.createSignedPayload({ scope: "place-selection", tripId, version, eventId, candidate: place, exp });
+  return security.createSignedPayload({ scope: "place-selection", dataGeneration: readInstanceState(getDatabasePath()).dataGeneration, tripId, version, eventId, candidate: place, exp });
 }
 function edit(tripId: string, version: number, eventId = "d1-activity", place = candidate) {
   return maps.confirmPlanPlace(tripId, version, { eventId, selectionToken: token(tripId, version, eventId, place), precision: "poi" });

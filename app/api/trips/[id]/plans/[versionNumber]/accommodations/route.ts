@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { z } from "zod";
 import { appWriteAccessError, hasAppAccess, unauthorizedResponse } from "@/lib/access";
 import { listEvidenceFacts } from "@/lib/evidence-service";
@@ -27,17 +29,19 @@ async function parameters(context: Context) {
   if (!Number.isSafeInteger(version) || version < 1 || String(version) !== versionNumber) throw new PlanValidationError("计划版本号不正确。");
   return { id, version };
 }
-export async function GET(request: Request, context: Context) {
+export const GET = businessRoute(async function GET(request: Request, context: Context) {
   if (!hasAppAccess(request)) return unauthorizedResponse();
   try { const { id, version } = await parameters(context); return json({ recommendations: await getPlanAccommodations(id, version, idSchema.parse(new URL(request.url).searchParams.get("eventId"))) }); }
-  catch (error) { return failure(error); }
-}
-export async function POST(request: Request, context: Context) {
+  catch (error) {
+    if (error instanceof RestoreGuardError) throw error; return failure(error); }
+});
+export const POST = businessRoute(async function POST(request: Request, context: Context) {
   const denied = appWriteAccessError(request); if (denied) return denied;
   try {
     const { id, version } = await parameters(context), body = actionSchema.parse(await request.json());
     if (body.action === "preview") return json({ preview: await previewAccommodation(id, version, body.eventId, body.stay, request.signal) });
     const plan = await applyAccommodation(id, version, body.eventId, body.previewToken, request.signal);
     return json({ plan: { ...plan, evidenceFacts: (await listEvidenceFacts(id)).filter((f) => f.planVersionId === plan.id) } });
-  } catch (error) { return failure(error); }
-}
+  } catch (error) {
+    if (error instanceof RestoreGuardError) throw error; return failure(error); }
+});

@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { appWriteAccessError } from "@/lib/access";
 import { MAX_TICKET_IMAGE_BYTES, recognizeTicketImage, TicketImageError } from "@/lib/ticket-ocr-service";
 
@@ -5,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const maxBody = Math.ceil(MAX_TICKET_IMAGE_BYTES * 4 / 3) + 2048;
 
-export async function POST(request: Request) {
+export const POST = businessRoute(async function POST(request: Request) {
   const accessError = appWriteAccessError(request);
   if (accessError) return accessError;
   try {
@@ -31,7 +33,8 @@ export async function POST(request: Request) {
     const draft = await recognizeTicketImage(bytes, mime, request.signal);
     return Response.json({ draft }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     return Response.json({ error: error instanceof TicketImageError ? error.message : "图片请求无法读取，请重新选择。" },
       { status: error instanceof TicketImageError ? error.status : 400, headers: { "Cache-Control": "no-store" } });
   }
-}
+});

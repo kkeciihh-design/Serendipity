@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import { useEffect, useRef, useState } from "react";
 import { BedDouble, MapPin } from "lucide-react";
@@ -38,7 +39,7 @@ function StayEditor({ tripId, plan, eventId, onSaved }: { tripId: string; plan: 
   const endpoint = `/api/trips/${tripId}/plans/${plan.versionNumber}`;
   useEffect(() => {
     const controller = new AbortController(); control.current = controller;
-    fetch(`${endpoint}/accommodations?eventId=${encodeURIComponent(eventId)}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]) }).then(async (r) => {
+    businessFetch(`${endpoint}/accommodations?eventId=${encodeURIComponent(eventId)}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]) }).then(async (r) => {
       const payload = await r.json(); if (!r.ok) throw new Error(payload.error); if (controller.signal.aborted) return;
       const d: StayRecommendations = payload.recommendations; setData(d); setAreaId(d.existing?.areaId ?? d.areas[0].id); setKind(d.existing?.kind ?? "area");
       setCheckIn(d.checkIn); setCheckOut(d.checkOut); setRooms(String(d.roomCount));
@@ -51,7 +52,7 @@ function StayEditor({ tripId, plan, eventId, onSaved }: { tripId: string; plan: 
   async function request(body: unknown, path: string, task: string) {
     control.current?.abort(); const controller = new AbortController(); control.current = controller; setBusy(task); setError("");
     try {
-      const r = await fetch(`${endpoint}/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(task === "预览" ? 100_000 : 30_000)]) });
+      const r = await businessFetch(`${endpoint}/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(task === "预览" ? 100_000 : 30_000)]) });
       const p = await r.json(); if (!r.ok) throw new Error(p.error ?? "请求失败，请重试。");
       if (!controller.signal.aborted) return p;
     } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error && !/Timeout|abort/i.test(e.message) ? e.message : task === "保存" ? "保存未及时返回，请刷新核对当前版本。" : "请求超时，请重试。"); }

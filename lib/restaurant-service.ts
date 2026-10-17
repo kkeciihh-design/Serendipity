@@ -1,3 +1,4 @@
+import { businessOperation, capturedGeneration, assertCapturedGeneration } from "./business-guard";
 import crypto from "node:crypto";
 import { confirmedBudgetLimit } from "./attractions";
 import { calculateBudgetSummary, derivePlanCosts, validatePlanCosts } from "./budget";
@@ -11,7 +12,7 @@ import { getRestaurantCatalogEntry, restaurantCityMatches } from "./restaurant-c
 import { buildRestaurantCard, buildRestaurantRecommendations, diningMinutes, mealCost, mealPricingSchema, priceMealCost, restaurantExclusions, restaurantForEvent, restaurantProtectionReasons, type MealPricing, type RestaurantPreview } from "./restaurants";
 
 type PreparedEdit = Parameters<typeof savePlanRecommendationEdit>[0];
-type CacheEntry = { tripId: string; version: number; eventId: string; expires: number; result: RestaurantPreview; edit: PreparedEdit };
+type CacheEntry = { dataGeneration: string; tripId: string; version: number; eventId: string; expires: number; result: RestaurantPreview; edit: PreparedEdit };
 const globalCache = globalThis as typeof globalThis & { restaurantPreviews?: Map<string, CacheEntry> };
 const previews = globalCache.restaurantPreviews ??= new Map<string, CacheEntry>();
 function active(signal?: AbortSignal) { if (signal?.aborted) throw new PlanConflictError("本次餐厅选择已取消，旧计划保持不变。"); }
@@ -20,13 +21,13 @@ function meal(plan: PlanVersionRecord, eventId: string) {
   if (!event || event.type !== "meal") throw new PlanValidationError("没有找到对应用餐安排。");
   return event;
 }
-export async function getPlanRestaurants(tripId: string, version: number, eventId: string) {
+export const getPlanRestaurants = businessOperation(async function getPlanRestaurants(tripId: string, version: number, eventId: string) {
   const [plan, facts] = await Promise.all([getPlanVersion(tripId, version), listEvidenceFacts(tripId)]);
   meal(plan, eventId);
   return buildRestaurantRecommendations(plan, eventId, facts);
-}
+});
 
-export async function previewRestaurantEdit(tripId: string, version: number, eventId: string, candidateId: string | null, rawPricing: MealPricing, signal?: AbortSignal): Promise<RestaurantPreview> {
+export const previewRestaurantEdit = businessOperation(async function previewRestaurantEdit(tripId: string, version: number, eventId: string, candidateId: string | null, rawPricing: MealPricing, signal?: AbortSignal): Promise<RestaurantPreview> {
   active(signal);
   const pricing = mealPricingSchema.parse(rawPricing);
   const plan = await getPlanVersion(tripId, version), before = meal(plan, eventId);
@@ -105,15 +106,16 @@ export async function previewRestaurantEdit(tripId: string, version: number, eve
       replace ? `${before.startTime}–${before.endTime} → ${event.startTime}–${event.endTime}；地点、已有相邻路线、预算和红线按同一新版本更新。` : "本餐人数不改整趟人数、其他餐次、路线或固定交通。",
       "修改过的门店或费用来源需重新核验；不会自动订餐或保证有座。"],
     conflicts: [...new Set(conflicts)], warnings: [...new Set(warnings)], canApply: conflicts.length === 0 };
-  previews.set(previewToken, { tripId, version, eventId, expires, result, edit: {
+  previews.set(previewToken, { dataGeneration: capturedGeneration(), tripId, version, eventId, expires, result, edit: {
     tripId, expectedPlanVersion: version, eventId, targetType: "meal", action: replace ? "replace" : "adjust", event,
     places, costs: proposed.costs, routeLegs: proposed.routeLegs, pendingItems, warnings: result.warnings } });
   return result;
-}
+});
 
-export async function applyRestaurantEdit(tripId: string, version: number, eventId: string, token: string, signal?: AbortSignal) {
+export const applyRestaurantEdit = businessOperation(async function applyRestaurantEdit(tripId: string, version: number, eventId: string, token: string, signal?: AbortSignal) {
   active(signal);
   const cached = previews.get(token);
+  if (cached) assertCapturedGeneration(cached.dataGeneration);
   if (!cached || cached.expires <= Date.now() || cached.tripId !== tripId || cached.version !== version || cached.eventId !== eventId) throw new PlanConflictError("用餐预览已失效，请重新预览后确认。");
   if (!cached.result.canApply) throw new PlanValidationError(cached.result.conflicts[0] ?? "存在冲突，旧计划未改变。");
   if (cached.edit.action === "adjust") {
@@ -124,4 +126,4 @@ export async function applyRestaurantEdit(tripId: string, version: number, event
   const saved = await savePlanRecommendationEdit({ ...cached.edit, abortSignal: signal });
   previews.delete(token);
   return saved;
-}
+});

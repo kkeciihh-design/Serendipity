@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Sparkles, RotateCcw } from "lucide-react";
 import { formatMoneyRange } from "@/lib/budget";
@@ -18,7 +19,7 @@ export function ReplanPanel({ tripId, plan, requestState, onSaved }: { tripId: s
   const read = useCallback(async () => {
     const run = ++sequence.current;
     try {
-      const response = await fetch(endpoint, { cache: "no-store" });
+      const response = await businessFetch(endpoint, { cache: "no-store" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error);
       if (run !== sequence.current) return;
@@ -36,7 +37,7 @@ export function ReplanPanel({ tripId, plan, requestState, onSaved }: { tripId: s
       const payload = action === "preview" ? { action, reason, expectedPlanVersion: plan.versionNumber, expectedRequestRevision: requestState.requestRevision }
         : action === "undo" ? { action, expectedPlanVersion: plan.versionNumber, expectedRequestRevision: requestState.requestRevision }
         : { action, candidateId: candidate?.id, expectedCandidateRevision: candidate?.revision };
-      const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal: requestController.signal });
+      const response = await businessFetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal: requestController.signal });
       const body = await response.json();
       if (run !== sequence.current) return;
       if (!response.ok) { setNeedsRequest(Boolean(body.requirementChange)); throw new Error(body.error); }

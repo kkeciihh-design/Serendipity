@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import {
   BadgeCheck,
@@ -258,7 +259,7 @@ export function TripRequestWorkspace({
     setIsSaving(true);
     setFeedback({ tone: "info", message: "正在保存需求修订..." });
     try {
-      const response = await fetch(`/api/trips/${record.tripId}/request`, {
+      const response = await businessFetch(`/api/trips/${record.tripId}/request`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -309,7 +310,7 @@ export function TripRequestWorkspace({
     setIsExtracting(true);
     setFeedback({ tone: "info", message: "AI 正在理解需求..." });
     try {
-      const response = await fetch(
+      const response = await businessFetch(
         `/api/trips/${record.tripId}/request/extract`,
         {
           method: "POST",
@@ -372,7 +373,7 @@ export function TripRequestWorkspace({
     setIsConfirming(true);
     setFeedback({ tone: "info", message: "正在确认当前需求修订..." });
     try {
-      const response = await fetch(
+      const response = await businessFetch(
         `/api/trips/${record.tripId}/request/confirm`,
         {
           method: "POST",

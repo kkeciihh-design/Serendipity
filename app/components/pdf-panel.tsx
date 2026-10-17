@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ExportFileSummary } from "@/lib/export-snapshot";
 import { formatRedlineTime } from "@/lib/redlines";
@@ -18,7 +19,7 @@ export function PdfPanel({ tripId }: { tripId: string }) {
     const controller = new AbortController(); active.current = controller; setBusy(true); setError("");
     const timer = setTimeout(() => controller.abort(), 15_000);
     try {
-      const r = await fetch(`${endpoint}?kind=pdf`, { cache: "no-store", signal: controller.signal });
+      const r = await businessFetch(`${endpoint}?kind=pdf`, { cache: "no-store", signal: controller.signal });
       const body = await r.json(); if (!r.ok) throw new Error(body.error);
       if (!controller.signal.aborted) { setData(body); setFile(body.files[0] ?? null); }
     } catch (e) { if (active.current === controller) setError(controller.signal.aborted ? "读取超时，请重试。" : e instanceof Error ? e.message : "读取失败，请重试。"); }
@@ -31,7 +32,7 @@ export function PdfPanel({ tripId }: { tripId: string }) {
     const timer = setTimeout(() => controller.abort(), 20_000);
     void (async () => {
       try {
-        const r = await fetch(`${endpoint}/${file.id}`, { cache: "no-store", signal: controller.signal });
+        const r = await businessFetch(`${endpoint}/${file.id}`, { cache: "no-store", signal: controller.signal });
         if (!r.ok || r.headers.get("content-type") !== "application/pdf") throw new Error("PDF预览加载失败，请重试或下载文件。");
         const blob = await r.blob(); if (controller.signal.aborted) return;
         url = URL.createObjectURL(blob); setPreviewUrl(url);
@@ -45,7 +46,7 @@ export function PdfPanel({ tripId }: { tripId: string }) {
     const controller = new AbortController(); active.current = controller; setBusy(true); setError("");
     const timer = setTimeout(() => controller.abort(), 75_000);
     try {
-      const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+      const r = await businessFetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify({ expectedPlanVersion: data.plan.versionNumber, format: "pdf", options: { dates: date === "all" ? null : [date], includePrivateAddress: address, includeSeats: seats, publicLandmark: landmark }, pdfContent: { mode, includePhotos: photos } }) });
       const body = await r.json(); if (!r.ok) throw new Error(body.error);
       if (!controller.signal.aborted) { setFile(body.file); setData((old) => old ? { ...old, files: [body.file, ...old.files].slice(0, 20) } : old); }

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { backupBeforeMigration } from "./database-backup.mjs";
+import { resumeInterruptedRestore } from "./restore-core.mjs";
 
 const projectRoot = process.cwd();
 const dataDirectory = process.env.SERENDIPITY_DATA_DIR
@@ -17,6 +18,7 @@ const databaseUrl = `file:${databasePath.replaceAll("\\", "/")}`;
 const prismaCli = path.join(projectRoot, "node_modules", "prisma", "build", "index.js");
 
 fs.mkdirSync(databaseDirectory, { recursive: true });
+resumeInterruptedRestore(databasePath);
 backupBeforeMigration(databasePath, path.join(projectRoot, "prisma", "migrations"));
 
 let migration;
@@ -53,4 +55,5 @@ if (migration.error || migration.status !== 0) {
   process.exit(migration.status ?? 1);
 }
 
+resumeInterruptedRestore(databasePath);
 console.log(`Serendipity 数据库已就绪：${databasePath}`);

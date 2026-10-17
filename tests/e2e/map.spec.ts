@@ -55,7 +55,7 @@ async function controlledMap(page: Page, tripId: string, empty = false) {
       { poiId: "node:9999", name: "深圳北站", latitude: 22.609, longitude: 114.023, district: "龙华区" },
     ].map((item) => {
       const candidate = { provider: "osm", ...item, city: "深圳市", address: `深圳市${item.district}${item.name}`, adcode: "", category: "railway:station", coordinateSystem: "WGS84", retrievedAt: new Date().toISOString() };
-      return { ...candidate, selectionToken: createSignedPayload({ scope: "place-selection", tripId, version, eventId, candidate, exp: Date.now() + 60000 }) };
+      return { ...candidate, selectionToken: createSignedPayload({ scope: "place-selection", dataGeneration: route.request().headers()["x-data-generation"], tripId, version, eventId, candidate, exp: Date.now() + 60000 }) };
     });
     await route.fulfill({ json: { candidates: empty ? [] : candidates } });
   });

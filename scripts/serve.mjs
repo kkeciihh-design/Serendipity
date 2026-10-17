@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
+import os from "node:os";
+import { resumeInterruptedRestore } from "./restore-core.mjs";
 
 // Keep listener selection and the anonymous-local policy in the same launcher.
 // Never pass unchecked CLI arguments that could override the chosen hostname.
@@ -16,6 +18,8 @@ if (!host || !/^\d+$/.test(port ?? "") || Number(port) < 1 || Number(port) > 655
   throw new Error("Invalid listener configuration.");
 }
 const env = { ...process.env };
+const root = env.SERENDIPITY_DATA_DIR ?? path.join(env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "Serendipity");
+resumeInterruptedRestore(path.resolve(root, "data", "serendipity.db"));
 delete env.SERENDIPITY_LOCAL_PORT;
 if ((host === "127.0.0.1" || host === "::1") && !env.SERENDIPITY_PUBLIC_ORIGIN && !env.SERENDIPITY_TRUST_PROXY) {
   env.SERENDIPITY_LOCAL_PORT = port;

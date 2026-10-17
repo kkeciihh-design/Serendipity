@@ -1,3 +1,4 @@
+import { businessOperation } from "./business-guard";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { getMapConfiguration } from "./map-settings";
@@ -150,12 +151,12 @@ function routeIdentity(input: {
   return crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex").slice(0, 48);
 }
 
-export async function searchAndSavePlanRoute(tripId: string, version: number, input: unknown, signal?: AbortSignal) {
+export const searchAndSavePlanRoute = businessOperation(async function searchAndSavePlanRoute(tripId: string, version: number, input: unknown, signal?: AbortSignal) {
   const plan = await getPlanVersion(tripId, version);
   if (!plan.isCurrent) throw new PlanConflictError("计划已变化，请刷新后重新查询路线。");
   const route = await queryPlanRoute(plan, input, signal);
   return savePlanRouteEdit({ tripId, expectedPlanVersion: version, route, abortSignal: signal });
-}
+});
 
 // Read-only route adapter: replacement previews query their complete proposed
 // snapshot before the single version transaction commits any state.
@@ -300,7 +301,7 @@ export async function queryPlanRoute(plan: Pick<PlanVersionRecord, "tripId" | "e
   return route;
 }
 
-export async function saveManualPlanRoute(tripId: string, version: number, input: unknown, signal?: AbortSignal) {
+export const saveManualPlanRoute = businessOperation(async function saveManualPlanRoute(tripId: string, version: number, input: unknown, signal?: AbortSignal) {
   const parsed = manualRouteEditSchema.safeParse(input);
   if (!parsed.success) throw new PlanValidationError(parsed.error.issues[0]?.message ?? "人工路线记录格式不正确。");
   const plan = await getPlanVersion(tripId, version);
@@ -319,4 +320,4 @@ export async function saveManualPlanRoute(tripId: string, version: number, input
   }
   const route = manualReferenceRoute({ tripId, date: from.date, edit: parsed.data });
   return savePlanRouteEdit({ tripId, expectedPlanVersion: version, route, abortSignal: signal });
-}
+});

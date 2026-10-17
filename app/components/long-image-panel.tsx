@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ExportFileSummary } from "@/lib/export-snapshot";
 import { formatRedlineTime } from "@/lib/redlines";
@@ -17,7 +18,7 @@ export function LongImagePanel({ tripId }: { tripId: string }) {
     const controller = new AbortController(); active.current = controller; setBusy(true); setError("");
     const timer = setTimeout(() => controller.abort(), 15_000);
     try {
-      const response = await fetch(`${endpoint}?kind=long-image`, { cache: "no-store", signal: controller.signal });
+      const response = await businessFetch(`${endpoint}?kind=long-image`, { cache: "no-store", signal: controller.signal });
       const body = await response.json(); if (!response.ok) throw new Error(body.error);
       if (!controller.signal.aborted) { setData(body); setFile(body.files[0] ?? null); setFailedImages([]); }
     } catch (e) { if (active.current === controller) setError(controller.signal.aborted ? "读取超时，请重试。" : e instanceof Error ? e.message : "读取失败，请重试。"); }
@@ -29,7 +30,7 @@ export function LongImagePanel({ tripId }: { tripId: string }) {
     const controller = new AbortController(); active.current = controller; setBusy(true); setError("");
     const timer = setTimeout(() => controller.abort(), 75_000);
     try {
-      const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+      const response = await businessFetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify({ expectedPlanVersion: data.plan.versionNumber, format: "long-image", options: { dates: date === "all" ? null : [date], includePrivateAddress, includeSeats, publicLandmark }, imageContent: { includeMap, includePhotos } }) });
       const body = await response.json(); if (!response.ok) throw new Error(body.error);
       if (controller.signal.aborted) return;

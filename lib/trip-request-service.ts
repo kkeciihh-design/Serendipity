@@ -1,3 +1,4 @@
+import { businessOperation, businessTransaction } from "./business-guard";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z, type ZodType } from "zod";
 import { getDatabaseUrl } from "./data-directory";
@@ -231,7 +232,7 @@ function serializeRecord(record: {
   };
 }
 
-export async function getTripRequestRecord(tripId: string) {
+export const getTripRequestRecord = businessOperation(async function getTripRequestRecord(tripId: string) {
   const trip = await prisma.trip.findUnique({
     where: { id: tripId },
     include: { request: true },
@@ -241,7 +242,7 @@ export async function getTripRequestRecord(tripId: string) {
   }
 
   return serializeRecord(trip.request);
-}
+});
 
 async function loadRequest(tripId: string) {
   const trip = await prisma.trip.findUnique({
@@ -266,7 +267,7 @@ function ensureExpectedRevision(
   }
 }
 
-export async function saveRequestDraft(tripId: string, input: unknown) {
+export const saveRequestDraft = businessOperation(async function saveRequestDraft(tripId: string, input: unknown) {
   const parsed = parseOrThrow(saveRequestDraftSchema, input);
   const { request } = await loadRequest(tripId);
   ensureExpectedRevision(request.requestRevision, parsed.expectedRequestRevision);
@@ -320,7 +321,7 @@ export async function saveRequestDraft(tripId: string, input: unknown) {
     ...generatedAssumptions,
   ];
 
-  const updated = await prisma.$transaction(async (transaction) => {
+  const updated = await businessTransaction(prisma, async (transaction) => {
     const result = await transaction.tripRequest.updateMany({
       where: {
         tripId,
@@ -371,9 +372,9 @@ export async function saveRequestDraft(tripId: string, input: unknown) {
     throw new TripRequestConflictError();
   }
   return serializeRecord(updated);
-}
+});
 
-export async function saveExtractionResult(input: {
+export const saveExtractionResult = businessOperation(async function saveExtractionResult(input: {
   tripId: string;
   expectedRequestRevision: number;
   expectedOriginalRequest: string;
@@ -388,7 +389,7 @@ export async function saveExtractionResult(input: {
   }
 
   const questions = remainingQuestions(input.questions, snapshot).slice(0, 3);
-  const updated = await prisma.$transaction(async (transaction) => {
+  const updated = await businessTransaction(prisma, async (transaction) => {
     const result = await transaction.tripRequest.updateMany({
       where: {
         tripId: input.tripId,
@@ -422,9 +423,9 @@ export async function saveExtractionResult(input: {
     throw new TripRequestConflictError();
   }
   return serializeRecord(updated);
-}
+});
 
-export async function confirmRequest(tripId: string, input: unknown) {
+export const confirmRequest = businessOperation(async function confirmRequest(tripId: string, input: unknown) {
   const parsed = parseOrThrow(confirmRequestSchema, input);
   const { request } = await loadRequest(tripId);
   if (request.requestRevision !== parsed.expectedRequestRevision) {
@@ -444,7 +445,7 @@ export async function confirmRequest(tripId: string, input: unknown) {
   }
 
   const confirmedAt = new Date();
-  const updated = await prisma.$transaction(async (transaction) => {
+  const updated = await businessTransaction(prisma, async (transaction) => {
     const result = await transaction.tripRequest.updateMany({
       where: {
         tripId,
@@ -475,7 +476,7 @@ export async function confirmRequest(tripId: string, input: unknown) {
     throw new TripRequestConflictError();
   }
   return serializeRecord(updated);
-}
+});
 
 export async function closeTripRequestStore() {
   await prisma.$disconnect();

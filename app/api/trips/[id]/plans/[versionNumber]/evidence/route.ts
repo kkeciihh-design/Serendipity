@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { appWriteAccessError } from "@/lib/access";
@@ -22,7 +24,7 @@ const bodySchema = z.object({
   officialHost: z.string().trim().min(3).max(160),
 });
 
-export async function POST(request: Request, context: RouteContext) {
+export const POST = businessRoute(async function POST(request: Request, context: RouteContext) {
   const accessError = appWriteAccessError(request);
   if (accessError) return accessError;
 
@@ -47,6 +49,7 @@ export async function POST(request: Request, context: RouteContext) {
     });
     return NextResponse.json({ fact });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: error.issues[0]?.message ?? "来源核验请求不合法。" },
@@ -85,4 +88,4 @@ export async function POST(request: Request, context: RouteContext) {
       { status: 500 },
     );
   }
-}
+});

@@ -1,3 +1,5 @@
+import { readInstanceState } from "../scripts/restore-core.mjs";
+import { getDatabasePath } from "../lib/data-directory";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createSignedPayload } from "../lib/security";
@@ -30,7 +32,7 @@ async function fixture(days = 3, located = false) {
 }
 type Plan = Awaited<ReturnType<typeof fixture>>;
 const values = (p: Plan, overrides: Partial<StayInput> = {}): StayInput => ({ areaId: "today", kind: "area", hotelToken: null, routeMode: "walking", checkIn: p.requestSnapshot.startDate!, checkOut: p.requestSnapshot.endDate!, roomCount: 3, minCents: 18050, maxCents: 22050, morningDepartureTime: "07:00", checkInFrom: "14:00", checkOutBy: "12:00", luggageStorage: "unknown", conditionNote: "测试资料", acknowledged: true, ...overrides });
-const token = (p: Plan, hotel = candidate("77")) => createSignedPayload({ scope: "place-selection", tripId: p.tripId, version: p.versionNumber, eventId: "d1-hotel", candidate: hotel, exp: Date.now() + 60_000 });
+const token = (p: Plan, hotel = candidate("77")) => createSignedPayload({ scope: "place-selection", dataGeneration: readInstanceState(getDatabasePath()).dataGeneration, tripId: p.tripId, version: p.versionNumber, eventId: "d1-hotel", candidate: hotel, exp: Date.now() + 60_000 });
 const preview = (p: Plan, overrides: Partial<StayInput> = {}) => service.previewAccommodation(p.tripId, p.versionNumber, "d1-hotel", values(p, overrides));
 const apply = (p: Plan, t: string) => service.applyAccommodation(p.tripId, p.versionNumber, "d1-hotel", t);
 function mockRoute(seconds = 600) { vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ code: "Ok", routes: [{ duration: seconds, distance: 800, geometry: "_p~iF~ps|U_ulLnnqC_mqNvxq`@", legs: [{ steps: [{ name: "测试道路", duration: seconds, distance: 800, maneuver: { type: "depart" } }] }] }] })))); }

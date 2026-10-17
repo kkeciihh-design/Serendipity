@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import {
   BadgeCheck,
@@ -173,7 +174,7 @@ export function PlanBudget({
     setIsSaving(true);
     setFeedback({ tone: "info", message: "正在保存费用修改..." });
     try {
-      const response = await fetch(
+      const response = await businessFetch(
         `/api/trips/${tripId}/plans/${plan.versionNumber}`,
         {
           method: "PATCH",

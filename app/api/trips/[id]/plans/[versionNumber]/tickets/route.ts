@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { z } from "zod";
 import { appWriteAccessError } from "@/lib/access";
 import { listEvidenceFacts } from "@/lib/evidence-service";
@@ -10,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 type Context = { params: Promise<{ id: string; versionNumber: string }> };
 
-export async function POST(request: Request, context: Context) {
+export const POST = businessRoute(async function POST(request: Request, context: Context) {
   const accessError = appWriteAccessError(request);
   if (accessError) return accessError;
 
@@ -31,6 +33,7 @@ export async function POST(request: Request, context: Context) {
     );
     return Response.json({ plan: { ...plan, evidenceFacts } });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     if (error instanceof z.ZodError) {
       return Response.json(
         { error: error.issues[0]?.message ?? "票面确认格式不正确。" },
@@ -45,4 +48,4 @@ export async function POST(request: Request, context: Context) {
     }
     return mapApiError(error);
   }
-}
+});

@@ -1,3 +1,4 @@
+import { businessOperation, businessTransaction, capturedGeneration, assertCapturedGeneration } from "./business-guard";
 import crypto from "node:crypto";
 import { syncPlanChecklist } from "./checklist-store";
 import { parseExecution } from "./execution";
@@ -244,16 +245,16 @@ export function serializePlan(record: PlanVersionRow): PlanVersionRecord {
   }
 }
 
-export async function listPlanVersions(tripId: string) {
+export const listPlanVersions = businessOperation(async function listPlanVersions(tripId: string) {
   const rows = await prisma.planVersion.findMany({
     where: { tripId },
     include: { trip: { select: { currentPlanVersionId: true } } },
     orderBy: { versionNumber: "desc" },
   });
   return rows.map(serializePlan);
-}
+});
 
-export async function getPlanVersion(
+export const getPlanVersion = businessOperation(async function getPlanVersion(
   tripId: string,
   versionNumber: number,
 ) {
@@ -267,9 +268,9 @@ export async function getPlanVersion(
     throw new PlanNotFoundError();
   }
   return serializePlan(row);
-}
+});
 
-export async function getPlanGenerationContext(
+export const getPlanGenerationContext = businessOperation(async function getPlanGenerationContext(
   tripId: string,
   expectedRequestRevision: number,
 ): Promise<PlanCapture> {
@@ -299,6 +300,7 @@ export async function getPlanGenerationContext(
 
   return {
     tripId,
+    dataGeneration: capturedGeneration(),
     expectedRequestRevision,
     expectedPlanVersion: trip.currentPlanVersion?.versionNumber ?? null,
     expectedChecklistRevision: trip.checklist?.revision ?? 0,
@@ -306,7 +308,7 @@ export async function getPlanGenerationContext(
     requestSnapshot: parseSnapshot(trip.request.confirmedRequest),
     originalRequest: trip.request.originalRequest,
   };
-}
+});
 
 function assertRegenerationPreservesFacts(current: { events: string; costs: string; tickets?: string } | null) {
   if (!current) return;
@@ -321,7 +323,7 @@ function assertRegenerationPreservesFacts(current: { events: string; costs: stri
   }
 }
 
-export async function savePlanVersion(input: {
+export const savePlanVersion = businessOperation(async function savePlanVersion(input: {
   capture: PlanCapture;
   plan: PlanContent;
   validationResults: PlanValidationResults;
@@ -335,6 +337,7 @@ export async function savePlanVersion(input: {
   }
 
   const { capture } = input;
+  assertCapturedGeneration(capture.dataGeneration);
   // Generations cross the model boundary; human edits use separate entry points.
   const plan = normalizePlanOutput(input.plan);
   const validation = validatePlan(plan, capture.requestSnapshot);
@@ -345,7 +348,7 @@ export async function savePlanVersion(input: {
     throw new PlanValidationError(costErrors[0]);
   }
   try {
-    return await prisma.$transaction(async (transaction) => {
+    return await businessTransaction(prisma, async (transaction) => {
       if (input.abortSignal?.aborted) {
         throw new PlanConflictError("本次生成已取消，结果不会保存。");
       }
@@ -435,7 +438,7 @@ export async function savePlanVersion(input: {
     }
     throw error;
   }
-}
+});
 
 export async function copyEvidenceFacts(
   transaction: Prisma.TransactionClient,
@@ -478,13 +481,13 @@ export async function copyEvidenceFacts(
   }
 }
 
-export async function savePlanEventEdit(input: {
+export const savePlanEventEdit = businessOperation(async function savePlanEventEdit(input: {
   tripId: string;
   expectedPlanVersion: number;
   edit: PlanEventEditInput;
 }) {
   try {
-    return await prisma.$transaction(async (transaction) => {
+    return await businessTransaction(prisma, async (transaction) => {
       const row = await transaction.planVersion.findUnique({
         where: {
           tripId_versionNumber: {
@@ -606,15 +609,15 @@ export async function savePlanEventEdit(input: {
     if (error instanceof PlanEventEditValidationError) throw new PlanValidationError(error.message);
     throw error;
   }
-}
+});
 
-export async function savePlanCostEdit(input: {
+export const savePlanCostEdit = businessOperation(async function savePlanCostEdit(input: {
   tripId: string;
   expectedPlanVersion: number;
   edit: PlanCostEditInput;
 }) {
   try {
-    return await prisma.$transaction(async (transaction) => {
+    return await businessTransaction(prisma, async (transaction) => {
       const row = await transaction.planVersion.findUnique({
         where: {
           tripId_versionNumber: {
@@ -723,15 +726,15 @@ export async function savePlanCostEdit(input: {
     }
     throw error;
   }
-}
+});
 
-export async function savePlanPlaceEdit(input: {
+export const savePlanPlaceEdit = businessOperation(async function savePlanPlaceEdit(input: {
   tripId: string; expectedPlanVersion: number; eventId: string;
   candidate: PlaceCandidate | null; precision: Place["precision"];
   abortSignal?: AbortSignal;
 }) {
   try {
-    return await prisma.$transaction(async (transaction) => {
+    return await businessTransaction(prisma, async (transaction) => {
       if (input.abortSignal?.aborted) throw new PlanConflictError("本次定位已取消。");
       const row = await transaction.planVersion.findUnique({
         where: { tripId_versionNumber: { tripId: input.tripId, versionNumber: input.expectedPlanVersion } },
@@ -792,7 +795,7 @@ export async function savePlanPlaceEdit(input: {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new PlanConflictError("计划已变化，请刷新后重试。");
     throw error;
   }
-}
+});
 
 function routeCostId(fromEventId: string, toEventId: string) {
   return `route-${crypto.createHash("sha256").update(`${fromEventId}\n${toEventId}`).digest("hex").slice(0, 24)}`;
@@ -957,14 +960,14 @@ export function updateRoutesAfterEventChange(routeLegs: RouteLeg[], events: Plan
   return { routeLegs: routes, costs: restoreReleasedTransportCosts(routeLegs, routes, events, costs, previousEvents ?? events) };
 }
 
-export async function savePlanRouteEdit(input: {
+export const savePlanRouteEdit = businessOperation(async function savePlanRouteEdit(input: {
   tripId: string;
   expectedPlanVersion: number;
   route: RouteLeg;
   abortSignal?: AbortSignal;
 }) {
   try {
-    return await prisma.$transaction(async (transaction) => {
+    return await businessTransaction(prisma, async (transaction) => {
       if (input.abortSignal?.aborted) throw new PlanConflictError("本次路线查询已取消。");
       const row = await transaction.planVersion.findUnique({
         where: { tripId_versionNumber: { tripId: input.tripId, versionNumber: input.expectedPlanVersion } },
@@ -1032,11 +1035,11 @@ export async function savePlanRouteEdit(input: {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new PlanConflictError("计划已变化，请刷新后重试。");
     throw error;
   }
-}
+});
 
 // Shared short transaction for a reviewed venue choice. External reads finish
 // before this commit, which rechecks identity, version and protected facts.
-export async function savePlanRecommendationEdit(input: {
+export const savePlanRecommendationEdit = businessOperation(async function savePlanRecommendationEdit(input: {
   tripId: string; expectedPlanVersion: number; eventId: string;
   targetType: "activity" | "meal" | "accommodation"; action: "keep" | "replace" | "adjust"; event: PlanEvent; places: Place[];
   relatedEvents?: PlanEvent[];
@@ -1044,7 +1047,7 @@ export async function savePlanRecommendationEdit(input: {
   warnings: string[]; abortSignal?: AbortSignal;
 }) {
   try {
-    return await prisma.$transaction(async (transaction) => {
+    return await businessTransaction(prisma, async (transaction) => {
       const assertActive = () => { if (input.abortSignal?.aborted) throw new PlanConflictError("本次推荐选择已取消，旧计划保持不变。"); };
       assertActive();
       const row = await transaction.planVersion.findUnique({
@@ -1108,7 +1111,7 @@ export async function savePlanRecommendationEdit(input: {
     if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034", "P2028"].includes(error.code)) throw new PlanConflictError("计划已变化，请重新预览后重试。");
     throw error;
   }
-}
+});
 
 export function savePlanAttractionEdit(input: Omit<Parameters<typeof savePlanRecommendationEdit>[0], "targetType" | "action"> & { action: "keep" | "replace" }) {
   return savePlanRecommendationEdit({ ...input, targetType: "activity" });
@@ -1316,14 +1319,14 @@ function applyTicketTransferCosts(tickets: Ticket[], routes: RouteLeg[], costs: 
   return result;
 }
 
-export async function savePlanTicketEdit(input: {
+export const savePlanTicketEdit = businessOperation(async function savePlanTicketEdit(input: {
   tripId: string;
   expectedPlanVersion: number;
   action: TicketAction;
 }) {
   const action = ticketActionSchema.parse(input.action);
   try {
-    return await prisma.$transaction(async (transaction) => {
+    return await businessTransaction(prisma, async (transaction) => {
       const row = await transaction.planVersion.findUnique({
         where: {
           tripId_versionNumber: {
@@ -1513,7 +1516,7 @@ export async function savePlanTicketEdit(input: {
     }
     throw error;
   }
-}
+});
 
 export async function markCurrentPlanStale(
   transaction: Prisma.TransactionClient,

@@ -5,8 +5,8 @@ const nextConfig: NextConfig = {
   distDir: process.env.SERENDIPITY_BUILD_DIR && /^\.next-[a-z0-9-]+$/.test(process.env.SERENDIPITY_BUILD_DIR)
     ? process.env.SERENDIPITY_BUILD_DIR : ".next",
   reactStrictMode: true,
-  // A 10MB image expands to ~13.34MB when encoded in the guarded JSON API.
-  experimental: { proxyClientMaxBodySize: "15mb" },
+  // Travel JSON is capped at 64 MiB; its guarded API also enforces a stream limit.
+  experimental: { proxyClientMaxBodySize: "65mb" },
   serverExternalPackages: ["@prisma/client", "tesseract.js", "sharp", "@tesseract.js-data/chi_sim", "playwright", "playwright-core"],
 };
 

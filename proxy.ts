@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { hasAppAccess } from "./lib/access";
+import { readInstanceState } from "./scripts/restore-core.mjs";
+import { getDatabasePath } from "./lib/data-directory";
 
 export function proxy(request: NextRequest) {
   if (hasAppAccess(request)) {
-    return NextResponse.next();
+    const headers = new Headers(request.headers);
+    headers.set("x-page-data-generation", readInstanceState(getDatabasePath()).dataGeneration);
+    return NextResponse.next({ request: { headers } });
   }
 
   const path = request.nextUrl.pathname;
@@ -13,7 +17,9 @@ export function proxy(request: NextRequest) {
     path === "/api/settings/password" ||
     path === "/api/settings/session"
   ) {
-    return NextResponse.next();
+    const headers = new Headers(request.headers);
+    headers.set("x-page-data-generation", readInstanceState(getDatabasePath()).dataGeneration);
+    return NextResponse.next({ request: { headers } });
   }
 
   if (path.startsWith("/api/")) {

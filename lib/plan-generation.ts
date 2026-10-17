@@ -1,3 +1,4 @@
+import { businessOperation } from "./business-guard";
 import { completeText, type AICompletionResult } from "./ai-adapter";
 import {
   normalizePlanOutput,
@@ -107,7 +108,7 @@ function planPrompt(input: {
     .join("\n");
 }
 
-export async function generatePlanVersion(
+export const generatePlanVersion = businessOperation(async function generatePlanVersion(
   input: {
     tripId: string;
     expectedRequestRevision: number;
@@ -210,4 +211,4 @@ export async function generatePlanVersion(
   } finally {
     activeGenerations.delete(input.tripId);
   }
-}
+});

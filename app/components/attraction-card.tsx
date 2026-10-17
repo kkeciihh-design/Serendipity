@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import { BookOpenCheck, Check, ChevronRight, CircleAlert, Clock3, RefreshCw, Route, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -155,7 +156,7 @@ export function AttractionTimelineCard({ tripId, plan, event, visitLabel, onSave
     const active = () => activeScope.current === scope && requestRef.current === controller;
     void (async () => {
       try {
-        const response = await fetch(`${endpoint}?eventId=${encodeURIComponent(event.id)}`, { cache: "no-store", signal: controller.signal });
+        const response = await businessFetch(`${endpoint}?eventId=${encodeURIComponent(event.id)}`, { cache: "no-store", signal: controller.signal });
         const payload = await response.json().catch(() => null) as { recommendations?: AttractionRecommendations; error?: string } | null;
         if (!response.ok) throw new Error(payload?.error ?? `景点资料读取失败（HTTP ${response.status}）。`);
         if (!active() || controller.signal.aborted) return;
@@ -189,7 +190,7 @@ export function AttractionTimelineCard({ tripId, plan, event, visitLabel, onSave
     setFeedback({ error: false, message: action === "preview" ? "正在按本版行程检查替换后的衔接…" : "正在保存你的选择…" });
     if (action === "preview") setPreview(null);
     try {
-      const response = await fetch(endpoint, { method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, eventId: event.id, ...(candidateId ? { candidateId } : {}), ...(action === "apply" && preview ? { previewToken: preview.previewToken } : {}) }) });
+      const response = await businessFetch(endpoint, { method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, eventId: event.id, ...(candidateId ? { candidateId } : {}), ...(action === "apply" && preview ? { previewToken: preview.previewToken } : {}) }) });
       const payload = await response.json().catch(() => null) as { preview?: AttractionReplacementPreview; plan?: PlanVersionClient; error?: string } | null;
       if (!active()) return;
       if (!response.ok) throw new Error(payload?.error ?? `操作失败（HTTP ${response.status}），当前安排保持不变。`);
