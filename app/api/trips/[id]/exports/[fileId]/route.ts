@@ -1,6 +1,6 @@
 import { hasAppAccess, unauthorizedResponse } from "@/lib/access";
 import { ExportError } from "@/lib/export-snapshot";
-import { getExportFile } from "@/lib/export-service";
+import { getExportFile, getExportImagePart, getExportPdfBytes } from "@/lib/export-service";
 import { MOBILE_HTML_CSP } from "@/lib/mobile-export";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +9,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const { id, fileId } = await params, file = await getExportFile(id, fileId);
     const disposition = new URL(request.url).searchParams.get("download") === "1" ? "attachment" : "inline";
+    if (file.format === "pdf") {
+      return new Response(new Uint8Array(getExportPdfBytes(file)), { headers: { "Content-Type": "application/pdf", "Cache-Control": "no-store", "Content-Disposition": `${disposition}; filename="${file.filename}"`, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Content-Security-Policy": "frame-ancestors 'self'" } });
+    }
+    if (file.format === "long-image") {
+      const part = getExportImagePart(file, Number(new URL(request.url).searchParams.get("part") ?? "1"));
+      return new Response(new Uint8Array(part.bytes), { headers: { "Content-Type": "image/png", "Cache-Control": "no-store", "Content-Disposition": `${disposition}; filename="${part.filename}"`, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" } });
+    }
     const mime = file.format === "mobile-html" ? "text/html" : file.format === "markdown" ? "text/markdown" : "text/plain";
     return new Response(file.html, { headers: { "Content-Type": `${mime}; charset=utf-8`, "Cache-Control": "no-store",
       "Content-Disposition": `${disposition}; filename="${file.filename}"`, "Content-Security-Policy": `${MOBILE_HTML_CSP}; frame-ancestors 'self'; sandbox`,

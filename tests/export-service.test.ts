@@ -1,4 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import * as renderer from "../lib/long-image-renderer";
+import * as pdfRenderer from "../lib/pdf-renderer";
 import { PrismaClient } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { isolatedDatabase } from "./helpers/test-database";
@@ -16,6 +18,71 @@ async function seed() {
   return trip.id;
 }
 describe("durable coherent export records", () => {
+  it("PDF commits its original snapshot when a new plan and execution update during rendering", async () => {
+    const id = await seed(), original = pdfRenderer.printPdf;
+    const spy = vi.spyOn(pdfRenderer, "printPdf").mockImplementation(async (html, signal) => {
+      const old = await db.planVersion.findFirstOrThrow({ where: { tripId: id } });
+      const { id: oldId, createdAt, updatedAt, ...fields } = old; void oldId; void createdAt; void updatedAt;
+      const next = await db.planVersion.create({ data: { ...fields, versionNumber: 2 } });
+      await db.trip.update({ where: { id }, data: { currentPlanVersionId: next.id } });
+      await db.executionState.update({ where: { tripId: id }, data: { revision: 99 } });
+      expect(html.split("</head>")[1]).toContain("执行修订 4"); expect(html).not.toContain("2040-01-01");
+      return original(html, signal);
+    });
+    try {
+      const f = await service.createExport(id, { expectedPlanVersion: 1, format: "pdf", options: {}, pdfContent: { mode: "simplified", includePhotos: false } });
+      expect(f).toMatchObject({ planVersion: 1, requestRevision: 2, executionRevision: 4, requirementUpToDate: false });
+      const row = await service.getExportFile(id, f.id), bytes = service.getExportPdfBytes(row);
+      expect(createHash("sha256").update(bytes).digest("hex")).toBe(f.sha256);
+      const snapshot = JSON.parse((await db.exportFile.findUniqueOrThrow({ where: { id: f.id } })).snapshot);
+      expect(snapshot.plan.versionNumber).toBe(1); expect(snapshot.advisories.items.length).toBeGreaterThan(0);
+      await service.closeExportStore(); expect(service.getExportPdfBytes(await service.getExportFile(id, f.id))).toEqual(bytes);
+      expect((await service.getExportPanel(id, "pdf")).files).toHaveLength(1); expect((await service.getExportPanel(id)).files).toHaveLength(0);
+    } finally { spy.mockRestore(); }
+  }, 90_000);
+  it("PDF resource failures and cancellation at registration leave no partial file", async () => {
+    const id = await seed();
+    await expect(service.createExport(id, { expectedPlanVersion: 1, format: "pdf", options: {} })).rejects.toThrow("缺少已确认公开地点");
+    const controller = new AbortController();
+    const spy = vi.spyOn(pdfRenderer, "printPdf").mockImplementation(async () => { controller.abort(); return { schemaVersion: 1, pages: 1, bytes: 0, eventIds: [], base64: "" }; });
+    try {
+      await expect(service.createExport(id, { expectedPlanVersion: 1, format: "pdf", options: {}, pdfContent: { mode: "simplified" } }, controller.signal)).rejects.toThrow("取消");
+      expect(await db.exportFile.count({ where: { tripId: id } })).toBe(0);
+    } finally { spy.mockRestore(); }
+  });
+  it("long image captures before rendering, releases the read transaction and atomically stores all parts", async () => {
+    const id = await seed(), original = renderer.screenshotLongImage;
+    const spy = vi.spyOn(renderer, "screenshotLongImage").mockImplementation(async (html, prefix, signal) => {
+      // A concurrent update can commit during the slow renderer. It must not be
+      // queried back into this file, even when R, V and execution are now newer.
+      await db.executionState.update({ where: { tripId: id }, data: { revision: 99 } });
+      const body = html.split("</head>")[1];
+      expect(body.includes("执行修订 4")).toBe(true); expect(body.includes("4 人")).toBe(true); expect(body.includes("2040-01-01")).toBe(false);
+      return original(html, prefix, signal);
+    });
+    try {
+      const f = await service.createExport(id, { expectedPlanVersion: 1, format: "long-image", options: {}, imageContent: { includeMap: false, includePhotos: false } });
+      expect(f.parts).toHaveLength(1); expect(f.executionRevision).toBe(4);
+      const row = await service.getExportFile(id, f.id), part = service.getExportImagePart(row, 1);
+      expect(createHash("sha256").update(part.bytes).digest("hex")).toBe(f.parts![0].sha256);
+      const snapshot = JSON.parse((await db.exportFile.findUniqueOrThrow({ where: { id: f.id } })).snapshot);
+      expect(snapshot.execution.revision).toBe(4);
+      await service.closeExportStore(); expect(await service.getExportFile(id, f.id)).toEqual(row);
+      expect((await service.getExportPanel(id, "long-image")).files).toHaveLength(1);
+      expect((await service.getExportPanel(id)).files).toHaveLength(0);
+    } finally { spy.mockRestore(); }
+  }, 90_000);
+  it("a cancelled or failed renderer leaves no partial image record and can retry", async () => {
+    const id = await seed(), controller = new AbortController();
+    const spy = vi.spyOn(renderer, "screenshotLongImage").mockImplementation(async () => { controller.abort(); return { schemaVersion: 1, parts: [] }; });
+    try {
+      await expect(service.createExport(id, { expectedPlanVersion: 1, format: "long-image", options: {} }, controller.signal)).rejects.toThrow("取消");
+      expect(await db.exportFile.count({ where: { tripId: id } })).toBe(0);
+      spy.mockRejectedValue(new Error("controlled renderer failure"));
+      await expect(service.createExport(id, { expectedPlanVersion: 1, format: "long-image", options: {} })).rejects.toThrow("controlled");
+      expect(await db.exportFile.count({ where: { tripId: id } })).toBe(0);
+    } finally { spy.mockRestore(); }
+  });
   it("text formats reuse snapshots, retain exact bytes, isolate history and reject unsupported formats", async () => {
     const id = await seed();
     const html = await service.createMobileExport(id, { expectedPlanVersion: 1, options: {} });
@@ -33,7 +100,7 @@ describe("durable coherent export records", () => {
     }
     expect((await service.getExportPanel(id)).files.map((f) => f.id)).toEqual([html.id]);
     expect((await service.getExportPanel(id, "text")).files).toHaveLength(2);
-    await expect(service.createExport(id, { expectedPlanVersion: 1, format: "pdf", options: {} })).rejects.toThrow();
+    await expect(service.createExport(id, { expectedPlanVersion: 1, format: "unsupported", options: {} })).rejects.toThrow();
     await expect(service.createExport(id, { expectedPlanVersion: 99, format: "plain-text", options: {} })).rejects.toThrow("计划已更新");
     await expect(service.createExport(id, { expectedPlanVersion: 1, format: "markdown", options: {} }, AbortSignal.abort())).rejects.toThrow("取消");
     expect(await db.exportFile.count({ where: { tripId: id } })).toBe(3);

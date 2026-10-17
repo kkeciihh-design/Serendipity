@@ -14,7 +14,7 @@ function failure(error: unknown) {
 export async function GET(request: Request, context: Context) {
   if (!hasAppAccess(request)) return unauthorizedResponse();
   try {
-    const kind = z.enum(["mobile-html", "text"]).parse(new URL(request.url).searchParams.get("kind") ?? "mobile-html");
+    const kind = z.enum(["mobile-html", "text", "long-image", "pdf"]).parse(new URL(request.url).searchParams.get("kind") ?? "mobile-html");
     return json(await getExportPanel((await context.params).id, kind));
   } catch (error) { return failure(error); }
 }
