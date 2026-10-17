@@ -4,6 +4,7 @@ import { planEventSchema, planEventStart, preparePlanForStorage, type PlanEvent 
 import type { PlanVersionRecord } from "./plan-service";
 import { isActiveTicket } from "./tickets";
 import type { RequestSnapshot } from "./trip-request";
+import { executionProtectedIds, type ExecutionProgress } from "./execution";
 
 export class ReplanError extends Error {
   constructor(message: string, public status = 409) { super(message); this.name = "ReplanError"; }
@@ -21,8 +22,8 @@ export const replanWriteSchema = z.discriminatedUnion("action", [
   z.object({ action: z.enum(["apply", "cancel"]), candidateId: z.string().uuid(), expectedCandidateRevision: z.number().int().positive() }).strict(),
 ]);
 
-export function protectedEvent(plan: PlanVersionRecord, event: PlanEvent, now: string) {
-  return event.locked || event.status === "confirmed" || planEventStart(event).getTime() <= Date.parse(now) ||
+export function protectedEvent(plan: PlanVersionRecord, event: PlanEvent, now: string, execution?: ExecutionProgress) {
+  return (execution && executionProtectedIds(execution).has(event.id)) || event.locked || event.status === "confirmed" || planEventStart(event).getTime() <= Date.parse(now) ||
     plan.tickets.some((ticket) => isActiveTicket(ticket) && ticket.eventId === event.id) ||
     plan.costs.some((cost) => cost.linkedEventId === event.id && !cost.id.startsWith("route-") && hasProtectedCostFact(cost));
 }
@@ -30,10 +31,10 @@ export function sameEvent(a: PlanEvent, b: PlanEvent) {
   const clean = (event: PlanEvent) => ({ ...event, order: undefined });
   return JSON.stringify(clean(a)) === JSON.stringify(clean(b));
 }
-export function assertProtectedFacts(base: PlanVersionRecord, proposed: PlanVersionRecord, now: string) {
-  for (const before of base.events.filter((e) => protectedEvent(base, e, now))) {
+export function assertProtectedFacts(base: PlanVersionRecord, proposed: PlanVersionRecord, now: string, execution?: ExecutionProgress) {
+  for (const before of base.events.filter((e) => protectedEvent(base, e, now, execution))) {
     const after = proposed.events.find((e) => e.id === before.id);
-    if (!after || !sameEvent(before, after)) throw new ReplanError(`“${before.title}”已经开始、锁定、确认或关联有效票据/费用，不能更改。`);
+    if (!after || !sameEvent(before, after)) throw new ReplanError(`“${before.title}”已选为当前步骤、到达、完成、开始、锁定、确认或关联有效票据/费用，不能更改。`);
   }
   if (JSON.stringify(base.tickets) !== JSON.stringify(proposed.tickets)) throw new ReplanError("重新规划不能改写任何票据事实。");
   for (const cost of base.costs.filter(hasProtectedCostFact)) {
@@ -47,7 +48,7 @@ export function assertProtectedFacts(base: PlanVersionRecord, proposed: PlanVers
   }
 }
 
-export function applyReplanProposal(base: PlanVersionRecord, snapshot: RequestSnapshot, revision: number, raw: unknown, now: string) {
+export function applyReplanProposal(base: PlanVersionRecord, snapshot: RequestSnapshot, revision: number, raw: unknown, now: string, execution?: ExecutionProgress) {
   const proposal = replanProposalSchema.parse(raw);
   if (proposal.requirementChange) throw new ReplanError(`这涉及旅行需求变更：${proposal.requirementChange}。请先在“旅行需求”保存并确认，再重新规划。`, 422);
   if (!proposal.edits.length || new Set(proposal.edits.map((e) => e.eventId)).size !== proposal.edits.length) throw new ReplanError("AI 没有提出有效变更，或重复修改同一活动。", 400);
@@ -55,7 +56,7 @@ export function applyReplanProposal(base: PlanVersionRecord, snapshot: RequestSn
   for (const edit of proposal.edits) {
     const before = events.find((e) => e.id === edit.eventId);
     if (!before) throw new ReplanError("AI 返回了不存在的活动。", 400);
-    if (protectedEvent(base, before, now)) throw new ReplanError(`“${before.title}”属于保留事项，无法按本次要求调整。`);
+    if (protectedEvent(base, before, now, execution)) throw new ReplanError(`“${before.title}”属于保留事项，无法按本次要求调整。`);
     if (edit.remove) {
       if (["departure_transport", "return_transport", "accommodation"].includes(before.type)) throw new ReplanError("去返程和住宿需要保留，请调整时刻或先确认旅行需求。");
       events = events.filter((e) => e.id !== before.id);
@@ -77,7 +78,7 @@ export function applyReplanProposal(base: PlanVersionRecord, snapshot: RequestSn
   const prepared = preparePlanForStorage({ events, pendingItems: base.pendingItems });
   const proposed = { ...base, ...prepared, costs, requestSnapshot: snapshot, requestRevision: revision, requirementUpToDate: true,
     places: base.places.filter((p) => events.some((e) => e.placeId === p.id)) };
-  assertProtectedFacts(base, proposed, now);
+  assertProtectedFacts(base, proposed, now, execution);
   return proposed;
 }
 

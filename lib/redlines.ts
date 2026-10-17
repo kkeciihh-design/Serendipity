@@ -115,6 +115,17 @@ export function redlineUrgency(suggestedAt: string | null, now: number) {
   return { color: remainingSeconds <= 0 ? "red" : remainingSeconds <= 900 ? "orange" : "green", remainingSeconds } as const;
 }
 
+export function liveRedlineCheck(result: RedlineResult, now: number, reliable = true): ForwardCheck {
+  const route = result.input.route.kind === "fixed" ? result.input.route : result.currentCheck.route;
+  const check = forwardCheck(result.input, isoAt(now), route);
+  const expiredDeadline = result.input.deadlines.some((d) => d.at && Date.parse(d.at) <= now);
+  if (expiredDeadline) return { ...check, status: "infeasible" };
+  // A timed result is specific to a queried departure. Do not silently move
+  // its waiting time to a new second, or retain yesterday's green status.
+  if (!reliable || route.kind === "timed" && now !== Date.parse(result.currentCheck.departureAt)) return { ...check, status: "unknown" };
+  return check;
+}
+
 export function formatRedlineTime(at: string | null, relativeDate?: string) {
   if (!at) return "待补资料";
   const local = new Date(Date.parse(at) + 8 * 3600_000).toISOString();

@@ -13,10 +13,12 @@ process.env.SERENDIPITY_DATA_DIR = assertTestDataPath(path.resolve("test-data/e2
 const db = new PrismaClient({ datasources: { db: { url: `file:${path.resolve("test-data/e2e/data/serendipity.db").replaceAll("\\", "/")}` } } });
 const evidence = verificationEvidenceDirectory("phase22-browser");
 let server: http.Server, settings: typeof import("../../lib/settings");
+let releaseExecutionModel: (() => void) | null = null;
 test.beforeAll(async () => {
   server = http.createServer(async (req, res) => {
     const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const body = JSON.parse(Buffer.concat(chunks).toString()), prompt: string = body.messages.at(-1).content;
+    if (prompt.includes("用户变化=执行并发演练")) await new Promise<void>((resolve) => { releaseExecutionModel = resolve; });
     const remove = prompt.includes("用户变化=不去"), late = prompt.includes("用户变化=晚起"), requirement = prompt.includes("用户变化=改去");
     const proposal = { requirementChange: requirement ? "目的地发生变化" : null, edits: requirement ? [] : [{ eventId: late ? "d2-breakfast" : "d2-activity", remove,
       fields: remove ? {} : late ? { startTime: "09:00", endTime: "09:30" } : { title: "室内展览", locationName: "室内展馆", costDraftCents: 3000 } }] };
@@ -92,4 +94,20 @@ test("API rejects foreign origins, client snapshots and forged revision updates"
   expect((await request.post(`/api/trips/${id}/replan`, { data: { action: "preview", reason: "下雨了", expectedPlanVersion: 1, expectedRequestRevision: 2, requestSnapshot: {} } })).status()).toBe(400);
   const r = await request.post(`/api/trips/${id}/replan`, { data: { action: "preview", reason: "下雨了", expectedPlanVersion: 1, expectedRequestRevision: 2 } }); expect(r.status()).toBe(200); const { candidate } = await r.json();
   expect((await request.post(`/api/trips/${id}/replan`, { data: { action: "apply", candidateId: candidate.id, expectedCandidateRevision: candidate.revision, expectedPlanVersion: 2 } })).status()).toBe(400);
+});
+test("execution completion in another browser page invalidates a model response still in flight", async ({ page, request, context }) => {
+  const id = await seed(request), executionPage = await context.newPage();
+  await executionPage.goto(`/trips/${id}/execute`); await executionPage.getByRole("button", { name: "开始旅行", exact: true }).click();
+  await expect(executionPage.getByRole("button", { name: "完成这一步", exact: true })).toBeEnabled();
+  await open(page, id); await panel(page).getByLabel("这次想怎么调整？").fill("执行并发演练，下雨调整明天的活动");
+  await panel(page).getByRole("button", { name: "生成调整预览", exact: true }).click();
+  try {
+    await expect.poll(() => Boolean(releaseExecutionModel)).toBe(true);
+    await executionPage.getByRole("button", { name: "完成这一步", exact: true }).click();
+    await expect(executionPage.getByText(/已完成 1 \//)).toBeVisible();
+  } finally { releaseExecutionModel?.(); releaseExecutionModel = null; }
+  await expect(panel(page).getByRole("status")).toContainText("执行进度");
+  expect(await db.planVersion.count({ where: { tripId: id } })).toBe(1);
+  expect(await db.replanCandidate.count({ where: { tripId: id } })).toBe(0);
+  await executionPage.close();
 });

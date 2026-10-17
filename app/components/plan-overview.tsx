@@ -35,6 +35,7 @@ import { RedlinePanel } from "./redline-panel";
 import { AccommodationPanel } from "./accommodation-panel";
 import { ChecklistPanel } from "./checklist-panel";
 import { ReplanPanel } from "./replan-panel";
+import { TripBottomNav } from "./trip-bottom-nav";
 import { AdvisoryPanel, AdvisorySummary, useAdvisories } from "./advisory-panel";
 import type { Place } from "@/lib/places";
 import type { RouteLeg } from "@/lib/routes";
@@ -116,7 +117,7 @@ export function PlanOverview({
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [pendingTimelineScrollEventId, setPendingTimelineScrollEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "timeline" | "transport" | "budget" | "map" | "accommodation" | "checklist" | "advisories" | "replan"
+    "timeline" | "transport" | "budget" | "map" | "accommodation" | "checklist" | "advisories" | "replan" | "more"
   >("timeline");
   const [hasOpenedMap, setHasOpenedMap] = useState(false);
   const [hasOpenedBudget, setHasOpenedBudget] = useState(false);
@@ -139,6 +140,11 @@ export function PlanOverview({
   }, [activeTab]);
 
   useEffect(() => {
+    const view = new URL(window.location.href).searchParams.get("view");
+    if (view === "timeline" || view === "map" || view === "budget" || view === "more") {
+      setActiveTab(view);
+      document.getElementById("plan-views")?.scrollIntoView({ block: "start" });
+    }
     if (new URL(window.location.href).searchParams.get("view") === "replan") {
       setActiveTab("replan");
       document.getElementById("plan-views")?.scrollIntoView({ block: "start" });
@@ -456,6 +462,7 @@ export function PlanOverview({
       ) : null}
 
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+        {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/execute`} className="inline-flex min-h-12 items-center justify-center rounded-lg bg-sage px-5 py-3 font-semibold text-white">进入旅行执行模式</Link>}
         <button
           type="button"
           onClick={generatePlan}
@@ -653,7 +660,9 @@ export function PlanOverview({
             </div>
             {activeTab === "advisories" && <div role="tabpanel" aria-label="行程提醒"><AdvisoryPanel data={advisoryData} plan={displayPlan} onEvent={handleEventSelect} onChecklist={(id) => { setChecklistFocusId(id); setActiveTab("checklist"); }} /></div>}
             {activeTab === "replan" && <div role="tabpanel" aria-label="AI 重新规划"><ReplanPanel key={displayPlan.id} tripId={tripId} plan={displayPlan} requestState={requestState} onSaved={handlePlanSaved} /></div>}
-            {activeTab !== "checklist" && <button type="button" className="fixed right-4 bottom-4 z-30 inline-flex min-h-12 items-center gap-2 rounded-full bg-sage px-4 py-3 font-semibold text-white shadow-lg sm:hidden" onClick={() => { setActiveTab("checklist"); document.getElementById("plan-views")?.scrollIntoView({ block: "start" }); }}><ListChecks className="size-5" aria-hidden="true" />打开出发前清单</button>}
+            {activeTab === "more" && <div role="tabpanel" aria-label="更多" className="grid gap-3 py-4"><Link href={`/trips/${tripId}/execute`} className="min-h-12 rounded-lg bg-sage px-4 py-3 font-semibold text-white">进入旅行执行模式</Link>{([["replan", "AI 重新规划"], ["transport", "门到门交通"], ["advisories", "行程提醒"], ["accommodation", "住宿推荐"]] as const).map(([view, title]) => <button key={view} className="min-h-12 rounded-lg border border-sand px-4 py-3 text-left font-semibold" onClick={() => setActiveTab(view)}>{title}</button>)}</div>}
+            {activeTab !== "checklist" && <button type="button" className="mt-4 inline-flex min-h-12 items-center gap-2 rounded-lg border border-sage px-4 py-3 font-semibold text-sage sm:hidden" onClick={() => { setActiveTab("checklist"); document.getElementById("plan-views")?.scrollIntoView({ block: "start" }); }}><ListChecks className="size-5" aria-hidden="true" />打开出发前清单</button>}
+            <TripBottomNav tripId={tripId} active={activeTab} onSelect={(view) => { setActiveTab(view); document.getElementById("plan-views")?.scrollIntoView({ block: "start" }); }} />
             <div hidden={activeTab !== "transport"} role="tabpanel" aria-label="门到门交通">
               <TransportOverview
                 tripId={tripId}
