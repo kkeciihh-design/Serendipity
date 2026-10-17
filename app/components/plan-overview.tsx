@@ -267,7 +267,7 @@ export function PlanOverview({
       if (controller.signal.aborted) {
         setFeedback({
           tone: "info",
-          message: "已取消本次生成；已有计划保持不变。",
+          message: "已取消等待生成结果。未收到响应不能确认是否已保存，请重新读取当前计划核对。",
         });
         return;
       }

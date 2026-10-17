@@ -4,8 +4,9 @@ import { getAttractionCatalogEntry } from "./attraction-catalog";
 import { attractionExclusionReasons, attractionProtectionReasons, attractionVisitMinutes, buildAttractionCard, buildAttractionRecommendations, catalogEntryForEvent, confirmedBudgetLimit, type AttractionReplacementPreview } from "./attractions";
 import { calculateBudgetSummary, derivePlanCosts, hasProtectedCostFact, validatePlanCosts } from "./budget";
 import { listEvidenceFacts } from "./evidence-service";
+import { executionProtectedIds } from "./execution";
 import { preparePlanForStorage, validatePlan, type PlanEvent } from "./plan";
-import { getPlanVersion, PlanConflictError, PlanValidationError, savePlanAttractionEdit, type PlanVersionRecord } from "./plan-service";
+import { getPlanExecutionCapture, getPlanVersion, PlanConflictError, PlanValidationError, savePlanAttractionEdit, type PlanVersionRecord } from "./plan-service";
 import { placeIdentity, placeSchema } from "./places";
 import { buildPlanRedlines } from "./redline-service";
 import { occupiedEnd, replacementRoutes } from "./recommendation-service";
@@ -36,6 +37,8 @@ export const previewAttractionReplacement = businessOperation(async function pre
   assertActive(signal);
   const plan = await getPlanVersion(tripId, version);
   const before = getActivity(plan, eventId);
+  const execution = await getPlanExecutionCapture(tripId, version);
+  if (executionProtectedIds(execution.progress).has(eventId)) throw new PlanConflictError("当前、已到达或已完成的景点不能替换，实际进度已保留。");
   const protection = attractionProtectionReasons(plan, before);
   if (protection.length) throw new PlanConflictError(protection[0]);
   const entry = getAttractionCatalogEntry(candidateId);
@@ -99,6 +102,7 @@ export const previewAttractionReplacement = businessOperation(async function pre
   warnings.push(...card.warnings);
   const current = await getPlanVersion(tripId, version);
   if (!current.isCurrent) throw new PlanConflictError("查询期间计划已变化，请重新预览。");
+  if ((await getPlanExecutionCapture(tripId, version)).revision !== execution.revision) throw new PlanConflictError("旅行执行进度或位置已经变化，请重新预览。");
   assertActive(signal);
   const now = Date.now();
   for (const [key, value] of previews) if (value.expires <= now) previews.delete(key);
@@ -111,7 +115,7 @@ export const previewAttractionReplacement = businessOperation(async function pre
     conflicts: [...new Set(conflicts)], warnings: [...new Set(warnings)], canApply: conflicts.length === 0,
     beforeBudget: calculateBudgetSummary(plan.costs, plan.requestSnapshot), afterBudget, card };
   previews.set(previewToken, { dataGeneration: capturedGeneration(), tripId, version, eventId, candidateId, expires, result, edit: {
-    tripId, expectedPlanVersion: version, eventId, action: "replace", event: proposed.events.find((item) => item.id === eventId)!,
+    tripId, expectedPlanVersion: version, expectedExecutionRevision: execution.revision, eventId, action: "replace", event: proposed.events.find((item) => item.id === eventId)!,
     places, costs: proposed.costs, routeLegs: proposed.routeLegs, pendingItems, warnings: result.warnings,
   } });
   return result;
@@ -140,13 +144,14 @@ export const keepPlanAttraction = businessOperation(async function keepPlanAttra
   const event = getActivity(plan, eventId);
   assertActive(signal);
   if (!plan.isCurrent) throw new PlanConflictError("历史版本只读，请回到当前计划操作。");
+  const execution = await getPlanExecutionCapture(tripId, version);
   const entry = catalogEntryForEvent(plan, event);
   if (candidateId && candidateId !== entry?.id) throw new PlanValidationError("保留只适用于当前景点；选择其他景点请先预览替换。");
   const currentCard = entry ? buildAttractionCard(entry, plan, event, true, await listEvidenceFacts(tripId)) : null;
   if (currentCard?.eligibility === "excluded") throw new PlanValidationError(currentCard.warnings[0] ?? "当前景点存在已确认冲突，请选择其他候选。");
   assertActive(signal);
   if (event.attractionSelection?.action === "keep" && event.attractionSelection.catalogId === (entry?.id ?? null)) return plan;
-  return savePlanAttractionEdit({ tripId, expectedPlanVersion: version, eventId, action: "keep",
+  return savePlanAttractionEdit({ tripId, expectedPlanVersion: version, expectedExecutionRevision: execution.revision, eventId, action: "keep",
     event: { ...event, attractionSelection: { catalogId: entry?.id ?? null, action: "keep", selectedAt: new Date().toISOString() } },
     places: plan.places, routeLegs: plan.routeLegs, costs: plan.costs, pendingItems: plan.pendingItems,
     warnings: ["已记录保留景点的选择；这不代表完成预约、购票或来源核验。"], abortSignal: signal });

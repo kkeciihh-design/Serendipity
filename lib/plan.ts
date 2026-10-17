@@ -272,6 +272,23 @@ export function validatePlan(
     if (stay && (event.type !== "accommodation" || event.date < stay.checkIn || event.date >= stay.checkOut ||
       Math.round((Date.parse(stay.checkOut) - Date.parse(stay.checkIn)) / 86_400_000) !== stay.nightCount)) errors.push("住宿日期与入住资料不一致，请重新确认住宿。");
     if (stay && event.date === stay.checkIn && stay.checkInFrom && event.startTime < stay.checkInFrom && stay.luggageStorage === "unavailable") errors.push("未到入住时间且酒店不可寄存行李，请调整到店时刻或酒店。");
+    if (stay) {
+      const morningDate = nextPlanDate(event.date);
+      const departureAt = Date.parse(`${morningDate}T${stay.morningDepartureTime}:00+08:00`);
+      if (departureAt < planEventEnd(event).getTime()) errors.push(`${event.date} 的住宿结束晚于次日计划离店时刻，请先调整时间轴。`);
+      if (morningDate === stay.checkOut && stay.checkOutBy && stay.morningDepartureTime > stay.checkOutBy) errors.push("最后一天计划离店晚于酒店退房截止，请提前离店或确认延迟退房。");
+      for (const next of plan.events.filter((item) => item.date === morningDate && !item.ticketTimingPending)) {
+        const atHotel = stay.kind === "hotel" && event.placeId && next.placeId === event.placeId;
+        // Preparation, a meal or rest may happen in the hotel. An explicitly
+        // different venue, a destination activity or transport requires leaving,
+        // even when a hotel/route has not been precisely located yet.
+        const requiresDeparture = ["local_transport", "departure_transport", "return_transport"].includes(next.type) ||
+          (!atHotel && (["activity", "accommodation"].includes(next.type) || Boolean(next.placeId && next.placeId !== event.placeId) || Boolean(next.restaurantSelection)));
+        if (requiresDeparture && planEventStart(next).getTime() < departureAt) {
+          errors.push(`${morningDate} 计划${stay.morningDepartureTime}从住宿离店，晚于${next.title}的开始时刻${next.startTime}；请提前离店或调整该项安排。`);
+        }
+      }
+    }
     if (eventIds.has(event.id)) {
       errors.push(`事件 ID 重复：${event.id}。`);
     }

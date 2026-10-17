@@ -57,10 +57,12 @@ export function parseTravelBackup(raw) {
   const factKeys = t.EvidenceFact.map((r) => JSON.stringify([r.planVersionId, r.targetType, r.targetId, r.field]));
   if (new Set(factKeys).size !== factKeys.length) throw new Error("同一计划字段的来源记录重复。");
   const versions = new Set();
+  const latestPlans = new Map();
   for (const plan of t.PlanVersion) {
     const key = `${plan.tripId}:${plan.versionNumber}`;
     if (versions.has(key)) throw new Error("计划版本重复。");
     versions.add(key);
+    if (!latestPlans.has(plan.tripId) || latestPlans.get(plan.tripId).versionNumber < plan.versionNumber) latestPlans.set(plan.tripId, plan);
   }
   for (const name of TRAVEL_TABLES.filter((n) => n !== "Trip")) for (const row of t[name]) {
     if (!trips.has(row.tripId)) throw new Error("备份含不属于任何旅行的记录。");
@@ -69,6 +71,9 @@ export function parseTravelBackup(raw) {
   }
   for (const trip of t.Trip) {
     if (trip.currentPlanVersionId && plans.get(trip.currentPlanVersionId)?.tripId !== trip.id) throw new Error("当前计划指针不属于该旅行。");
+    // New edits allocate current + 1; a historical or missing current pointer
+    // would make an otherwise valid restore impossible to edit afterwards.
+    if (trip.currentPlanVersionId !== (latestPlans.get(trip.id)?.id ?? null)) throw new Error("当前计划必须指向该旅行的最新版本；有历史计划时不能缺少当前计划。");
     const requests = t.TripRequest.filter((r) => r.tripId === trip.id);
     if (requests.length !== 1) throw new Error("每趟旅行必须有且只有一份需求。");
     const request = requests[0];

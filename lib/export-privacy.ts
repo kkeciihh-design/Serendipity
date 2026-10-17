@@ -12,15 +12,38 @@ export function exportPrivacy(snapshot: ExportSnapshot, options: MobileExportOpt
     const name = t.direction === "departure" ? t.chainOriginName : t.chainDestinationName;
     if (name) privateNames.add(name);
   }
-  const looksPrivate = (s: string) => /(?:家中|家门|住址|住宅|小区|单元|\d+\s*(?:栋|幢|室)|[街路巷道]\s*\d+\s*号|我家|返家|回家)/.test(s);
+  // A street number also identifies public shops. Residential context, an
+  // apartment/unit, or the saved private journey endpoints establish privacy.
+  const residentialDetails = (s: string) => /(?:住址|住宅|小区|单元|[\d零〇一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+\s*(?:栋|幢|室)|我家\s*[:：]|我家(?:在|位于))/.test(s);
+  const looksPrivate = (s: string) => residentialDetails(s) || /(?:家中|家门|我家|返家|回家)/.test(s);
+  // Notes can also contain unrelated contact addresses. Only an explicit
+  // declaration about this activity's location can make its map point private.
+  // Require a boundary after the home label so a shop such as “我家酸菜鱼” is
+  // not interpreted as a declaration that the event takes place at home.
+  const declaresPrivateLocation = (note: string | null | undefined) => (note ?? "").split(/[。！？!?；;\r\n]/).some((statement) =>
+    /^\s*本(?:次)?(?:活动|住宿|休息)(?:地点|地址)\s*(?:[:：]|为|是|在)\s*(?:我家|家中|家里|家门口|自宅|私人住址|私人住宅)(?=$|[\s:：，,（(])/.test(statement));
   const privateIds = new Set(events.filter((e) =>
     (departing && planEventEnd(e) <= planEventStart(departing)) ||
     (returning && planEventStart(e) >= planEventEnd(returning)) ||
-    looksPrivate(`${e.title} ${e.locationName ?? ""}`) || privateNames.has(e.locationName ?? "")
+    looksPrivate(`${e.title} ${e.locationName ?? ""}`) || privateNames.has(e.locationName ?? "") || declaresPrivateLocation(e.note)
   ).map((e) => e.id));
-  for (const e of events) if (privateIds.has(e.id) && e.locationName) privateNames.add(e.locationName);
-  for (const p of plan.places) if (privateNames.has(p.name) || looksPrivate(`${p.name} ${p.address}`) || events.some((e) => privateIds.has(e.id) && e.placeId === p.id)) {
-    privateNames.add(p.name); if (p.address) privateNames.add(p.address);
+  const privatePlaceIds = new Set(plan.places.filter((p) => looksPrivate(`${p.name} ${p.address}`)).map((p) => p.id));
+  // Close over both identities and their saved aliases before any renderer
+  // projects text, maps, photos, or route details. A place detected only through
+  // its address must hide every visit, including visits with another label.
+  let changed = true;
+  while (changed) {
+    const before = privateIds.size + privatePlaceIds.size + privateNames.size;
+    for (const e of events) if (privateIds.has(e.id) || e.placeId && privatePlaceIds.has(e.placeId) || privateNames.has(e.locationName ?? "")) {
+      privateIds.add(e.id);
+      if (e.placeId) privatePlaceIds.add(e.placeId);
+      if (e.locationName) privateNames.add(e.locationName);
+    }
+    for (const p of plan.places) if (privatePlaceIds.has(p.id) || privateNames.has(p.name) || privateNames.has(p.address)) {
+      privatePlaceIds.add(p.id); privateNames.add(p.name);
+      if (p.address) privateNames.add(p.address);
+    }
+    changed = before !== privateIds.size + privatePlaceIds.size + privateNames.size;
   }
   const seats = plan.tickets.map((t) => t.seat).filter((s): s is string => Boolean(s));
   const clean = (value: string | null | undefined) => {
@@ -28,7 +51,7 @@ export function exportPrivacy(snapshot: ExportSnapshot, options: MobileExportOpt
     if (!options.includePrivateAddress) {
       for (const token of [...privateNames].filter(Boolean).sort((a, b) => b.length - a.length)) s = s.replaceAll(token, "私人地点已隐藏");
       // Unknown addresses in free-form notes must not bypass the known-origin filter.
-      if (looksPrivate(s) && /\d/.test(s)) s = "私人地址细节已隐藏";
+      if (residentialDetails(s) || looksPrivate(s) && /(?:\d|[零〇一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+\s*(?:号|栋|幢|单元|室))/.test(s)) s = "私人地址细节已隐藏";
     }
     if (!options.includeSeats) {
       for (const seat of seats) s = s.replaceAll(seat, "座位已隐藏");

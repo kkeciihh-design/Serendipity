@@ -102,13 +102,14 @@ export function TripEditor({
       return;
     }
 
+    const submittedTitle = title;
     setIsSaving(true);
     setFeedback({ tone: "info", message: "正在保存标题..." });
     try {
       const response = await businessFetch(`/api/trips/${trip.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim() }),
+        body: JSON.stringify({ title: submittedTitle.trim() }),
       });
       if (!response.ok) {
         throw new Error(await readApiError(response));
@@ -116,7 +117,7 @@ export function TripEditor({
 
       const payload = (await response.json()) as { trip: TripEditorTrip };
       setSavedTrip(payload.trip);
-      setTitle(payload.trip.title);
+      setTitle((current) => current === submittedTitle ? payload.trip.title : current);
       setFeedback({
         tone: "success",
         message: "标题已保存；这不会改变需求修订或确认状态。",

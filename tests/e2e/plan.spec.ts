@@ -550,7 +550,7 @@ test("generation failures keep the old preview and retry after cancel", async ({
   await expect(page.getByRole("button", { name: /正在生成/ })).toBeDisabled();
   await cancelButton.click();
   releaseFirstRoute?.();
-  await expect(page.getByText("已取消本次生成；已有计划保持不变。")).toBeVisible();
+  await expect(page.getByText("已取消等待生成结果。未收到响应不能确认是否已保存，请重新读取当前计划核对。")).toBeVisible();
   await expect(
     page.getByRole("heading", { name: /尚无基础计划/ }),
   ).toBeVisible();

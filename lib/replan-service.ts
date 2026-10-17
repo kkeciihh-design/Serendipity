@@ -6,7 +6,8 @@ import { storedAIConfiguration } from "./settings";
 import { getDatabaseUrl } from "./data-directory";
 import { copyEvidenceFacts, serializePlan, applyRouteCost, updateRoutesAfterEventChange, type PlanVersionRecord } from "./plan-service";
 import { planEventStart, validatePlan } from "./plan";
-import { validatePlanCosts } from "./budget";
+import { calculateBudgetSummary, validatePlanCosts } from "./budget";
+import { confirmedBudgetLimit } from "./attractions";
 import { requestSnapshotSchema } from "./trip-request";
 import { isActiveTicket, validateTickets } from "./tickets";
 import { queryPlanRoute } from "./route-service";
@@ -142,6 +143,15 @@ function material(review: Review) {
     redlines: review.redlines.map((r) => ({ input: r.input, suggestedAt: r.suggestedAt, precision: r.precision })) });
 }
 
+function assertConfirmedBudget(plan: PlanVersionRecord, snapshot: Context["requestSnapshot"]) {
+  // A replan may apply a newer confirmed request than the base plan used.
+  // Both the explicit limit and the quantity factors must use that request.
+  const limit = confirmedBudgetLimit({ ...plan, requestSnapshot: snapshot });
+  if (limit !== null && calculateBudgetSummary(plan.costs, snapshot).totalMinCents > limit) {
+    throw new ReplanError("重新规划后的已知费用下限超过已确认的明确预算上限，请调整方案或先修改并确认预算需求。", 400);
+  }
+}
+
 async function reviewPlan(ctx: Context, proposed: PlanVersionRecord, signal: AbortSignal | undefined, deps: Dependencies, remainingFrom = (deps.now ?? clock)()): Promise<Review> {
   assertActive(signal);
   const now = (deps.now ?? clock)();
@@ -159,6 +169,7 @@ async function reviewPlan(ctx: Context, proposed: PlanVersionRecord, signal: Abo
   const tickets = validateTickets(plan.tickets, plan.events);
   const errors = [...validation.errors, ...validatePlanCosts(plan.costs, plan.events), ...tickets.errors];
   if (errors.length) throw new ReplanError(errors[0], 400);
+  assertConfirmedBudget(plan, ctx.requestSnapshot);
   for (const route of plan.routeLegs) if (route.conflict) throw new ReplanError(`路线与活动时刻冲突：${route.conflict}`);
   const checkedAt = (deps.now ?? clock)();
   const redlines = await (deps.redlines ?? buildPlanRedlines)(plan, checkedAt);
@@ -284,6 +295,7 @@ export const applyReplan = businessOperation(async function applyReplan(tripId: 
     if (Date.parse(commitNow) < Date.parse(review.verifiedAt) || Date.parse(commitNow) >= Date.parse(review.validUntil)) throw new ReplanError("提交前可行性窗口已经失效，请再次检查候选；原计划未改动。");
     assertProtectedFacts(latest.plan, review.plan, commitNow, latest.execution);
     const plan = review.plan;
+    assertConfirmedBudget(plan, latest.requestSnapshot);
     const created = await tx.planVersion.create({ data: { tripId, versionNumber: latest.plan.versionNumber + 1,
       requestRevision: next.capture.requestRevision, requestSnapshot: next.capture.confirmedRequest,
       events: JSON.stringify(plan.events), costs: JSON.stringify(plan.costs), places: JSON.stringify(plan.places), routeLegs: JSON.stringify(plan.routeLegs), tickets: JSON.stringify(plan.tickets),

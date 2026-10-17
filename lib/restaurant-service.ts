@@ -3,8 +3,9 @@ import crypto from "node:crypto";
 import { confirmedBudgetLimit } from "./attractions";
 import { calculateBudgetSummary, derivePlanCosts, validatePlanCosts } from "./budget";
 import { listEvidenceFacts } from "./evidence-service";
+import { executionProtectedIds } from "./execution";
 import { planEventStart, preparePlanForStorage, validatePlan } from "./plan";
-import { getPlanVersion, PlanConflictError, PlanValidationError, savePlanRecommendationEdit, type PlanVersionRecord } from "./plan-service";
+import { getPlanExecutionCapture, getPlanVersion, PlanConflictError, PlanValidationError, savePlanRecommendationEdit, type PlanVersionRecord } from "./plan-service";
 import { placeIdentity, placeSchema } from "./places";
 import { buildPlanRedlines } from "./redline-service";
 import { occupiedEnd, replacementRoutes } from "./recommendation-service";
@@ -31,6 +32,8 @@ export const previewRestaurantEdit = businessOperation(async function previewRes
   active(signal);
   const pricing = mealPricingSchema.parse(rawPricing);
   const plan = await getPlanVersion(tripId, version), before = meal(plan, eventId);
+  const execution = await getPlanExecutionCapture(tripId, version);
+  if (executionProtectedIds(execution.progress).has(eventId)) throw new PlanConflictError("当前、已到达或已完成的用餐安排不能通过推荐改写，请在预算中记录真实费用。");
   const protection = restaurantProtectionReasons(plan, before);
   if (protection.length) throw new PlanConflictError(protection[0]);
   const existing = restaurantForEvent(plan, before);
@@ -94,6 +97,7 @@ export const previewRestaurantEdit = businessOperation(async function previewRes
   }
   active(signal);
   if (!(await getPlanVersion(tripId, version)).isCurrent) throw new PlanConflictError("查询期间计划已变化，请重新预览。");
+  if ((await getPlanExecutionCapture(tripId, version)).revision !== execution.revision) throw new PlanConflictError("旅行执行进度或位置已经变化，请重新预览。");
   active(signal);
   const now = Date.now();
   for (const [key, value] of previews) if (value.expires <= now) previews.delete(key);
@@ -107,7 +111,7 @@ export const previewRestaurantEdit = businessOperation(async function previewRes
       "修改过的门店或费用来源需重新核验；不会自动订餐或保证有座。"],
     conflicts: [...new Set(conflicts)], warnings: [...new Set(warnings)], canApply: conflicts.length === 0 };
   previews.set(previewToken, { dataGeneration: capturedGeneration(), tripId, version, eventId, expires, result, edit: {
-    tripId, expectedPlanVersion: version, eventId, targetType: "meal", action: replace ? "replace" : "adjust", event,
+    tripId, expectedPlanVersion: version, expectedExecutionRevision: execution.revision, eventId, targetType: "meal", action: replace ? "replace" : "adjust", event,
     places, costs: proposed.costs, routeLegs: proposed.routeLegs, pendingItems, warnings: result.warnings } });
   return result;
 });

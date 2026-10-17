@@ -35,6 +35,22 @@ export function executionProtectedIds(state: ExecutionProgress) {
   return new Set([state.currentEventId, ...state.items.filter((i) => i.arrivedAt || i.completedAt).map((i) => i.eventId),
     state.location?.source === "manual" ? state.location.eventId : null].filter((v): v is string => Boolean(v)));
 }
+export function executionEventChangeConflict(before: PlanEvent[], after: PlanEvent[], state: ExecutionProgress) {
+  const protectedIds = executionProtectedIds(state);
+  for (const event of before.filter((item) => protectedIds.has(item.id))) {
+    const next = after.find((item) => item.id === event.id);
+    // Notes, locks and confirmation labels may still be corrected. A visit's
+    // identity and planned timing cannot acquire another visit's actual record.
+    if (!next || ["type", "title", "locationName", "placeId", "dayNumber"].some((key) =>
+      (event[key as keyof PlanEvent] ?? null) !== (next[key as keyof PlanEvent] ?? null)) ||
+      planEventStart(event).getTime() !== planEventStart(next).getTime() ||
+      planEventEnd(event).getTime() !== planEventEnd(next).getTime() ||
+      JSON.stringify(event.accommodationSelection) !== JSON.stringify(next.accommodationSelection)) {
+      return `“${event.title}”已选为当前步骤、已到达或已完成，不能删除或改写活动身份、地点和计划时刻。实际进度已保留。`;
+    }
+  }
+  return null;
+}
 export function applyExecutionChange(state: ExecutionProgress, events: PlanEvent[], change: ExecutionChange, now: string): ExecutionProgress {
   const result = structuredClone(state);
   if (change.action === "clear_location") { result.location = null; return result; }

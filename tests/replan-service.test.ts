@@ -7,10 +7,11 @@ import { planFixture, requestFixture } from "./helpers/plan-fixtures";
 import { ticketFixture } from "./helpers/ticket-fixtures";
 import { verificationEvidenceDirectory } from "./helpers/evidence-directory";
 import { preparePlanForStorage, validatePlan } from "../lib/plan";
-import { derivePlanCosts } from "../lib/budget";
+import { calculateBudgetSummary, derivePlanCosts } from "../lib/budget";
 import { applyReplanProposal, protectedEvent, type ReplanProposal } from "../lib/replan";
 import type { PlanVersionRecord } from "../lib/plan-service";
 import type { AICompletionResult } from "../lib/ai-adapter";
+import type { RequestSnapshot } from "../lib/trip-request";
 vi.mock("../lib/settings", () => ({ storedAIConfiguration: async () => ({ provider: "openai-chat-completions", baseUrl: "http://127.0.0.1:9999", model: "isolated-test", apiKey: "test-only", basePrompt: "", systemPrompt: "" }) }));
 let database: ReturnType<typeof isolatedDatabase>, db: PrismaClient;
 let trips: typeof import("../lib/trips"), requests: typeof import("../lib/trip-request-service"), plans: typeof import("../lib/plan-service"), service: typeof import("../lib/replan-service"), checklist: typeof import("../lib/checklist-service");
@@ -20,9 +21,9 @@ const edit = (eventId = "d2-activity", fields: ReplanProposal["edits"][number]["
 const completion = (value = edit()) => async (): Promise<AICompletionResult> => ({ ok: true, content: JSON.stringify(value) });
 const input = (p: PlanVersionRecord) => ({ tripId: p.tripId, reason: "下雨了", expectedPlanVersion: p.versionNumber, expectedRequestRevision: p.requestRevision });
 const at = (p: PlanVersionRecord, time: string) => new Date(`${p.requestSnapshot.startDate}T${time}+08:00`).toISOString();
-async function fixture(t31 = false) {
+async function fixture(t31 = false, requestOverrides: Partial<RequestSnapshot> = {}) {
   const trip = await trips.createTrip({ originalRequest: "阶段22隔离重规划演练" });
-  const request = await requests.saveRequestDraft(trip.id, { expectedRequestRevision: 1, request: requestFixture() });
+  const request = await requests.saveRequestDraft(trip.id, { expectedRequestRevision: 1, request: requestFixture(2, requestOverrides) });
   await requests.confirmRequest(trip.id, { expectedRequestRevision: request.requestRevision });
   const capture = await plans.getPlanGenerationContext(trip.id, request.requestRevision), content = planFixture(capture.requestSnapshot);
   if (t31) {
@@ -110,6 +111,48 @@ describe("阶段22：候选、时间与原子提交", () => {
     expect(result.outcome).toBe("review_required"); expect((await plans.listPlanVersions(p.tripId)).length).toBe(1);
     await evidence("fare-recheck", { outcome: result.outcome, planCount: (await plans.listPlanVersions(p.tripId)).length,
       oldCost: c.plan.costs.find((cost) => cost.linkedEventId === "d2-activity"), newCost: result.outcome === "review_required" ? result.candidate.plan.costs.find((cost) => cost.linkedEventId === "d2-activity") : null });
+  });
+  it("rejects the review's 2216-yuan proposal against an explicit 1000-yuan hard cap without storing a candidate", async () => {
+    const p = await fixture(false, { budgetAmountCents: 100000, constraints: ["不自驾", "总预算不超过1000元"] }), before = await state(p);
+    const proposal = edit("d2-activity", { title: "室内活动", locationName: "室内馆", costDraftCents: 200000 });
+    const proposed = applyReplanProposal(p, p.requestSnapshot, p.requestRevision, proposal, new Date().toISOString());
+    expect(calculateBudgetSummary(proposed.costs, proposed.requestSnapshot).totalMinCents).toBe(221600);
+    await expect(service.previewReplan(input(p), { completion: completion(proposal) })).rejects.toThrow("明确预算上限");
+    expect(await state(p)).toEqual(before);
+    expect(await db.replanCandidate.count({ where: { tripId: p.tripId } })).toBe(0);
+  });
+  it.each(["总预算1000元左右", "总预算尽量不超过1000元"])("keeps the soft preference '%s' as a warning and allows the reviewed proposal", async (constraint) => {
+    const p = await fixture(false, { budgetAmountCents: 100000, constraints: [constraint] });
+    const c = await service.previewReplan(input(p), { completion: completion(edit("d2-activity", { costDraftCents: 200000 })) });
+    expect(c.warnings.join()).toContain("预算");
+    const result = await service.applyReplan(p.tripId, c.id, c.revision);
+    expect(result.outcome).toBe("applied");
+  });
+  it("uses the latest confirmed request's hard limit instead of the base plan's old budget", async () => {
+    const p = await fixture(), request = await requests.saveRequestDraft(p.tripId, { expectedRequestRevision: p.requestRevision,
+      request: { ...p.requestSnapshot, budgetAmountCents: 100000, constraints: ["总预算不超过1000元"] } });
+    await requests.confirmRequest(p.tripId, { expectedRequestRevision: request.requestRevision });
+    await expect(service.previewReplan({ ...input(p), expectedRequestRevision: request.requestRevision }, {
+      completion: completion(edit("d2-activity", { costDraftCents: 200000 })),
+    })).rejects.toThrow("明确预算上限");
+    expect((await plans.listPlanVersions(p.tripId))).toHaveLength(1);
+  });
+  it("scales an explicit per-person limit to the confirmed traveler count and permits the exact boundary", async () => {
+    const p = await fixture(false, { budgetAmountCents: 100000, budgetScope: "per_person", travelerCount: 2, constraints: ["每人预算不超过1000元"] });
+    const c = await service.previewReplan(input(p), { completion: completion(edit("d2-activity", { costDraftCents: 178400 })) });
+    expect(calculateBudgetSummary(c.plan.costs, c.plan.requestSnapshot).totalMinCents).toBe(200000);
+    expect((await service.applyReplan(p.tripId, c.id, c.revision)).outcome).toBe("applied");
+  });
+  it("rechecks the hard cap after application-time route prices change and retains the original plan and candidate", async () => {
+    const p = await fixture(false, { budgetAmountCents: 100000, constraints: ["总预算不超过1000元"] });
+    const c = await service.previewReplan(input(p), { completion: completion() }), before = await state(p);
+    const candidateBefore = await db.replanCandidate.findUniqueOrThrow({ where: { id: c.id } });
+    await expect(service.applyReplan(p.tripId, c.id, c.revision, undefined, { routes: async (_base, proposed) => {
+      const plan = structuredClone(proposed); plan.costs.find((cost) => cost.linkedEventId === "d2-activity")!.unitAmountCents = 200000;
+      return { plan, warnings: [] };
+    } })).rejects.toThrow("明确预算上限");
+    expect(await state(p)).toEqual(before);
+    expect(await db.replanCandidate.findUniqueOrThrow({ where: { id: c.id } })).toEqual(candidateBefore);
   });
   it("material recheck changes are shown again, never silently applied; external work holds no transaction", async () => {
     const p = await fixture(), c = await service.previewReplan(input(p), { completion: completion() });

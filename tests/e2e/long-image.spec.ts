@@ -26,7 +26,10 @@ for (const days of [2, 4]) test(`${days} day images: full previews, exact PNG do
   await page.getByRole("button", { name: "生成长图预览" }).click();
   await expect(page.getByRole("status")).toContainText("已生成", { timeout: 50_000 });
   const { files } = await (await request.get(`${endpoint}?kind=long-image`)).json(), file = files[0];
-  if (days === 2) expect(file.parts).toHaveLength(1); else expect(file.parts.length).toBeGreaterThan(1);
+  // Saved advisories add content even to a two-day plan. Segment count is
+  // content-dependent; every downloaded segment and event is checked below.
+  expect(file.parts.length).toBeGreaterThan(0);
+  if (days === 4) expect(file.parts.length).toBeGreaterThan(1);
   expect([...new Set(file.parts.flatMap((p: { eventIds: string[] }) => p.eventIds))].sort()).toEqual(trip.p.events.map((e) => e.id).sort());
   const images = page.getByRole("img", { name: /旅行长图第/ });
   expect(await images.count()).toBe(file.parts.length);
