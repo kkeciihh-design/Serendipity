@@ -140,6 +140,9 @@ export async function searchDuckDuckGo(
   const { html } = await readSourcePage(url, {
     ...options, officialHost: "duckduckgo.com",
   }).catch(() => { throw new Error("搜索服务不可用，请稍后重试。"); });
+  if (/<form\b[^>]*\bid=["']challenge-form["']/i.test(html)) {
+    throw new Error("搜索服务要求人机验证，暂时无法自动读取；请稍后重试。当前资料不会因此标为已核验。");
+  }
   const results = parseDuckDuckGoResults(html);
   if (results.length === 0) {
     throw new Error("搜索没有返回可用结果。");

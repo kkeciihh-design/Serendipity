@@ -5,6 +5,7 @@ import { validatePlan } from "../lib/plan";
 import { planFixture, requestFixture } from "./helpers/plan-fixtures";
 import { isolatedDatabase } from "./helpers/test-database";
 import { ticketFixture } from "./helpers/ticket-fixtures";
+import { writeVerificationEvidence } from "./helpers/evidence-directory";
 import { defaultRedlinePreferences } from "../lib/redline-preferences";
 import { buildPlanRedlines, ticketRedlineInput } from "../lib/redline-service";
 import { manualReferenceRoute, readCachedRoute } from "../lib/routes";
@@ -226,6 +227,7 @@ describe("atomic ticket fact persistence", () => {
     expect(redlines.every((r) => r.precision === "pending_confirmation")).toBe(true);
     expect(current.events.find((e) => e.id === "departure")?.ticketTimingPending).toBe(true);
     expect(current.costs.find((cost) => cost.id === `ticket-${first.id}`)).toMatchObject({ paymentStatus: "paid", unitAmountCents: 24300 });
+    const replacedEvidence = { tickets: current.tickets, costs: current.costs, redlines };
     current = await act(current, { action: "cancel", ticketId: replacement.id, acknowledged: true });
     expect(current.tickets.find((t) => t.id === companion.id)).toEqual(companion);
     expect((await buildPlanRedlines(current))).toHaveLength(1);
@@ -234,6 +236,12 @@ describe("atomic ticket fact persistence", () => {
     expect(await buildPlanRedlines(current)).toEqual([]);
     expect(current.events.find((e) => e.id === "departure")?.ticketManaged).toBe(false);
     expect((await plans.getPlanVersion(current.tripId, current.versionNumber)).tickets).toEqual(current.tickets);
+    writeVerificationEvidence("phase30-core", "T30-ticket-states", {
+      input: { ticket, companion, replacement: { serviceNumber: "G888", departureTime: "09:30", arrivalTime: null }, serviceFailure: "offline", requirementChanged: true },
+      expected: "Only selected ticket replaced; companion/payment preserved; cancel last active ticket removes redline",
+      replaced: replacedEvidence, finalTickets: current.tickets, finalCosts: current.costs,
+      finalRedlines: await buildPlanRedlines(current),
+    });
     await expect(act(current, { action: "activate", ticket, acknowledged: true, importSource: { ...source, documentKind: "refund" } })).rejects.toThrow("退票资料");
   });
   it("uses only time-applicable saved routes and never shifts a no-service finding to another time", async () => {

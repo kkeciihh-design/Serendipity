@@ -2,7 +2,7 @@ import https from "node:https";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readSourcePage } from "../lib/evidence-source";
+import { readSourcePage, searchDuckDuckGo } from "../lib/evidence-source";
 import { isPublicAddress, validateExternalUrl, type Address } from "../lib/source-http";
 import { normalizeOfficialHost } from "../lib/evidence";
 
@@ -12,6 +12,14 @@ const page = () => new Response("<p>official content</p>", { headers: { "Content
 afterEach(() => vi.restoreAllMocks());
 
 describe("source URL and connection boundary", () => {
+  it("reports a search verification challenge separately from an empty result and does not follow it", async () => {
+    const fetchImpl = vi.fn(async () => new Response('<form id="challenge-form" action="/anomaly.js">Verify</form>', {
+      status: 202, headers: { "Content-Type": "text/html" },
+    }));
+    await expect(searchDuckDuckGo("museum", { fetchImpl, lookupImpl: publicLookup })).rejects.toThrow("人机验证");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await expect(searchDuckDuckGo("museum", { fetchImpl: async () => page(), lookupImpl: publicLookup })).rejects.toThrow("没有返回可用结果");
+  });
   it("rejects non-public IPv4, IPv6 and all private IPv4-mapped IPv6 forms", () => {
     const blocked = [
       "127.0.0.1", "0.0.0.0", "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.1", "169.254.169.254",

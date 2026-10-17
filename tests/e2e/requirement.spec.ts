@@ -64,7 +64,7 @@ test("requirement summary saves, confirms, and requires reconfirmation after edi
   await page.getByRole("button", { name: "确认修订 2" }).click();
   await expect(page.getByRole("heading", { name: /修订 2｜已确认/ })).toBeVisible();
   await expect(
-    page.getByText(/修订 2 已确认，可作为阶段 06 生成计划/),
+    page.getByText(/修订 2 已确认，可以生成旅行计划/),
   ).toBeVisible();
 
   await page.locator("#request-destination").fill("长沙和株洲");
