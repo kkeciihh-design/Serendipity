@@ -18,6 +18,18 @@ function fixture(): PlanVersionRecord {
 }
 const run = (plan = fixture(), overrides: Partial<Parameters<typeof projectAdvisories>[0]> = {}) => projectAdvisories({ plan, checklist: deriveChecklist(plan), facts: [], weather: [], previous: [], now: new Date("2026-10-16T08:00:00Z"), ...overrides });
 describe("相关活动提醒", () => {
+  it.each(["opening_hours", "reservation"] as const)("keeps reminders readable when the first %s source lookup fails with empty metadata", (field) => {
+    const p = fixture();
+    const fact: EvidenceFactClient = { id: "failed-source", planVersionId: p.id, targetType: "event", targetId: "d1-activity", field,
+      status: "unverified", effectiveStatus: "stale", evaluationVersion: 0, sourceTitle: "", sourceUrl: "", sourcePublisher: "",
+      sourcePublishedAt: null, sourceDateStatus: "not_read", extractedValue: "", searchProvider: "duckduckgo", searchQuery: "museum",
+      retrievedAt: "2026-10-16T08:00:00Z", applicableFrom: null, applicableUntil: null, lastRefreshAt: "2026-10-16T08:00:00Z",
+      lastRefreshStatus: "failed", lastRefreshError: "搜索服务要求人机验证", contentQuote: "", conflictReason: null };
+    const item = run(p, { facts: [fact] }).find((i) => i.eventId === fact.targetId && i.category === field)!;
+    expect(item).toMatchObject({ validity: "stale", acknowledged: false, sourceUrl: null });
+    expect(item.sourceLabel.trim()).not.toBe("");
+    expect(run(p, { facts: [fact] })).toEqual(run(p, { facts: [fact] }));
+  });
   it("ties reminders to actual events/checklist, does not repeat venue templates on generic meals/rest", () => {
     const p = fixture(), items = run(p); expect(new Set(items.map((i) => i.id)).size).toBe(items.length);
     expect(items.every((i) => p.events.some((e) => e.id === i.eventId))).toBe(true);

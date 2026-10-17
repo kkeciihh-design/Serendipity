@@ -1,5 +1,5 @@
 ﻿param(
-  [string]$BuildDirectory = '.next-phase29-release',
+  [string]$BuildDirectory = '.next-phase30-verified',
   [string]$DataDirectory = (Join-Path $env:LOCALAPPDATA 'Serendipity'),
   [int]$PreferredPort = 3003,
   [string]$ShortcutDirectory = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Serendipity 日常使用')

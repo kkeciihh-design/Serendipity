@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { writeVerificationEvidence } from "./helpers/evidence-directory";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   emptyRequestSnapshot,
@@ -369,6 +370,14 @@ describe("plan versions", () => {
     expect(stalePlans[0].requirementUpToDate).toBe(false);
     expect(stalePlans[0].requestSnapshot.destination).toBe("株洲");
     expect(staleConfirmed.requestRevision).toBe(6);
+    writeVerificationEvidence("phase30-core", "T29-revisions", {
+      input: { initialSnapshot, changedDestination, changedDates, changedTravelers },
+      expected: "Reject each old capture after destination, date or travellers change; keep historical snapshots",
+      rejectedCaptures: [dateCapture, travelerCapture],
+      history: history.map((p) => ({ version: p.versionNumber, revision: p.requestRevision, snapshot: p.requestSnapshot })),
+      latestConfirmedRevision: staleConfirmed.requestRevision,
+      currentStoredSnapshot: stalePlans[0].requestSnapshot, requirementUpToDate: stalePlans[0].requirementUpToDate,
+    });
 
     await expect(
       planService.savePlanVersion({

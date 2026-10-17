@@ -394,7 +394,7 @@ export function TripRequestWorkspace({
         tone: "success",
         message: keepLocalEdits
           ? `修订 ${payload.request.requestRevision} 已确认；等待时输入的新内容已保留，保存后需要重新确认。`
-          : `修订 ${payload.request.requestRevision} 已确认，可作为阶段 06 生成计划的唯一需求依据。`,
+          : `修订 ${payload.request.requestRevision} 已确认，可以生成旅行计划。`,
       });
     } catch (error) {
       setFeedback({

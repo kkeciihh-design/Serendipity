@@ -32,6 +32,10 @@ export function projectAdvisories(input: {
       targetName: event.locationName || event.title, severity: "attention" as const, validity: "unknown" as const,
       checklistItemId: linked?.id ?? null, sourceLabel: "本计划记录 · 条件规则判断", sourceUrl: null,
       retrievedAt: null, applicableFrom: null, applicableUntil: null, ...fields };
+    // Failed first lookups intentionally retain empty source metadata. They
+    // still need a readable reminder, including in the shared export snapshot.
+    base.sourceLabel = base.sourceLabel.trim() || "本计划记录 · 来源待核对";
+    base.sourceUrl = base.sourceUrl?.trim() || null;
     base.reason = base.reason.slice(0, 500);
     // Re-reading unchanged information does not make the user acknowledge it again.
     const signature = createHash("sha256").update(JSON.stringify({ ...base, retrievedAt: null, startTime: event.startTime, endTime: event.endTime, placeId: event.placeId ?? null })).digest("hex");

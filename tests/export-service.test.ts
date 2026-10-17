@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { isolatedDatabase } from "./helpers/test-database";
 import { exportFixture } from "./helpers/export-fixtures";
+import { writeVerificationEvidence } from "./helpers/evidence-directory";
 let database: ReturnType<typeof isolatedDatabase>, db: PrismaClient, service: typeof import("../lib/export-service");
 beforeAll(async () => { database = isolatedDatabase("unit-mobile-export"); db = new PrismaClient({ datasources: { db: { url: database.databaseUrl } } }); service = await import("../lib/export-service"); });
 afterAll(async () => { await service?.closeExportStore(); await db?.$disconnect(); database?.cleanup(); });
@@ -116,6 +117,12 @@ describe("durable coherent export records", () => {
     const stored = JSON.parse((await db.exportFile.findUniqueOrThrow({ where: { id: file.id } })).snapshot);
     expect(stored.execution.revision).toBe(4); expect(stored.plan.requestSnapshot.travelerCount).toBe(4); expect(stored.checklist.items.length).toBeGreaterThan(0);
     expect((await service.getExportPanel(id)).files[0].id).toBe(file.id);
+    writeVerificationEvidence("phase30-core", "T29-export", {
+      latestRequest: { revision: 3, date: "2040-01-01", travellers: 20, budgetCents: 1 },
+      expected: "Export retains R2, original dates, 4 travellers, 150000 cents and execution revision 4 after updates",
+      file, capturedRequest: stored.plan.requestSnapshot, capturedExecutionRevision: stored.execution.revision,
+      rereadIdentical: (await service.getExportFile(id, file.id)).sha256 === original.sha256,
+    });
   });
   it("rejects stale plan, outside date and cancelled generation without partial file rows", async () => {
     const id = await seed();
