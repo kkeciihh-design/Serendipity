@@ -7,8 +7,9 @@ import { checklistBasis, projectChecklist } from "./checklist-store";
 import { parseExecution } from "./execution";
 import { effectiveEvidenceStatus, evidenceFieldSchema } from "./evidence";
 import { buildPlanRedlines } from "./redline-service";
-import { ExportError, mobileExportOptionsSchema, mobileExportWriteSchema, type ExportSnapshot, type ExportFileSummary } from "./export-snapshot";
+import { ExportError, exportFormatSchema, exportWriteSchema, mobileExportOptionsSchema, mobileExportWriteSchema, type ExportSnapshot, type ExportFileSummary } from "./export-snapshot";
 import { renderMobileHtml } from "./mobile-export";
+import { renderTextExport } from "./text-export";
 
 const shared = globalThis as typeof globalThis & { serendipityExportPrisma?: PrismaClient };
 const prisma = shared.serendipityExportPrisma ?? new PrismaClient({ datasources: { db: { url: getDatabaseUrl() } } });
@@ -40,32 +41,38 @@ export async function captureExportSnapshot(tx: Prisma.TransactionClient, tripId
     evidence, redlines: await buildPlanRedlines(plan, generatedAt, { cache: false }),
   };
 }
-const summarySelect = { id: true, planVersion: true, requestRevision: true, checklistRevision: true, executionRevision: true,
+const summarySelect = { id: true, format: true, planVersion: true, requestRevision: true, checklistRevision: true, executionRevision: true,
   requirementUpToDate: true, generatedAt: true, options: true, filename: true, sha256: true } as const;
 type SummaryRow = Prisma.ExportFileGetPayload<{ select: typeof summarySelect }>;
 function summary(row: SummaryRow): ExportFileSummary {
-  return { ...row, generatedAt: row.generatedAt.toISOString(), options: mobileExportOptionsSchema.parse(JSON.parse(row.options)) };
+  return { ...row, format: exportFormatSchema.parse(row.format), generatedAt: row.generatedAt.toISOString(), options: mobileExportOptionsSchema.parse(JSON.parse(row.options)) };
 }
-export async function getExportPanel(tripId: string) {
+export async function getExportPanel(tripId: string, kind: "mobile-html" | "text" = "mobile-html") {
   return prisma.$transaction(async (tx) => {
     const trip = await tx.trip.findUnique({ where: { id: tripId }, include: { currentPlanVersion: true } });
     if (!trip) throw new ExportError("没有找到这趟旅行。", 404);
     const plan = trip.currentPlanVersion && serializePlan({ ...trip.currentPlanVersion, trip: { currentPlanVersionId: trip.currentPlanVersionId } });
-    const files = await tx.exportFile.findMany({ where: { tripId }, select: summarySelect, orderBy: [{ generatedAt: "desc" }, { id: "desc" }], take: 20 });
+    const files = await tx.exportFile.findMany({ where: { tripId, format: kind === "text" ? { in: ["plain-text", "markdown"] } : "mobile-html" }, select: summarySelect, orderBy: [{ generatedAt: "desc" }, { id: "desc" }], take: 20 });
     return { plan: plan ? { versionNumber: plan.versionNumber, requestRevision: plan.requestRevision,
       dates: [...new Set(plan.events.map((e) => e.date))].sort() } : null, files: files.map(summary) };
   });
 }
 export async function createMobileExport(tripId: string, raw: unknown, signal?: AbortSignal) {
-  const input = mobileExportWriteSchema.parse(raw);
+  return createExport(tripId, mobileExportWriteSchema.parse(raw), signal);
+}
+export async function createExport(tripId: string, raw: unknown, signal?: AbortSignal) {
+  const input = exportWriteSchema.parse(raw);
   try {
     return await prisma.$transaction(async (tx) => {
       if (signal?.aborted) throw new ExportError("导出已取消，请重新读取记录。", 409);
       const snapshot = await captureExportSnapshot(tx, tripId, input.expectedPlanVersion);
-      const html = renderMobileHtml(snapshot, input.options);
+      // The existing `html` storage column holds immutable UTF-8 content for all
+      // formats. Keep the column for backwards compatibility; format controls MIME.
+      const html = input.format === "mobile-html" ? renderMobileHtml(snapshot, input.options) : renderTextExport(snapshot, input.options, input.format);
       // Safe filename deliberately avoids free-form trip titles and addresses.
-      const filename = `Serendipity-${snapshot.plan.requestSnapshot.startDate ?? "trip"}-V${snapshot.plan.versionNumber}-${snapshot.id.slice(0, 8)}.html`;
-      const row = await tx.exportFile.create({ data: { id: snapshot.id, tripId, planVersion: snapshot.plan.versionNumber,
+      const extension = input.format === "mobile-html" ? "html" : input.format === "markdown" ? "md" : "txt";
+      const filename = `Serendipity-${snapshot.plan.requestSnapshot.startDate ?? "trip"}-V${snapshot.plan.versionNumber}-${snapshot.id.slice(0, 8)}.${extension}`;
+      const row = await tx.exportFile.create({ data: { id: snapshot.id, tripId, format: input.format, planVersion: snapshot.plan.versionNumber,
         requestRevision: snapshot.plan.requestRevision, checklistRevision: snapshot.checklist.revision, executionRevision: snapshot.execution.revision,
         requirementUpToDate: snapshot.requirementUpToDate, generatedAt: new Date(snapshot.generatedAt), options: JSON.stringify(input.options),
         snapshot: JSON.stringify(snapshot), filename, html, sha256: createHash("sha256").update(html).digest("hex") }, select: summarySelect });
@@ -78,7 +85,7 @@ export async function createMobileExport(tripId: string, raw: unknown, signal?: 
   }
 }
 export async function getExportFile(tripId: string, id: string) {
-  const row = await prisma.exportFile.findFirst({ where: { id, tripId }, select: { html: true, filename: true, sha256: true } });
+  const row = await prisma.exportFile.findFirst({ where: { id, tripId }, select: { html: true, format: true, filename: true, sha256: true } });
   if (!row) throw new ExportError("文件不存在或所属旅行已删除。", 404);
   return row;
 }
