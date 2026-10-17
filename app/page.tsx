@@ -84,6 +84,7 @@ export default async function HomePage() {
               >
                 <Settings aria-hidden="true" className="size-5" />
               </Link>
+              <Link href="/runtime" className="mt-2 block py-2 text-sm text-cream underline underline-offset-4">运行状态</Link>
             </div>
           </header>
           <div className="mt-auto max-w-3xl px-5 pb-10 sm:px-10 lg:px-16 lg:pb-14">

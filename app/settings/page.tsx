@@ -57,6 +57,7 @@ export default async function SettingsPage() {
             </h1>
           </div>
         </header>
+        <Link href="/runtime" className="mt-4 inline-flex min-h-11 items-center rounded-md border border-sage/25 px-4 text-sm font-medium text-sage">运行状态与数据位置</Link>
         <div className="mt-6">{pageContent}</div>
       </div>
     </main>
