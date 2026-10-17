@@ -236,4 +236,25 @@ describe("阶段28：旅行备份、恢复屏障和持久换代", () => {
     const rollback = spawnSync(process.execPath, ["scripts/technical-restore.mjs", database.directory, safety, "--confirm", JSON.parse(rollbackPreview.stdout).confirmation], { encoding: "utf8", windowsHide: true });
     expect(rollback.status, rollback.stderr).toBe(0); expect(current().dataGeneration).not.toBe(beforeRollback); expect((await trips.getTrip(p.tripId))!.title).toBe("新编辑");
   });
+  it.each(["historical", "missing"])("R30-08 rejects a %s current pointer before preview or replacement and keeps valid restores editable", async (pointer) => {
+    const first = await fixture();
+    const latest = await edit(first.tripId, 1);
+    const original = snapshot(), generation = current().dataGeneration;
+    const confirmation = previewRestore(filename, original);
+    const history = current().history;
+    const malformed = structuredClone(original);
+    malformed.tables.Trip[0].currentPlanVersionId = pointer === "historical" ? first.id : null;
+    expect(() => validateTravelBackup(malformed)).toThrow("最新版本");
+    expect(() => previewRestore(filename, malformed)).toThrow("最新版本");
+    await expect(restoreTravelBackup(filename, malformed, confirmation)).rejects.toThrow("最新版本");
+    expect(backupHash(snapshot())).toBe(backupHash(original));
+    expect(current().dataGeneration).toBe(generation);
+    expect(current().activeRestoreId).toBeNull();
+    expect(current().history).toEqual(history);
+    await restore(original);
+    const third = await edit(first.tripId, latest.versionNumber, "恢复后首次编辑");
+    const fourth = await edit(first.tripId, third.versionNumber, "恢复后继续编辑");
+    expect([third.versionNumber, fourth.versionNumber]).toEqual([3, 4]);
+    expect((await db.trip.findUniqueOrThrow({ where: { id: first.tripId } })).currentPlanVersionId).toBe(fourth.id);
+  });
 });

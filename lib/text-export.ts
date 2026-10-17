@@ -2,6 +2,7 @@ import { calculateBudgetSummary, costCategoryLabels, formatMoneyRange, formatMon
 import { checklistGroups } from "./checklist";
 import { evidenceFieldLabels, evidenceStatusLabels } from "./evidence";
 import { exportPrivacy } from "./export-privacy";
+import { EMPTY_EXPORT_ADVISORIES, EXPORT_ADVISORY_NOTICE, projectExportAdvisories } from "./export-advisories";
 import { ExportError, mobileExportOptionsSchema, type ExportSnapshot, type MobileExportOptions, type TextExportFormat } from "./export-snapshot";
 import { formatPlanDate, planEventEnd, sortPlanEvents } from "./plan";
 import { formatBudgetTarget, formatRequestDateRange, formatTravelerCount } from "./plan-overview";
@@ -111,6 +112,14 @@ export function renderTextExport(snapshot: ExportSnapshot, rawOptions: MobileExp
   for (const pending of plan.pendingItems) item(`${pending.title}：${pending.reason}${pending.requiredBefore ? `（${pending.requiredBefore} 前）` : ""}`);
   for (const note of [...plan.validationResults.errors, ...plan.validationResults.warnings]) item(note);
   paragraph("天气、班次、预约与营业情况可能变化；本文件保留导出时提示，出发前请到官方渠道复核。");
+  heading("旅行提醒与注意事项");
+  paragraph(EXPORT_ADVISORY_NOTICE);
+  const advisories = projectExportAdvisories(snapshot, dates);
+  for (const advisory of advisories) {
+    heading(advisory.title, 3);
+    for (const line of advisory.paragraphs) paragraph(line);
+  }
+  if (!advisories.length) paragraph(EMPTY_EXPORT_ADVISORIES);
   heading("出发前清单");
   paragraph("勾选是导出时的人工确认记录；文字中的改动不会同步回应用。");
   const checklist = snapshot.checklist.items.filter((i) => !i.deleted && !i.orphaned && (options.dates === null || !i.date || dates.includes(i.date) || i.date < allDates[0] || i.eventIds.some((id) => selectedIds.has(id))));

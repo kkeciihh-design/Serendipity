@@ -10,6 +10,15 @@ function fixture(days = 3): PlanVersionRecord {
   return { id: "p", tripId: "t", versionNumber: 1, requestRevision: 1, requestSnapshot: snapshot, ...content, costs: derivePlanCosts(content.events), places: [], tickets: [], routeLegs: [], validationResults: validatePlan(content, snapshot), isCurrent: true, requirementUpToDate: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 }
 const input = (p: PlanVersionRecord): StayInput => ({ areaId: "today", kind: "area", hotelToken: null, routeMode: "public_transit", checkIn: p.requestSnapshot.startDate!, checkOut: p.requestSnapshot.endDate!, roomCount: 3, minCents: 18050, maxCents: 22050, morningDepartureTime: "07:00", checkInFrom: "14:00", checkOutBy: "12:00", luggageStorage: "unknown", conditionNote: "", acknowledged: true });
+function selectStay(p: PlanVersionRecord, morningDepartureTime = "09:00") {
+  const values = input(p);
+  for (const event of p.events.filter((e) => e.type === "accommodation")) event.accommodationSelection = {
+    stayId: "stay", areaId: values.areaId, areaName: "住宿区域", kind: values.kind, checkIn: values.checkIn, checkOut: values.checkOut,
+    roomCount: values.roomCount, nightCount: nightsBetween(values.checkIn, values.checkOut), morningDepartureTime,
+    checkInFrom: values.checkInFrom, checkOutBy: values.checkOutBy, luggageStorage: values.luggageStorage, conditionNote: "", selectedAt: new Date().toISOString(),
+  };
+  return p;
+}
 describe("住宿比较与按夜计算", () => {
   it("counts leap-month and year boundaries, rejects invalid dates and zero/overlong stays", () => {
     expect(nightsBetween("2028-02-28", "2028-03-01")).toBe(2); expect(nightsBetween("2026-12-31", "2027-01-02")).toBe(2);
@@ -51,6 +60,30 @@ describe("住宿比较与按夜计算", () => {
     expect(stayConditionChecks(stays, { ...v, luggageStorage: "available" }).warnings.join()).toContain("不等于可提前进房");
     expect(stayConditionChecks(stays, { ...v, morningDepartureTime: "13:00" }).conflicts.join()).toContain("退房截止");
     p.events = p.events.filter((e) => e.id !== "d2-hotel"); expect(stayInputIssues(p, "d1-hotel", v).join()).toContain("没有唯一");
+  });
+  it("checks every morning independently while keeping hotel preparation and unlocated breakfast possible", () => {
+    const p = selectStay(fixture());
+    expect(validatePlan(p, p.requestSnapshot, p.costs).errors).toEqual([]);
+    const lastActivity = p.events.find((e) => e.id === "d3-activity")!;
+    Object.assign(lastActivity, { startTime: "08:40", endTime: "08:50" });
+    const errors = validatePlan(p, p.requestSnapshot, p.costs).errors;
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain(`${lastActivity.date} 计划09:00从住宿离店`);
+  });
+  it("uses plan departure rather than the hotel's noon checkout deadline and checks known outside meals", () => {
+    const p = selectStay(fixture(2), "10:00");
+    expect(validatePlan(p, p.requestSnapshot, p.costs).errors).toEqual([]);
+    p.events.find((e) => e.id === "d2-breakfast")!.placeId = "outside-cafe";
+    expect(validatePlan(p, p.requestSnapshot, p.costs).errors.join()).toContain("早餐的开始时刻08:00");
+    p.events.find((e) => e.id === "d1-hotel")!.placeId = "hotel";
+    p.events.find((e) => e.id === "d1-hotel")!.accommodationSelection!.kind = "hotel";
+    p.events.find((e) => e.id === "d2-breakfast")!.placeId = "hotel";
+    expect(validatePlan(p, p.requestSnapshot, p.costs).errors).toEqual([]);
+  });
+  it("rejects transport before the planned departure without relying on route coordinates", () => {
+    const p = selectStay(fixture(2), "09:00");
+    p.events.push({ ...p.events.find((e) => e.id === "d2-preparation")!, id: "early-transport", type: "local_transport", startTime: "06:30", endTime: "07:00", title: "前往车站" });
+    expect(validatePlan(p, p.requestSnapshot, p.costs).errors.join()).toContain("前往车站的开始时刻06:30");
   });
   it("model output cannot claim confirmed accommodation details", () => {
     const p = fixture(), event = p.events.find((e) => e.id === "d1-hotel")!;

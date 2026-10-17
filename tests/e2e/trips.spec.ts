@@ -99,6 +99,42 @@ test("确认删除只删除当前旅行", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("R30-09 标题保存响应保留等待期间的新输入，后续保存可刷新读取", async ({ page, request }) => {
+  const created = await request.post("/api/trips", { data: { originalRequest: "标题保存竞态隔离回归" } });
+  expect(created.status()).toBe(201);
+  const { trip } = await created.json();
+  await page.goto(`/trips/${trip.id}`);
+  const input = page.locator("#trip-title");
+  let release!: () => void;
+  let saved!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const written = new Promise<void>((resolve) => { saved = resolve; });
+  await page.route(`**/api/trips/${trip.id}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    const response = await route.fetch();
+    saved();
+    await gate;
+    await route.fulfill({ response });
+  });
+  await input.fill("第一版标题");
+  await page.getByRole("button", { name: "保存标题", exact: true }).click();
+  try {
+    await written;
+    await expect(input).toBeEditable();
+    await input.fill("保存期间继续输入的新标题");
+  } finally { release(); }
+  await expect(page.getByRole("heading", { name: "第一版标题", exact: true })).toBeVisible();
+  await expect(input).toHaveValue("保存期间继续输入的新标题");
+  await expect(page.getByText("标题未保存", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存标题", exact: true })).toBeEnabled();
+  expect((await (await request.get(`/api/trips/${trip.id}`)).json()).trip.title).toBe("第一版标题");
+  await page.getByRole("button", { name: "保存标题", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "保存期间继续输入的新标题", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存标题", exact: true })).toBeDisabled();
+  await page.reload();
+  await expect(input).toHaveValue("保存期间继续输入的新标题");
+});
+
 test("写入失败不显示已保存也不清空输入", async ({ page }) => {
   await page.route("**/api/trips", async (route) => {
     if (route.request().method() !== "POST") {

@@ -16,10 +16,10 @@ import { planFixture, requestFixture } from "./helpers/plan-fixtures";
 import { isolatedDatabase } from "./helpers/test-database";
 
 let database: ReturnType<typeof isolatedDatabase>, db: PrismaClient;
-let trips: typeof import("../lib/trips"), requests: typeof import("../lib/trip-request-service"), plans: typeof import("../lib/plan-service"), service: typeof import("../lib/accommodation-service"), settings: typeof import("../lib/settings"), evidence: typeof import("../lib/evidence-service");
-beforeAll(async () => { database = isolatedDatabase("unit-accommodations"); db = new PrismaClient({ datasources: { db: { url: database.databaseUrl } } }); trips = await import("../lib/trips"); requests = await import("../lib/trip-request-service"); plans = await import("../lib/plan-service"); service = await import("../lib/accommodation-service"); settings = await import("../lib/settings"); evidence = await import("../lib/evidence-service"); });
+let trips: typeof import("../lib/trips"), requests: typeof import("../lib/trip-request-service"), plans: typeof import("../lib/plan-service"), service: typeof import("../lib/accommodation-service"), settings: typeof import("../lib/settings"), evidence: typeof import("../lib/evidence-service"), execution: typeof import("../lib/execution-service");
+beforeAll(async () => { database = isolatedDatabase("unit-accommodations"); db = new PrismaClient({ datasources: { db: { url: database.databaseUrl } } }); trips = await import("../lib/trips"); requests = await import("../lib/trip-request-service"); plans = await import("../lib/plan-service"); service = await import("../lib/accommodation-service"); settings = await import("../lib/settings"); evidence = await import("../lib/evidence-service"); execution = await import("../lib/execution-service"); });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); clearRouteCache(); });
-afterAll(async () => { await Promise.all([trips?.closeTripStore(), requests?.closeTripRequestStore(), plans?.closePlanStore(), settings?.closeSettingsStore(), evidence?.closeEvidenceStore(), db?.$disconnect()]); database?.cleanup(); });
+afterAll(async () => { await Promise.all([trips?.closeTripStore(), requests?.closeTripRequestStore(), plans?.closePlanStore(), settings?.closeSettingsStore(), evidence?.closeEvidenceStore(), execution?.closeExecutionStore(), db?.$disconnect()]); database?.cleanup(); });
 const candidate = (id: string, name = "测试酒店"): PlaceCandidate => ({ provider: "osm", poiId: id, name, city: "长沙", district: "", address: "隔离测试地址", adcode: "", category: "tourism:hotel", longitude: 112.97, latitude: 28.19, coordinateSystem: "WGS84", retrievedAt: new Date().toISOString() });
 async function fixture(days = 3, located = false) {
   const trip = await trips.createTrip({ originalRequest: "隔离住宿测试" });
@@ -46,6 +46,44 @@ describe("住宿确认服务", () => {
     expect(saved.events.filter((e) => e.type === "accommodation").every((e) => e.accommodationSelection?.kind === "area" && e.accommodationSelection.nightCount === 2 && e.placeId === null)).toBe(true);
     expect((await plans.getPlanVersion(p.tripId, 2)).events).toEqual(saved.events);
     await expect(apply(p, proposal.previewToken)).rejects.toThrow("过期");
+  });
+  it("blocks an unlocated area with 11:00 departure before a 10:00 activity even though checkout is 12:00", async () => {
+    const p = await fixture(2), proposal = await preview(p, { morningDepartureTime: "11:00", checkOutBy: "12:00" });
+    expect(p.places).toEqual([]);
+    expect(proposal.canApply).toBe(false);
+    expect(proposal.conflicts.join()).toContain("计划11:00从住宿离店");
+    expect(proposal.conflicts.join()).toContain("Example Museum的开始时刻10:00");
+    await expect(apply(p, proposal.previewToken)).rejects.toThrow("计划11:00");
+    expect((await plans.listPlanVersions(p.tripId))).toHaveLength(1);
+    expect(await plans.getPlanVersion(p.tripId, p.versionNumber)).toEqual(p);
+  });
+  it("retains a saved daily departure boundary during later ordinary timeline edits", async () => {
+    const p = await fixture(2), proposal = await preview(p), saved = await apply(p, proposal.previewToken);
+    await expect(plans.savePlanEventEdit({ tripId: saved.tripId, expectedPlanVersion: saved.versionNumber,
+      edit: { eventId: "d2-activity", timeEdit: "start_duration", startTime: "06:30", durationMinutes: 30, note: null, status: "suggested", locked: false, remove: false },
+    })).rejects.toThrow("计划07:00从住宿离店");
+    expect((await plans.listPlanVersions(p.tripId))).toHaveLength(2);
+    expect((await plans.getPlanVersion(p.tripId, saved.versionNumber)).events).toEqual(saved.events);
+  });
+  it.each(["current", "arrived", "completed"])("blocks a multi-night stay when a related night's execution is %s", async (status) => {
+    const p = await fixture();
+    await execution.saveExecution(p.tripId, { expectedRevision: 0, expectedPlanVersion: p.versionNumber, change: { action: "start", eventId: "d2-hotel" } });
+    if (status !== "current") await execution.saveExecution(p.tripId, { expectedRevision: 1, expectedPlanVersion: p.versionNumber, change: { action: status === "arrived" ? "arrive" : "complete", eventId: "d2-hotel" } });
+    const proposal = await preview(p);
+    expect(proposal.canApply).toBe(false);
+    expect(proposal.conflicts.join()).toContain("当前、已到达或已完成的住宿");
+    await expect(apply(p, proposal.previewToken)).rejects.toThrow("住宿");
+    expect((await plans.listPlanVersions(p.tripId))).toHaveLength(1);
+  });
+  it("rejects a previously applicable stay when execution changes after preview", async () => {
+    const p = await fixture(2), proposal = await preview(p);
+    expect(proposal.canApply).toBe(true);
+    await execution.saveExecution(p.tripId, { expectedRevision: 0, expectedPlanVersion: p.versionNumber, change: { action: "start", eventId: "d1-hotel" } });
+    await execution.saveExecution(p.tripId, { expectedRevision: 1, expectedPlanVersion: p.versionNumber, change: { action: "complete", eventId: "d1-hotel" } });
+    const before = await execution.getExecution(p.tripId);
+    await expect(apply(p, proposal.previewToken)).rejects.toThrow("执行进度");
+    expect((await plans.listPlanVersions(p.tripId))).toHaveLength(1);
+    expect((await execution.getExecution(p.tripId)).execution).toEqual(before.execution);
   });
   it("area references have no exact routes; selecting a real hotel calculates evening and next morning routes, fees and map", async () => {
     let p = await fixture(2, true); const area = await preview(p); p = await apply(p, area.previewToken);

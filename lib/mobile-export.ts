@@ -1,4 +1,5 @@
 import { exportPrivacy } from "./export-privacy";
+import { EMPTY_EXPORT_ADVISORIES, EXPORT_ADVISORY_NOTICE, projectExportAdvisories } from "./export-advisories";
 import { calculateBudgetSummary, formatMoneyRange } from "./budget";
 import { checklistGroups } from "./checklist";
 import { evidenceFieldLabels, evidenceStatusLabels } from "./evidence";
@@ -80,6 +81,7 @@ export function renderMobileHtml(snapshot: ExportSnapshot, rawOptions: MobileExp
       <p class="next">${t(next ? `下一步：${next.date === e.date ? "" : `${next.date} `}${next.startTime} ${next.title}${dates.includes(next.date) ? "" : "（该日未选入本文件）"}` : "下一步：本次行程结束，核对返家安排。")}</p></li>`;
   };
   const checklist = snapshot.checklist.items.filter((i) => !i.deleted && !i.orphaned && (options.dates === null || !i.date || dates.includes(i.date) || i.date < allDates[0] || i.eventIds.some((id) => selected.some((e) => e.id === id))));
+  const advisories = projectExportAdvisories(snapshot, dates);
   const title = `${plan.requestSnapshot.destination ?? "旅行"} · 随身一页`;
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${escape(MOBILE_HTML_CSP)}"><meta name="referrer" content="no-referrer"><title>${t(title)}</title>
@@ -97,6 +99,7 @@ ${p(`其中 ${budget.estimatedItemCount} 项估算、${budget.pendingItemCount} 
 <section id="redlines"><h2>关键时间红线</h2>${redlines.length ? redlines.map(renderRedline).join("") : p("所选日期没有可计算的有效票据红线。请核对票面、出发接驳与截止时刻，不能据此认定时间充裕。")}</section>
 ${dates.map((d) => `<section id="day-${d}" class="day"><h2>第 ${allEvents.find((e) => e.date === d)!.dayNumber} 天 <span>${t(d)}</span></h2><ol class="timeline">${selected.filter((e) => e.date === d).map(renderEvent).join("")}</ol><a class="back" href="#top">回到日期导航 ↑</a></section>`).join("")}
 <section id="pending"><h2>待确认事项</h2>${list(plan.pendingItems.map((i) => `${i.title}：${i.reason}${i.requiredBefore ? `（${i.requiredBefore} 前）` : ""}`))}${list([...plan.validationResults.errors, ...plan.validationResults.warnings])}${p("天气、班次、预约与营业情况可能变化；这里保留导出时的提示，出发前请到官方渠道复核。", "muted")}</section>
+<section id="advisories"><h2>旅行提醒与注意事项</h2>${p(EXPORT_ADVISORY_NOTICE, "muted")}${advisories.length ? advisories.map((item) => `<article class="advisory"><h3>${t(item.title)}</h3>${item.paragraphs.map((line) => p(line)).join("")}</article>`).join("") : p(EMPTY_EXPORT_ADVISORIES)}</section>
 <section id="checklist"><h2>出发前清单</h2>${p("勾选是导出时的人工确认记录，本文件不保存新的勾选。", "muted")}${checklist.length ? list(checklist.map((i) => `${i.completed ? "☑ 已确认" : "☐ 待准备"} · ${checklistGroups[i.group]} · ${i.title}${i.date ? `（${i.date}）` : ""}${i.note ? `：${i.note}` : ""}${i.changeNote ? `；${i.changeNote}` : ""}；${i.sourceLabel}`)) : p("所选日期没有清单事项。")}</section>
 </main><footer>${p("保存为 .html 文件后可离线阅读。Windows Edge 本地打开已验证；手机文件应用的 HTML 支持有差异，Android / iOS 真机打开方式尚待验证。")}${p("文件不会跟随旅行更新；需要新资料时请回到应用重新生成。", "muted")}<a class="back" href="#top">回到顶部 ↑</a></footer></body></html>`;
 }

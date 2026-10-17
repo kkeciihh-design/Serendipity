@@ -1,7 +1,7 @@
 import { businessOperation, businessTransaction, capturedGeneration, assertCapturedGeneration } from "./business-guard";
 import crypto from "node:crypto";
 import { syncPlanChecklist } from "./checklist-store";
-import { parseExecution } from "./execution";
+import { executionEventChangeConflict, parseExecution } from "./execution";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import {
@@ -270,6 +270,21 @@ export const getPlanVersion = businessOperation(async function getPlanVersion(
   return serializePlan(row);
 });
 
+export const getPlanExecutionCapture = businessOperation(async function getPlanExecutionCapture(tripId: string, expectedPlanVersion: number) {
+  return businessTransaction(prisma, async (transaction) => {
+    const trip = await transaction.trip.findUnique({ where: { id: tripId }, include: { currentPlanVersion: true, execution: true } });
+    if (trip?.currentPlanVersion?.versionNumber !== expectedPlanVersion) throw new PlanConflictError("计划已变化，请回到当前计划重新预览；历史版本保持只读。");
+    return { revision: trip.execution?.revision ?? 0, progress: parseExecution(trip.execution?.payload) };
+  });
+});
+
+async function assertExecutionPreserved(transaction: Prisma.TransactionClient, tripId: string, before: PlanEvent[], after: PlanEvent[], expectedRevision?: number) {
+  const execution = await transaction.executionState.findUnique({ where: { tripId } });
+  if (expectedRevision !== undefined && (execution?.revision ?? 0) !== expectedRevision) throw new PlanConflictError("旅行执行进度或位置已经变化，旧预览不能应用，请重新预览。");
+  const conflict = executionEventChangeConflict(before, after, parseExecution(execution?.payload));
+  if (conflict) throw new PlanConflictError(conflict);
+}
+
 export const getPlanGenerationContext = businessOperation(async function getPlanGenerationContext(
   tripId: string,
   expectedRequestRevision: number,
@@ -425,6 +440,9 @@ export const savePlanVersion = businessOperation(async function savePlanVersion(
       }
       const result = serializePlan(row);
       await syncPlanChecklist(transaction, result);
+      // Cancellation can arrive during any awaited write, including checklist
+      // synchronization. Throw before the transaction exits to roll everything back.
+      if (input.abortSignal?.aborted) throw new PlanConflictError("本次生成已取消，结果不会保存。");
       return result;
     });
   } catch (error) {
@@ -519,6 +537,7 @@ export const savePlanEventEdit = businessOperation(async function savePlanEventE
       const editedPlan = preparePlanForStorage(
         applyPlanEventEdit(sourcePlan, input.edit),
       );
+      await assertExecutionPreserved(transaction, row.tripId, currentPlan.events, editedPlan.events);
       const initialEditedCosts = currentPlan.costs.filter((cost) =>
         !input.edit.remove || cost.linkedEventId !== input.edit.eventId || hasProtectedCostFact(cost),
       ).map((cost) =>
@@ -758,6 +777,7 @@ export const savePlanPlaceEdit = businessOperation(async function savePlanPlaceE
         ...item, placeId: place?.id ?? null,
         locationName: place ? `${place.name.slice(0, 150)}${place.precision === "area_reference" ? "（区域参考点）" : ""}` : item.locationName,
       } : item);
+      await assertExecutionPreserved(transaction, row.tripId, current.events, events);
       const places = current.places.filter((item) => events.some((event) => event.placeId === item.id));
       if (place && !places.some((item) => item.id === place.id)) places.push(place);
       validatePlaceReferences(events, places);
@@ -1040,7 +1060,7 @@ export const savePlanRouteEdit = businessOperation(async function savePlanRouteE
 // Shared short transaction for a reviewed venue choice. External reads finish
 // before this commit, which rechecks identity, version and protected facts.
 export const savePlanRecommendationEdit = businessOperation(async function savePlanRecommendationEdit(input: {
-  tripId: string; expectedPlanVersion: number; eventId: string;
+  tripId: string; expectedPlanVersion: number; expectedExecutionRevision: number; eventId: string;
   targetType: "activity" | "meal" | "accommodation"; action: "keep" | "replace" | "adjust"; event: PlanEvent; places: Place[];
   relatedEvents?: PlanEvent[];
   routeLegs: RouteLeg[]; costs: PlanCostItem[]; pendingItems: PlanPendingItem[];
@@ -1072,6 +1092,10 @@ export const savePlanRecommendationEdit = businessOperation(async function saveP
       const event = planEventSchema.parse(input.action === "keep" ? { ...before, attractionSelection: input.event.attractionSelection } : input.event);
       const events = current.events.map((item) => item.id === event.id ? event :
         input.targetType === "accommodation" && edits.some((e) => e.id === item.id) ? planEventSchema.parse(edits.find((e) => e.id === item.id)) : item);
+      // Read and validate progress in the same SQLite snapshot as the write.
+      // A concurrent progress write invalidates this snapshot's write upgrade.
+      if (!Number.isInteger(input.expectedExecutionRevision) || input.expectedExecutionRevision < 0) throw new PlanConflictError("推荐预览缺少执行进度版本，请重新预览。");
+      await assertExecutionPreserved(transaction, row.tripId, current.events, events, input.expectedExecutionRevision);
       const places = input.action === "keep" ? current.places : z.array(placeSchema).parse(input.places);
       const costs = input.action === "keep" ? current.costs : z.array(planCostItemSchema).parse(input.costs);
       const routeLegs = input.action === "keep" ? current.routeLegs : z.array(routeLegSchema).parse(input.routeLegs);
@@ -1105,6 +1129,7 @@ export const savePlanRecommendationEdit = businessOperation(async function saveP
       assertActive();
       const result = serializePlan(saved);
       await syncPlanChecklist(transaction, result);
+      assertActive();
       return result;
     });
   } catch (error) {
