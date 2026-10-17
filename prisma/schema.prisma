@@ -21,10 +21,31 @@ model Trip {
   checklist            ChecklistState?
   advisories           AdvisoryState?
   execution            ExecutionState?
+  exportFiles          ExportFile[]
   replanCandidates     ReplanCandidate[]
   currentPlanVersion   PlanVersion?   @relation("CurrentPlanVersion", fields: [currentPlanVersionId], references: [id])
 
   @@map("Trip")
+}
+
+model ExportFile {
+  id                String   @id
+  tripId            String
+  trip              Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  format            String   @default("mobile-html")
+  planVersion       Int
+  requestRevision   Int
+  checklistRevision Int
+  executionRevision Int
+  requirementUpToDate Boolean
+  generatedAt       DateTime
+  options           String
+  snapshot          String
+  filename          String
+  html              String
+  sha256            String
+
+  @@index([tripId, generatedAt])
 }
 
 model ExecutionState {

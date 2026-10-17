@@ -95,7 +95,7 @@ export function ticketRedlineInput(plan: PlanVersionRecord, ticket: Ticket): Red
     earliestDepartureAt: occupiedUntil.length ? isoAt(Math.max(...occupiedUntil)) : null };
 }
 
-export async function buildPlanRedlines(plan: PlanVersionRecord, now = new Date().toISOString()) {
+export async function buildPlanRedlines(plan: PlanVersionRecord, now = new Date().toISOString(), options: { cache?: boolean } = {}) {
   return Promise.all(plan.tickets.filter(isActiveTicket).map(async (ticket) => {
     const input = ticketRedlineInput(plan, ticket);
     const candidates = plan.routeLegs.filter((r) => {
@@ -109,10 +109,10 @@ export async function buildPlanRedlines(plan: PlanVersionRecord, now = new Date(
         const to = plan.places.find((p) => p.id === plan.events.find((e) => e.id === route.toEventId)?.placeId);
         const key = from && to && !route.manualReference ? routeCacheKey({ date: local.slice(0, 10), departureTime: local.slice(11, 19),
           from, to, mode: route.mode, provider: `redline:${plan.id}:${route.id}` }) : null;
-        const cached = key ? readCachedRoute(key) : null;
+        const cached = key && options.cache !== false ? readCachedRoute(key) : null;
         const applicable = cached ?? route;
         if (routeApplies(routeTiming(applicable), departureAt)) {
-          if (key && !cached) writeCachedRoute(key, route);
+          if (key && !cached && options.cache !== false) writeCachedRoute(key, route);
           return { route: routeTiming(applicable) };
         }
       }
