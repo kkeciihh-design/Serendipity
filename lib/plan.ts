@@ -147,6 +147,7 @@ export type PlanCapture = {
   expectedRequestRevision: number;
   expectedPlanVersion: number | null;
   expectedChecklistRevision: number;
+  expectedExecutionRevision: number;
   requestSnapshot: RequestSnapshot;
   originalRequest: string;
 };

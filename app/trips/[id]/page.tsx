@@ -47,7 +47,7 @@ export default async function TripDetailPage({
       : null;
 
   return (
-    <main className="min-h-dvh bg-cream px-5 py-8 sm:px-10 sm:py-12 lg:px-16">
+    <main className="min-h-dvh bg-cream px-5 pt-8 pb-28 sm:px-10 sm:py-12 lg:px-16">
       <div className="mx-auto max-w-4xl">
         <Link
           href="/trips"

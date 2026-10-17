@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useForegroundRefresh, useTravelClock } from "./use-travel-clock";
 import { useRouter } from "next/navigation";
 import { Clock3 } from "lucide-react";
 import { defaultRedlinePreferences, type RedlinePreferences } from "@/lib/redline-preferences";
-import { formatRedlineTime, forwardCheck, redlineUrgency, reverseCandidate, type ForwardCheck, type RedlineResult } from "@/lib/redlines";
+import { formatRedlineTime, liveRedlineCheck, redlineUrgency, reverseCandidate, type ForwardCheck, type RedlineResult } from "@/lib/redlines";
 import type { Ticket } from "@/lib/tickets";
 import type { PlanVersionClient } from "./plan-overview";
 
@@ -95,38 +96,29 @@ export function RedlinePanel({ tripId, plan, onSaved }: { tripId: string; plan: 
   const router = useRouter();
   const [results, setResults] = useState<RedlineResult[] | null>(null);
   const [error, setError] = useState("");
-  const [clockMessage, setClockMessage] = useState("正在与本机服务器校时…");
-  const [now, setNow] = useState<number | null>(null);
+  const { now, message: clockMessage, reliable, calibrate, invalidate } = useTravelClock();
   const [dirtyIds, setDirtyIds] = useState<string[]>([]);
-  const offset = useRef(0);
   const serial = useRef(0);
   const refresh = useCallback(async () => {
     const sequence = ++serial.current;
     const sent = Date.now();
     try {
-      const response = await fetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/redlines`, { cache: "no-store" });
+      const response = await fetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/redlines`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
       const payload = await response.json();
       if (sequence !== serial.current) return;
       if (!response.ok) throw new Error(payload.error || "红线计算失败。");
       if (plan.isCurrent && !payload.isCurrent) { setResults(null); setError("计划已变化，正在更新红线依据。"); router.refresh(); return; }
-      offset.current = Date.parse(payload.serverNow) - (sent + Date.now()) / 2;
-      setNow(Date.now() + offset.current);
-      setClockMessage(Math.abs(offset.current) > 120_000 ? "设备与服务器时钟相差较大，时间不可靠；暂按服务器时间显示，请核对系统时间。" : "北京时间 · 使用本机服务器校准的时间");
+      calibrate(payload.serverNow, sent);
       setResults(payload.redlines); setError("");
     } catch (e) {
       if (sequence !== serial.current) return;
-      setResults(null); offset.current = 0;
-      setClockMessage("无法校时，使用设备时间；当前路线可行性待重新确认。");
+      setResults(null); invalidate(true);
       setError(e instanceof Error ? e.message : "红线暂不可用，请重试。");
     }
-  }, [tripId, plan.versionNumber, plan.isCurrent, router]);
+  }, [tripId, plan.versionNumber, plan.isCurrent, router, calibrate, invalidate]);
+  useForegroundRefresh(refresh, invalidate);
   useEffect(() => {
-    void refresh();
-    const tick = window.setInterval(() => setNow(Date.now() + offset.current), 1000);
-    const poll = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, 30_000);
-    const resume = () => { setNow(Date.now() + offset.current); if (document.visibilityState === "visible") void refresh(); };
-    window.addEventListener("focus", resume); document.addEventListener("visibilitychange", resume);
-    return () => { serial.current++; clearInterval(tick); clearInterval(poll); window.removeEventListener("focus", resume); document.removeEventListener("visibilitychange", resume); };
+    return () => { serial.current++; };
   }, [refresh]);
   return <section id="time-redlines" aria-label="时间红线" className="mt-5 rounded-xl border-2 border-clay/40 bg-white p-4 sm:p-5">
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-lg font-semibold"><Clock3 className="size-5 text-clay" />出门与返程时间红线</h3><span className="text-xs text-graphite">{clockMessage}</span></div>
@@ -140,8 +132,8 @@ export function RedlinePanel({ tripId, plan, onSaved }: { tripId: string; plan: 
       if (!ticket) return null;
       const dirty = dirtyIds.includes(ticket.id);
       const urgency = redlineUrgency(r.suggestedAt, now ?? Date.parse(r.calculatedAt));
-      const current = r.input.route.kind === "fixed" && now !== null ? forwardCheck(r.input, new Date(now).toISOString(), r.input.route) : r.currentCheck;
-      const color = dirty ? "border-sand bg-shell" : urgency.color === "red" ? "border-red-300 bg-red-50" : urgency.color === "orange" ? "border-orange-300 bg-orange-50" : urgency.color === "green" ? "border-emerald-300 bg-emerald-50" : "border-sand bg-shell";
+      const current = liveRedlineCheck(r, now ?? Date.parse(r.calculatedAt), reliable);
+      const color = dirty ? "border-sand bg-shell" : urgency.color === "red" ? "border-red-300 bg-red-50" : !reliable ? "border-sand bg-shell" : urgency.color === "orange" ? "border-orange-300 bg-orange-50" : urgency.color === "green" ? "border-emerald-300 bg-emerald-50" : "border-sand bg-shell";
       const hasTimedEstimate = r.input.route.kind === "timed" && !r.suggestedCheck?.routeApplicable;
       return <article key={ticket.id} aria-label={`${r.input.direction === "departure" ? "去程" : "返程"}红线 ${ticket.serviceNumber ?? "票面待补"}`} className={`min-w-0 rounded-lg border p-4 ${color}`} data-urgency={urgency.color}>
         <div className="flex flex-wrap justify-between gap-2"><h4 className="font-semibold">{r.input.direction === "departure" ? "去程出门" : "返程出发"} · {ticket.serviceNumber || "票面待补"}</h4><span className="text-sm">{precisionText[r.precision]}</span></div>

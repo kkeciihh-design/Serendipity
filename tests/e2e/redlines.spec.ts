@@ -126,7 +126,7 @@ test("manual timed routes remain pending; layout and server clock failures are v
   }
   await page.route("**/redlines", (route) => route.fulfill({ status: 503, json: { error: "暂时离线" } }));
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(panel(page).getByText(/无法校时，使用设备时间/)).toBeVisible();
+  await expect(panel(page).getByText(/无法校时，时间仅供参考/)).toBeVisible();
   await expect(panel(page).getByRole("button", { name: "重试计算" })).toBeVisible();
   await page.unroute("**/redlines");
   await panel(page).getByRole("button", { name: "重试计算" }).click();

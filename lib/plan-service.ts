@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { syncPlanChecklist } from "./checklist-store";
+import { parseExecution } from "./execution";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import {
@@ -274,7 +275,7 @@ export async function getPlanGenerationContext(
 ): Promise<PlanCapture> {
   const trip = await prisma.trip.findUnique({
     where: { id: tripId },
-    include: { request: true, currentPlanVersion: true, checklist: true },
+    include: { request: true, currentPlanVersion: true, checklist: true, execution: true },
   });
   if (!trip) {
     throw new PlanConflictError("没有找到这趟旅行。");
@@ -294,12 +295,14 @@ export async function getPlanGenerationContext(
     throw new PlanConflictError("只有当前已确认的需求修订才能生成计划。");
   }
   assertRegenerationPreservesFacts(trip.currentPlanVersion);
+  if (parseExecution(trip.execution?.payload).startedAt) throw new PlanConflictError("旅行已经开始，请使用 AI 重新规划调整剩余安排，保留实际进度。");
 
   return {
     tripId,
     expectedRequestRevision,
     expectedPlanVersion: trip.currentPlanVersion?.versionNumber ?? null,
     expectedChecklistRevision: trip.checklist?.revision ?? 0,
+    expectedExecutionRevision: trip.execution?.revision ?? 0,
     requestSnapshot: parseSnapshot(trip.request.confirmedRequest),
     originalRequest: trip.request.originalRequest,
   };
@@ -349,7 +352,7 @@ export async function savePlanVersion(input: {
 
       const trip = await transaction.trip.findUnique({
         where: { id: capture.tripId },
-        include: { request: true, currentPlanVersion: true, checklist: true },
+        include: { request: true, currentPlanVersion: true, checklist: true, execution: true },
       });
       if (!trip?.request) {
         throw new PlanConflictError("没有找到这趟旅行或需求记录。");
@@ -373,6 +376,7 @@ export async function savePlanVersion(input: {
         );
       }
       assertRegenerationPreservesFacts(trip.currentPlanVersion);
+      if ((trip.execution?.revision ?? 0) !== capture.expectedExecutionRevision || parseExecution(trip.execution?.payload).startedAt) throw new PlanConflictError("旅行执行进度已经变化，旧生成结果不能提交，请重新读取。");
       if ((trip.checklist?.revision ?? 0) < capture.expectedChecklistRevision) {
         throw new PlanConflictError("清单版本已变化，请重新读取后生成。");
       }
