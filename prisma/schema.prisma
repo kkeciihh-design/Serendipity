@@ -20,9 +20,23 @@ model Trip {
   evidenceFacts        EvidenceFact[]
   checklist            ChecklistState?
   advisories           AdvisoryState?
+  replanCandidates     ReplanCandidate[]
   currentPlanVersion   PlanVersion?   @relation("CurrentPlanVersion", fields: [currentPlanVersionId], references: [id])
 
   @@map("Trip")
+}
+
+model ReplanCandidate {
+  id        String   @id @default(uuid())
+  tripId    String
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  revision  Int      @default(1)
+  status    String   @default("preview")
+  payload   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tripId, createdAt])
 }
 
 model ChecklistState {

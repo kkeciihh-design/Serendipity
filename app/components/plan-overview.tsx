@@ -34,6 +34,7 @@ import { TransportOverview } from "./transport-overview";
 import { RedlinePanel } from "./redline-panel";
 import { AccommodationPanel } from "./accommodation-panel";
 import { ChecklistPanel } from "./checklist-panel";
+import { ReplanPanel } from "./replan-panel";
 import { AdvisoryPanel, AdvisorySummary, useAdvisories } from "./advisory-panel";
 import type { Place } from "@/lib/places";
 import type { RouteLeg } from "@/lib/routes";
@@ -115,7 +116,7 @@ export function PlanOverview({
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [pendingTimelineScrollEventId, setPendingTimelineScrollEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "timeline" | "transport" | "budget" | "map" | "accommodation" | "checklist" | "advisories"
+    "timeline" | "transport" | "budget" | "map" | "accommodation" | "checklist" | "advisories" | "replan"
   >("timeline");
   const [hasOpenedMap, setHasOpenedMap] = useState(false);
   const [hasOpenedBudget, setHasOpenedBudget] = useState(false);
@@ -138,6 +139,10 @@ export function PlanOverview({
   }, [activeTab]);
 
   useEffect(() => {
+    if (new URL(window.location.href).searchParams.get("view") === "replan") {
+      setActiveTab("replan");
+      document.getElementById("plan-views")?.scrollIntoView({ block: "start" });
+    }
     if (new URL(window.location.href).searchParams.get("view") === "advisories") {
       setActiveTab("advisories");
       document.getElementById("plan-views")?.scrollIntoView({ block: "start" });
@@ -586,6 +591,7 @@ export function PlanOverview({
                 <button type="button" role="tab" aria-selected={activeTab === "checklist"} onClick={() => setActiveTab("checklist")}
                   className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "checklist" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>出发前清单</button>
                 <button type="button" role="tab" aria-selected={activeTab === "advisories"} onClick={() => setActiveTab("advisories")} className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "advisories" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>行程提醒</button>
+                <button type="button" role="tab" aria-selected={activeTab === "replan"} onClick={() => setActiveTab("replan")} className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "replan" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>AI 重新规划</button>
               </div>
               <p className="text-sm text-graphite">
                 共 {days.length} 天｜{displayPlan.events.length} 个日程｜
@@ -646,6 +652,7 @@ export function PlanOverview({
               {(hasOpenedChecklist || activeTab === "checklist") && <ChecklistPanel key={displayPlan.id} tripId={tripId} plan={displayPlan} onEvent={handleEventSelect} advisories={advisoryData.view?.items ?? []} onAdvisories={openAdvisories} focusId={checklistFocusId} />}
             </div>
             {activeTab === "advisories" && <div role="tabpanel" aria-label="行程提醒"><AdvisoryPanel data={advisoryData} plan={displayPlan} onEvent={handleEventSelect} onChecklist={(id) => { setChecklistFocusId(id); setActiveTab("checklist"); }} /></div>}
+            {activeTab === "replan" && <div role="tabpanel" aria-label="AI 重新规划"><ReplanPanel key={displayPlan.id} tripId={tripId} plan={displayPlan} requestState={requestState} onSaved={handlePlanSaved} /></div>}
             {activeTab !== "checklist" && <button type="button" className="fixed right-4 bottom-4 z-30 inline-flex min-h-12 items-center gap-2 rounded-full bg-sage px-4 py-3 font-semibold text-white shadow-lg sm:hidden" onClick={() => { setActiveTab("checklist"); document.getElementById("plan-views")?.scrollIntoView({ block: "start" }); }}><ListChecks className="size-5" aria-hidden="true" />打开出发前清单</button>}
             <div hidden={activeTab !== "transport"} role="tabpanel" aria-label="门到门交通">
               <TransportOverview

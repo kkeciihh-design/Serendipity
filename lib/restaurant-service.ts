@@ -69,7 +69,7 @@ export async function previewRestaurantEdit(tripId: string, version: number, eve
   const conflicts = entry ? restaurantExclusions(entry, proposed, event, pricing) : [];
   // A current branch with confirmed closure must not be retained by repricing.
   if (card?.eligibility === "excluded") conflicts.push(...card.warnings.filter((warning) => /关闭|冲突|搬迁|停业|超出|上限/.test(warning)));
-  const validation = validatePlan({ events: proposed.events, pendingItems }, plan.requestSnapshot, proposed.costs);
+  const validation = validatePlan({ events: proposed.events, pendingItems }, plan.requestSnapshot, proposed.costs, plan.validationResults.scope);
   conflicts.push(...validation.errors, ...validatePlanCosts(proposed.costs, proposed.events));
   if (replace) for (const route of proposed.routeLegs) if ((route.fromEventId === eventId || route.toEventId === eventId) && route.durationSeconds !== null && route.conflict) conflicts.push(route.conflict);
   const afterBudget = calculateBudgetSummary(proposed.costs, plan.requestSnapshot);

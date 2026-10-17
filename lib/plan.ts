@@ -132,6 +132,7 @@ export const aiPlanOutputSchema = z.object({
 export type AIPlanOutput = z.infer<typeof aiPlanOutputSchema>;
 
 export const planValidationResultsSchema = z.object({
+  scope: z.literal("remaining").optional(),
   status: z.enum(["valid", "needs_review", "invalid"]),
   errors: z.array(z.string()),
   warnings: z.array(z.string()),
@@ -257,6 +258,7 @@ export function validatePlan(
   plan: PlanContent,
   snapshot: RequestSnapshot,
   costs?: PlanCostItem[],
+  scope?: "remaining",
 ): PlanValidationResults {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -320,29 +322,29 @@ export function validatePlan(
       (event) => event.dayNumber === dayNumber,
     );
     if (dayEvents.length === 0) {
-      errors.push(`第 ${dayNumber} 天没有安排。`);
+      (scope ? warnings : errors).push(`第 ${dayNumber} 天没有安排。`);
       return;
     }
 
     const meals = dayEvents.filter((event) => event.type === "meal");
     if (meals.length < 2) {
-      errors.push(`第 ${dayNumber} 天至少要保留两餐。`);
+      (scope ? warnings : errors).push(`第 ${dayNumber} 天至少要保留两餐。`);
     }
     const activities = dayEvents.filter(
       (event) => event.type === "activity",
     );
     if (activities.length === 0) {
-      errors.push(`第 ${dayNumber} 天缺少活动。`);
+      (scope ? warnings : errors).push(`第 ${dayNumber} 天缺少活动。`);
     }
     const rest = dayEvents.filter((event) => event.type === "rest");
     if (rest.length === 0) {
-      errors.push(`第 ${dayNumber} 天缺少休息安排。`);
+      (scope ? warnings : errors).push(`第 ${dayNumber} 天缺少休息安排。`);
     }
     const preparation = dayEvents.filter(
       (event) => event.type === "preparation",
     );
     if (preparation.length === 0) {
-      errors.push(`第 ${dayNumber} 天缺少准备事项。`);
+      (scope ? warnings : errors).push(`第 ${dayNumber} 天缺少准备事项。`);
     }
     if (!dayEvents.some((event) => event.date === date)) {
       errors.push(`第 ${dayNumber} 天的日期不是 ${date}。`);
@@ -401,6 +403,7 @@ export function validatePlan(
   warnings.push(...budgetWarnings(costs ?? derivePlanCosts(plan.events), snapshot));
 
   return {
+    ...(scope ? { scope } : {}),
     status: errors.length > 0 ? "invalid" : warnings.length > 0 ? "needs_review" : "valid",
     errors,
     warnings,

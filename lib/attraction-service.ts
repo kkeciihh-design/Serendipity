@@ -69,7 +69,7 @@ export async function previewAttractionReplacement(tripId: string, version: numb
   // Never silently discard an unrelated pending item to make room.
   if (pendingItems.length < 24) pendingItems.push(pending);
   proposed = { ...proposed, routeLegs: updated.routeLegs, costs: updated.costs, pendingItems };
-  const validation = validatePlan({ events: proposed.events, pendingItems }, plan.requestSnapshot, proposed.costs);
+  const validation = validatePlan({ events: proposed.events, pendingItems }, plan.requestSnapshot, proposed.costs, plan.validationResults.scope);
   conflicts.push(...validation.errors, ...validatePlanCosts(proposed.costs, proposed.events));
   for (const route of proposed.routeLegs) {
     if ((route.fromEventId === eventId || route.toEventId === eventId) && route.durationSeconds !== null && route.conflict) conflicts.push(route.conflict);
