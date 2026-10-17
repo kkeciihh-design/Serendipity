@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import Link from "next/link";
 import { CheckCheck, ExternalLink, Plus, RotateCcw } from "lucide-react";
@@ -29,7 +30,7 @@ export function ChecklistPanel({ tripId, plan, onEvent, advisories = [], onAdvis
     const abort = new AbortController(); controller.current = abort;
     const timeout = window.setTimeout(() => abort.abort(), 30000);
     try {
-      const response = await fetch(`${url}?planVersion=${plan.versionNumber}`, { cache: "no-store", signal: abort.signal });
+      const response = await businessFetch(`${url}?planVersion=${plan.versionNumber}`, { cache: "no-store", signal: abort.signal });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "清单读取失败，请重试。");
       if (controller.current !== abort) return;
@@ -47,7 +48,7 @@ export function ChecklistPanel({ tripId, plan, onEvent, advisories = [], onAdvis
     const abort = new AbortController(); controller.current = abort;
     const timeout = window.setTimeout(() => abort.abort(), 30000);
     try {
-      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, signal: abort.signal,
+      const response = await businessFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, signal: abort.signal,
         body: JSON.stringify({ expectedPlanVersion: plan.versionNumber, expectedRevision: view.revision, expectedBasis: view.basis, change }) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "保存失败，请重新读取核对后重试。");

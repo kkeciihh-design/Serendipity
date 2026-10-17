@@ -82,11 +82,14 @@ afterAll(async () => {
 });
 
 async function send(method: string, pathname: string, headers: Record<string, string | undefined> = {}, body = "{}") {
+  const { readInstanceState } = await import("../scripts/restore-core.mjs");
+  const { getDatabasePath } = await import("../lib/data-directory");
   // node:http permits a deliberately forged Host; undici/fetch may rewrite it.
   return new Promise<{ status: number; body: string }>((resolve, reject) => {
     const req = http.request(`${origin}${pathname}`, {
       method, headers: {
         "Content-Type": "application/json",
+        "x-data-generation": readInstanceState(getDatabasePath()).dataGeneration,
         ...(method === "GET" ? {} : { "Content-Length": String(Buffer.byteLength(body)) }),
         ...headers,
       },

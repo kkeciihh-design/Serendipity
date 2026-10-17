@@ -1,3 +1,4 @@
+import { businessOperation } from "./business-guard";
 import { completeText } from "./ai-adapter";
 import { storedAIConfiguration } from "./settings";
 import {
@@ -158,7 +159,7 @@ function normalizeAndValidate(
   return { snapshot, questions, assumptions, errors };
 }
 
-export async function extractTripRequest(
+export const extractTripRequest = businessOperation(async function extractTripRequest(
   tripId: string,
   expectedRequestRevision: number,
 ) {
@@ -252,4 +253,4 @@ export async function extractTripRequest(
     }
     throw error;
   }
-}
+});

@@ -1,3 +1,4 @@
+import { businessOperation, businessTransaction } from "./business-guard";
 import { randomUUID, createHash } from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { getDatabaseUrl } from "./data-directory";
@@ -64,8 +65,8 @@ function summary(row: SummaryRow): ExportFileSummary {
     ...(row.format === "long-image" ? { imageContent: imageContentSchema.parse(imageContent), parts: parts as ImagePart[] } : {}),
     ...(row.format === "pdf" ? { pdfContent: pdfContentSchema.parse(pdfContent), pdf } : {}) };
 }
-export async function getExportPanel(tripId: string, kind: "mobile-html" | "text" | "long-image" | "pdf" = "mobile-html") {
-  return prisma.$transaction(async (tx) => {
+export const getExportPanel = businessOperation(async function getExportPanel(tripId: string, kind: "mobile-html" | "text" | "long-image" | "pdf" = "mobile-html") {
+  return businessTransaction(prisma, async (tx) => {
     const trip = await tx.trip.findUnique({ where: { id: tripId }, include: { currentPlanVersion: true } });
     if (!trip) throw new ExportError("没有找到这趟旅行。", 404);
     const plan = trip.currentPlanVersion && serializePlan({ ...trip.currentPlanVersion, trip: { currentPlanVersionId: trip.currentPlanVersionId } });
@@ -73,21 +74,21 @@ export async function getExportPanel(tripId: string, kind: "mobile-html" | "text
     return { plan: plan ? { versionNumber: plan.versionNumber, requestRevision: plan.requestRevision,
       dates: [...new Set(plan.events.map((e) => e.date))].sort() } : null, files: files.map(summary) };
   });
-}
-export async function createMobileExport(tripId: string, raw: unknown, signal?: AbortSignal) {
+});
+export const createMobileExport = businessOperation(async function createMobileExport(tripId: string, raw: unknown, signal?: AbortSignal) {
   return createExport(tripId, mobileExportWriteSchema.parse(raw), signal);
-}
-export async function createExport(tripId: string, raw: unknown, signal?: AbortSignal) {
+});
+export const createExport = businessOperation(async function createExport(tripId: string, raw: unknown, signal?: AbortSignal) {
   const input = exportWriteSchema.parse(raw);
   try {
     if (input.format === "pdf") return await withLongImageSlot(async () => {
       if (signal?.aborted) throw new ExportError("PDF生成已取消。", 409);
-      const snapshot = await prisma.$transaction((tx) => captureExportSnapshot(tx, tripId, input.expectedPlanVersion));
+      const snapshot = await businessTransaction(prisma, (tx) => captureExportSnapshot(tx, tripId, input.expectedPlanVersion));
       const pdfContent = pdfContentSchema.parse(input.pdfContent ?? {});
       const manifest = await printPdf(await renderPdfHtml(snapshot, input.options, pdfContent), signal);
       const { base64, schemaVersion, ...pdf } = manifest; void schemaVersion;
       const filename = `Serendipity-${snapshot.plan.requestSnapshot.startDate ?? "trip"}-V${snapshot.plan.versionNumber}-${snapshot.id.slice(0, 8)}.pdf`;
-      return prisma.$transaction(async (tx) => {
+      return businessTransaction(prisma, async (tx) => {
         if (signal?.aborted) throw new ExportError("PDF生成已取消。", 409);
         const row = await tx.exportFile.create({ data: { id: snapshot.id, tripId, format: "pdf", planVersion: snapshot.plan.versionNumber,
           requestRevision: snapshot.plan.requestRevision, checklistRevision: snapshot.checklist.revision, executionRevision: snapshot.execution.revision,
@@ -99,7 +100,7 @@ export async function createExport(tripId: string, raw: unknown, signal?: AbortS
     });
     if (input.format === "long-image") return await withLongImageSlot(async () => {
       if (signal?.aborted) throw new ExportError("导出已取消。", 409);
-      const snapshot = await prisma.$transaction((tx) => captureExportSnapshot(tx, tripId, input.expectedPlanVersion));
+      const snapshot = await businessTransaction(prisma, (tx) => captureExportSnapshot(tx, tripId, input.expectedPlanVersion));
       const imageContent = imageContentSchema.parse(input.imageContent ?? {});
       const prefix = `Serendipity-${snapshot.plan.requestSnapshot.startDate ?? "trip"}-V${snapshot.plan.versionNumber}-${snapshot.id.slice(0, 8)}`;
       // Browser IO is outside the read transaction. Every rendered part uses the
@@ -107,7 +108,7 @@ export async function createExport(tripId: string, raw: unknown, signal?: AbortS
       const manifest = await screenshotLongImage(await renderLongImageHtml(snapshot, input.options, imageContent), prefix, signal);
       const html = JSON.stringify(manifest);
       const parts = manifest.parts.map(({ base64, ...part }) => { void base64; return part; });
-      return prisma.$transaction(async (tx) => {
+      return businessTransaction(prisma, async (tx) => {
         if (signal?.aborted) throw new ExportError("导出已取消。", 409);
         const row = await tx.exportFile.create({ data: { id: snapshot.id, tripId, format: "long-image", planVersion: snapshot.plan.versionNumber,
           requestRevision: snapshot.plan.requestRevision, checklistRevision: snapshot.checklist.revision, executionRevision: snapshot.execution.revision,
@@ -118,7 +119,7 @@ export async function createExport(tripId: string, raw: unknown, signal?: AbortS
       });
     });
     const format = input.format;
-    return await prisma.$transaction(async (tx) => {
+    return await businessTransaction(prisma, async (tx) => {
       if (signal?.aborted) throw new ExportError("导出已取消，请重新读取记录。", 409);
       const snapshot = await captureExportSnapshot(tx, tripId, input.expectedPlanVersion);
       // The existing `html` storage column holds immutable UTF-8 content for all
@@ -138,12 +139,12 @@ export async function createExport(tripId: string, raw: unknown, signal?: AbortS
     if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2034", "P2028", "P1008"].includes(error.code)) throw new ExportError("旅行资料正在更新，请重新读取后再生成。", 409);
     throw error;
   }
-}
-export async function getExportFile(tripId: string, id: string) {
+});
+export const getExportFile = businessOperation(async function getExportFile(tripId: string, id: string) {
   const row = await prisma.exportFile.findFirst({ where: { id, tripId }, select: { html: true, format: true, filename: true, sha256: true } });
   if (!row) throw new ExportError("文件不存在或所属旅行已删除。", 404);
   return row;
-}
+});
 export async function closeExportStore() { await prisma.$disconnect(); }
 
 export function getExportPdfBytes(row: Awaited<ReturnType<typeof getExportFile>>) {

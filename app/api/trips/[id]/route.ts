@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { NextResponse } from "next/server";
 import {
   TripRevisionConflictError,
@@ -48,7 +50,7 @@ function tripErrorResponse(error: unknown, fallbackStatus: number) {
   );
 }
 
-export async function GET(request: Request, context: RouteContext) {
+export const GET = businessRoute(async function GET(request: Request, context: RouteContext) {
   if (!hasAppAccess(request)) {
     return unauthorizedResponse();
   }
@@ -66,11 +68,12 @@ export async function GET(request: Request, context: RouteContext) {
 
     return NextResponse.json({ trip });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     return tripErrorResponse(error, 503);
   }
-}
+});
 
-export async function PATCH(request: Request, context: RouteContext) {
+export const PATCH = businessRoute(async function PATCH(request: Request, context: RouteContext) {
   const accessError = appWriteAccessError(request);
   if (accessError) return accessError;
 
@@ -80,6 +83,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     const trip = await updateTrip(id, body);
     return NextResponse.json({ trip });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     if (error instanceof SyntaxError) {
       return NextResponse.json(
         { error: "请求格式不正确，请重新保存。" },
@@ -88,9 +92,9 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
     return tripErrorResponse(error, 500);
   }
-}
+});
 
-export async function DELETE(request: Request, context: RouteContext) {
+export const DELETE = businessRoute(async function DELETE(request: Request, context: RouteContext) {
   const accessError = appWriteAccessError(request);
   if (accessError) return accessError;
 
@@ -99,6 +103,7 @@ export async function DELETE(request: Request, context: RouteContext) {
     await deleteTrip(id);
     return NextResponse.json({ deleted: true });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     return tripErrorResponse(error, 500);
   }
-}
+});

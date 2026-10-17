@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import {
   CircleAlert,
@@ -105,7 +106,7 @@ export function EvidenceDrawer({
     onRefreshState("refreshing");
     setFeedback({ tone: "info", message: "正在搜索并读取官方来源..." });
     try {
-      const response = await fetch(
+      const response = await businessFetch(
         `/api/trips/${tripId}/plans/${plan.versionNumber}/evidence`,
         {
           method: "POST",

@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { z } from "zod";
 import { appWriteAccessError, hasAppAccess, unauthorizedResponse } from "@/lib/access";
 import { ReplanError, replanWriteSchema } from "@/lib/replan";
@@ -12,11 +14,12 @@ function failure(error: unknown) {
   if (error instanceof z.ZodError || error instanceof SyntaxError) return json({ error: "重新规划请求或候选格式不正确。" }, 400);
   return json({ error: "重新规划暂时无法读取或保存，请重新读取核对当前计划。" }, 503);
 }
-export async function GET(request: Request, context: Context) {
+export const GET = businessRoute(async function GET(request: Request, context: Context) {
   if (!hasAppAccess(request)) return unauthorizedResponse();
-  try { return json(await getReplanState((await context.params).id)); } catch (error) { return failure(error); }
-}
-export async function POST(request: Request, context: Context) {
+  try { return json(await getReplanState((await context.params).id)); } catch (error) {
+    if (error instanceof RestoreGuardError) throw error; return failure(error); }
+});
+export const POST = businessRoute(async function POST(request: Request, context: Context) {
   const denied = appWriteAccessError(request); if (denied) return denied;
   try {
     const { id: tripId } = await context.params, raw = await request.text();
@@ -26,5 +29,6 @@ export async function POST(request: Request, context: Context) {
     if (body.action === "undo") return json({ candidate: await previewUndo({ ...body, tripId, signal: request.signal }) });
     if (body.action === "cancel") { await cancelReplan(tripId, body.candidateId, body.expectedCandidateRevision); return json({ cancelled: true }); }
     return json(await applyReplan(tripId, body.candidateId, body.expectedCandidateRevision, request.signal));
-  } catch (error) { return failure(error); }
-}
+  } catch (error) {
+    if (error instanceof RestoreGuardError) throw error; return failure(error); }
+});

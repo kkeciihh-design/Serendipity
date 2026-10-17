@@ -143,6 +143,7 @@ export type PlanValidationResults = z.infer<
 >;
 
 export type PlanCapture = {
+  dataGeneration: string;
   tripId: string;
   expectedRequestRevision: number;
   expectedPlanVersion: number | null;

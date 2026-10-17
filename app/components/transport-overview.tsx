@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import { ArrowDown, ExternalLink, Plane, Plus, TrainFront } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -237,7 +238,7 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
     setBusy(true);
     setFeedback(null);
     try {
-      const response = await fetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/tickets`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) });
+      const response = await businessFetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/tickets`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) });
       const payload = await response.json().catch(() => null) as { error?: string; plan?: PlanVersionClient } | null;
       if (!response.ok || !payload?.plan) throw new Error(payload?.error ?? `保存失败（HTTP ${response.status}），请重试。`);
       onSaved(payload.plan);

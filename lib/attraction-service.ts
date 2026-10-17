@@ -1,3 +1,4 @@
+import { businessOperation, capturedGeneration, assertCapturedGeneration } from "./business-guard";
 import crypto from "node:crypto";
 import { getAttractionCatalogEntry } from "./attraction-catalog";
 import { attractionExclusionReasons, attractionProtectionReasons, attractionVisitMinutes, buildAttractionCard, buildAttractionRecommendations, catalogEntryForEvent, confirmedBudgetLimit, type AttractionReplacementPreview } from "./attractions";
@@ -10,7 +11,7 @@ import { buildPlanRedlines } from "./redline-service";
 import { occupiedEnd, replacementRoutes } from "./recommendation-service";
 
 type PreparedEdit = Parameters<typeof savePlanAttractionEdit>[0];
-type PreviewEntry = { tripId: string; version: number; eventId: string; candidateId: string; expires: number; result: AttractionReplacementPreview; edit: PreparedEdit };
+type PreviewEntry = { dataGeneration: string; tripId: string; version: number; eventId: string; candidateId: string; expires: number; result: AttractionReplacementPreview; edit: PreparedEdit };
 const previewGlobal = globalThis as typeof globalThis & { attractionPreviews?: Map<string, PreviewEntry> };
 const previews = previewGlobal.attractionPreviews ??= new Map<string, PreviewEntry>();
 const PREVIEW_TTL = 10 * 60_000;
@@ -25,13 +26,13 @@ function getActivity(plan: PlanVersionRecord, eventId: string) {
   return event;
 }
 
-export async function getPlanAttractions(tripId: string, version: number, eventId: string) {
+export const getPlanAttractions = businessOperation(async function getPlanAttractions(tripId: string, version: number, eventId: string) {
   const [plan, facts] = await Promise.all([getPlanVersion(tripId, version), listEvidenceFacts(tripId)]);
   getActivity(plan, eventId);
   return buildAttractionRecommendations(plan, eventId, facts);
-}
+});
 
-export async function previewAttractionReplacement(tripId: string, version: number, eventId: string, candidateId: string, signal?: AbortSignal): Promise<AttractionReplacementPreview> {
+export const previewAttractionReplacement = businessOperation(async function previewAttractionReplacement(tripId: string, version: number, eventId: string, candidateId: string, signal?: AbortSignal): Promise<AttractionReplacementPreview> {
   assertActive(signal);
   const plan = await getPlanVersion(tripId, version);
   const before = getActivity(plan, eventId);
@@ -109,16 +110,17 @@ export async function previewAttractionReplacement(tripId: string, version: numb
       "地点、已有相邻路线、门票和交通费用在一个新版本中同时更新；固定交通红线根据新版本重算。", "原景点字段来源改为需重新核验；保留待确认预约和门票状态。"],
     conflicts: [...new Set(conflicts)], warnings: [...new Set(warnings)], canApply: conflicts.length === 0,
     beforeBudget: calculateBudgetSummary(plan.costs, plan.requestSnapshot), afterBudget, card };
-  previews.set(previewToken, { tripId, version, eventId, candidateId, expires, result, edit: {
+  previews.set(previewToken, { dataGeneration: capturedGeneration(), tripId, version, eventId, candidateId, expires, result, edit: {
     tripId, expectedPlanVersion: version, eventId, action: "replace", event: proposed.events.find((item) => item.id === eventId)!,
     places, costs: proposed.costs, routeLegs: proposed.routeLegs, pendingItems, warnings: result.warnings,
   } });
   return result;
-}
+});
 
-export async function applyAttractionReplacement(tripId: string, version: number, eventId: string, candidateId: string, previewToken: string, signal?: AbortSignal) {
+export const applyAttractionReplacement = businessOperation(async function applyAttractionReplacement(tripId: string, version: number, eventId: string, candidateId: string, previewToken: string, signal?: AbortSignal) {
   assertActive(signal);
   const preview = previews.get(previewToken);
+  if (preview) assertCapturedGeneration(preview.dataGeneration);
   if (!preview || preview.expires <= Date.now() || preview.tripId !== tripId || preview.version !== version || preview.eventId !== eventId || preview.candidateId !== candidateId) {
     throw new PlanConflictError("替换预览已失效，请重新预览后确认。");
   }
@@ -130,9 +132,9 @@ export async function applyAttractionReplacement(tripId: string, version: number
   const saved = await savePlanAttractionEdit({ ...preview.edit, abortSignal: signal });
   previews.delete(previewToken);
   return saved;
-}
+});
 
-export async function keepPlanAttraction(tripId: string, version: number, eventId: string, candidateId?: string, signal?: AbortSignal) {
+export const keepPlanAttraction = businessOperation(async function keepPlanAttraction(tripId: string, version: number, eventId: string, candidateId?: string, signal?: AbortSignal) {
   assertActive(signal);
   const plan = await getPlanVersion(tripId, version);
   const event = getActivity(plan, eventId);
@@ -148,4 +150,4 @@ export async function keepPlanAttraction(tripId: string, version: number, eventI
     event: { ...event, attractionSelection: { catalogId: entry?.id ?? null, action: "keep", selectedAt: new Date().toISOString() } },
     places: plan.places, routeLegs: plan.routeLegs, costs: plan.costs, pendingItems: plan.pendingItems,
     warnings: ["已记录保留景点的选择；这不代表完成预约、购票或来源核验。"], abortSignal: signal });
-}
+});

@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, Clock3, LocateFixed, MapPin } from "lucide-react";
@@ -21,7 +22,7 @@ export function ExecutionPanel({ tripId }: { tripId: string }) {
   const { now, reliable, message: clockMessage, calibrate, invalidate } = useTravelClock();
   const readRedlines = useCallback(async (plan: PlanVersionClient, sequence: number) => {
     try {
-      const response = await fetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/redlines`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+      const response = await businessFetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/redlines`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
       const payload = await response.json();
       if (sequence !== serial.current) return;
       if (!response.ok || !payload.isCurrent) throw new Error();
@@ -32,7 +33,7 @@ export function ExecutionPanel({ tripId }: { tripId: string }) {
     if (busyRef.current) return;
     const sequence = ++serial.current, sent = Date.now();
     try {
-      const response = await fetch(`/api/trips/${tripId}/execution`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+      const response = await businessFetch(`/api/trips/${tripId}/execution`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
       const payload = await response.json();
       if (sequence !== serial.current) return;
       if (!response.ok) throw new Error(payload.error || "进度读取失败。");
@@ -50,7 +51,7 @@ export function ExecutionPanel({ tripId }: { tripId: string }) {
     busyRef.current = true; setBusy(true); setError(""); setMessage("");
     const sequence = ++serial.current, sent = Date.now();
     try {
-      const response = await fetch(`/api/trips/${tripId}/execution`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(15_000),
+      const response = await businessFetch(`/api/trips/${tripId}/execution`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(15_000),
         body: JSON.stringify({ expectedPlanVersion: data.plan.versionNumber, expectedRevision: data.execution.revision, change }) });
       const payload = await response.json();
       if (sequence !== serial.current) return;

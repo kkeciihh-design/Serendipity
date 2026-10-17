@@ -1,3 +1,4 @@
+import { businessOperation, businessTransaction } from "./business-guard";
 import { Prisma, PrismaClient, type EvidenceFact } from "@prisma/client";
 import { z } from "zod";
 import { getDatabaseUrl } from "./data-directory";
@@ -101,7 +102,7 @@ export function serializeFact(row: EvidenceFact, now = new Date()): EvidenceFact
   return fact;
 }
 
-export async function listEvidenceFacts(tripId: string) {
+export const listEvidenceFacts = businessOperation(async function listEvidenceFacts(tripId: string) {
   const rows = await prisma.evidenceFact.findMany({
     where: { tripId },
     orderBy: [
@@ -112,7 +113,7 @@ export async function listEvidenceFacts(tripId: string) {
     ],
   });
   return rows.map((row) => serializeFact(row));
-}
+});
 
 function targetFromPlan(row: { events: string; costs: string }, eventId: string) {
   try {
@@ -139,7 +140,7 @@ function hasCompleteSupport(result: EvidenceCandidate, target: EvidenceTarget, o
   } catch { return false; }
 }
 
-export async function verifyEvidenceFact(
+export const verifyEvidenceFact = businessOperation(async function verifyEvidenceFact(
   input: unknown,
   options: { collectEvidence?: typeof collectEvidence } = {},
 ) {
@@ -151,7 +152,7 @@ export async function verifyEvidenceFact(
   try {
     // Commit the in-flight state before reading the network. New plan versions
     // can then inherit it conservatively, including the very first refresh.
-    const capture = await prisma.$transaction(async (transaction) => {
+    const capture = await businessTransaction(prisma, async (transaction) => {
       const row = await transaction.planVersion.findUnique({
         where: {
           tripId_versionNumber: {
@@ -199,7 +200,7 @@ export async function verifyEvidenceFact(
 
     // Success and failure have exactly the same commit boundary. Never write
     // late results to a historical version, an edited target or a newer request.
-    return await prisma.$transaction(async (transaction) => {
+    return await businessTransaction(prisma, async (transaction) => {
       const currentRow = await transaction.planVersion.findUnique({
         where: { id: capture.planId },
         include: { trip: { select: { currentPlanVersionId: true } } },
@@ -275,7 +276,7 @@ export async function verifyEvidenceFact(
     }
     throw error;
   }
-}
+});
 
 export async function closeEvidenceStore() {
   await prisma.$disconnect();

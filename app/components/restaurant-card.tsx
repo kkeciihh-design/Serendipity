@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import { BookOpenCheck, Check, ChevronRight, CircleAlert, RefreshCw, Route, Utensils, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -116,7 +117,7 @@ export function RestaurantTimelineCard({ tripId, plan, event, visitLabel, onSave
     const timeout = window.setTimeout(() => controller.abort(), 30_000);
     void (async () => {
       try {
-        const response = await fetch(`${endpoint}?eventId=${encodeURIComponent(event.id)}`, { cache: "no-store", signal: controller.signal });
+        const response = await businessFetch(`${endpoint}?eventId=${encodeURIComponent(event.id)}`, { cache: "no-store", signal: controller.signal });
         const payload = await response.json();
         if (!current() || controller.signal.aborted) return;
         if (!response.ok) throw new Error(payload?.error ?? "餐厅资料读取失败，请重试。");
@@ -135,7 +136,7 @@ export function RestaurantTimelineCard({ tripId, plan, event, visitLabel, onSave
     setBusy(action); setFeedback({ error: false, message: action === "preview" ? "正在检查本餐调整…" : "正在保存用餐安排…" });
     if (action === "preview") setPreview(null);
     try {
-      const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+      const response = await businessFetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify(action === "preview" ? { action, eventId: event.id, candidateId, pricing } : { action, eventId: event.id, previewToken: preview!.previewToken }) });
       const payload = await response.json();
       if (!current() || controller.signal.aborted) return;

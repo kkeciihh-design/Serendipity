@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import { useEffect, useRef, useState } from "react";
 import type { Ticket } from "@/lib/tickets";
@@ -88,7 +89,7 @@ export function TicketImportPanel({ tickets, disabled, onReview, onRefund, onDis
     element.getContext("2d")!.drawImage(bitmap, bitmap.width * crop.left / 100, bitmap.height * crop.top / 100, width, height, 0, 0, element.width, element.height);
     controller.current = new AbortController();
     try {
-      const response = await fetch("/api/ticket-import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: element.toDataURL("image/png") }), signal: controller.current.signal });
+      const response = await businessFetch("/api/ticket-import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: element.toDataURL("image/png") }), signal: controller.current.signal });
       const payload = await response.json();
       if (run !== sequence.current) return;
       if (!response.ok || !payload.draft) throw new Error(payload.error ?? "识别失败，请重试。");

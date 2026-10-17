@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
@@ -84,7 +86,7 @@ function editErrorResponse(error: unknown) {
   );
 }
 
-export async function PATCH(request: Request, context: RouteContext) {
+export const PATCH = businessRoute(async function PATCH(request: Request, context: RouteContext) {
   const accessError = appWriteAccessError(request);
   if (accessError) return accessError;
 
@@ -118,6 +120,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     const evidenceFacts = (await listEvidenceFacts(id)).filter((fact) => fact.planVersionId === plan.id);
     return NextResponse.json({ plan: { ...plan, evidenceFacts } });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: error.issues[0]?.message ?? "日程修改格式不正确。" },
@@ -132,4 +135,4 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
     return editErrorResponse(error);
   }
-}
+});

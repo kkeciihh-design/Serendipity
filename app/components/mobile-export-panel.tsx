@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ExportFileSummary } from "@/lib/export-snapshot";
 import { formatRedlineTime } from "@/lib/redlines";
@@ -15,7 +16,7 @@ export function MobileExportPanel({ tripId }: { tripId: string }) {
     const controller = new AbortController(); active.current = controller; setBusy(true); setError("");
     const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
-      const r = await fetch(`/api/trips/${tripId}/exports`, { cache: "no-store", signal: controller.signal });
+      const r = await businessFetch(`/api/trips/${tripId}/exports`, { cache: "no-store", signal: controller.signal });
       const body = await r.json(); if (!r.ok) throw new Error(body.error);
       setData(body); setSelected((old) => old ?? body.files[0] ?? null); setDate("all");
     } catch (e) { if (active.current === controller) setError(controller.signal.aborted ? "读取超时，请重试。" : e instanceof Error ? e.message : "读取失败，请重试。"); }
@@ -27,7 +28,7 @@ export function MobileExportPanel({ tripId }: { tripId: string }) {
     const controller = new AbortController(); active.current = controller; setBusy(true); setError("");
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
-      const r = await fetch(`/api/trips/${tripId}/exports`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+      const r = await businessFetch(`/api/trips/${tripId}/exports`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify({ expectedPlanVersion: data.plan.versionNumber, options: { dates: date === "all" ? null : [date], includePrivateAddress, includeSeats, publicLandmark } }) });
       const body = await r.json(); if (!r.ok) throw new Error(body.error);
       setSelected(body.file); setChanged(false); setData((old) => old ? { ...old, files: [body.file, ...old.files].slice(0, 20) } : old);

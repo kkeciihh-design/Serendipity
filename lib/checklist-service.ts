@@ -1,3 +1,4 @@
+import { businessOperation, businessTransaction } from "./business-guard";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { getDatabaseUrl } from "./data-directory";
 import { getPlanVersion } from "./plan-service";
@@ -9,9 +10,9 @@ const shared = globalThis as typeof globalThis & { serendipityChecklistPrisma?: 
 const prisma = shared.serendipityChecklistPrisma ?? new PrismaClient({ datasources: { db: { url: getDatabaseUrl() } } });
 if (process.env.NODE_ENV !== "production") shared.serendipityChecklistPrisma = prisma;
 
-export async function getChecklist(tripId: string, version: number): Promise<ChecklistView> {
+export const getChecklist = businessOperation(async function getChecklist(tripId: string, version: number): Promise<ChecklistView> {
   const plan = await getPlanVersion(tripId, version);
-  return prisma.$transaction(async (tx) => {
+  return businessTransaction(prisma, async (tx) => {
     const trip = await tx.trip.findUnique({ where: { id: tripId } });
     if (trip?.currentPlanVersionId !== plan.id) throw new ChecklistError("清单记录当前旅行的准备进度，请返回当前计划查看。", 409);
     const state = await tx.checklistState.findUnique({ where: { tripId } });
@@ -19,13 +20,13 @@ export async function getChecklist(tripId: string, version: number): Promise<Che
     return { tripId, planVersion: version, revision: state?.revision ?? 0, updatedAt: state?.updatedAt.toISOString() ?? null,
       items, basis: checklistBasis(items) };
   });
-}
+});
 
-export async function saveChecklist(tripId: string, value: unknown, signal?: AbortSignal): Promise<ChecklistView> {
+export const saveChecklist = businessOperation(async function saveChecklist(tripId: string, value: unknown, signal?: AbortSignal): Promise<ChecklistView> {
   const input = checklistWriteSchema.parse(value);
   const plan = await getPlanVersion(tripId, input.expectedPlanVersion);
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await businessTransaction(prisma, async (tx) => {
       if (signal?.aborted) throw new ChecklistError("保存请求已取消，请重新读取清单核对。", 409);
       const trip = await tx.trip.findUnique({ where: { id: tripId } });
       if (trip?.currentPlanVersionId !== plan.id) throw new ChecklistError("计划已变化，请刷新页面后核对清单；本次修改未覆盖新计划。", 409);
@@ -51,5 +52,5 @@ export async function saveChecklist(tripId: string, value: unknown, signal?: Abo
     if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034", "P2028", "P1008"].includes(error.code)) throw new ChecklistError("清单正被另一项操作更新，请重新读取后重试。", 409);
     throw error;
   }
-}
+});
 export async function closeChecklistStore() { await prisma.$disconnect(); }

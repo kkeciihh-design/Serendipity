@@ -1,3 +1,4 @@
+import { businessOperation, capturedGeneration, assertCapturedGeneration } from "./business-guard";
 import crypto from "node:crypto";
 import { buildStayRecommendations, nightsBetween, stayConditionChecks, stayEvents, stayInputIssues, stayInputSchema, stayPointDistance, type StayInput, type StayPreview } from "./accommodations";
 import { calculateBudgetSummary, derivePlanCosts, hasProtectedCostFact, planCostItemSchema } from "./budget";
@@ -12,15 +13,15 @@ import { invalidateRouteReference, manualReferenceRoute, routeConflict } from ".
 import { buildPlanRedlines } from "./redline-service";
 
 type Edit = Parameters<typeof savePlanRecommendationEdit>[0];
-type Cached = { tripId: string; version: number; eventId: string; expires: number; result: StayPreview; edit: Edit };
+type Cached = { dataGeneration: string; tripId: string; version: number; eventId: string; expires: number; result: StayPreview; edit: Edit };
 const globalCache = globalThis as typeof globalThis & { stayPreviews?: Map<string, Cached> };
 const previews = globalCache.stayPreviews ??= new Map<string, Cached>();
 function active(signal?: AbortSignal) { if (signal?.aborted) throw new PlanConflictError("住宿预览已取消，请重新操作。"); }
-export async function getPlanAccommodations(tripId: string, version: number, eventId: string) {
+export const getPlanAccommodations = businessOperation(async function getPlanAccommodations(tripId: string, version: number, eventId: string) {
   const plan = await getPlanVersion(tripId, version);
   if (!plan.events.some((e) => e.id === eventId && e.type === "accommodation")) throw new PlanValidationError("没有找到住宿安排。");
   return buildStayRecommendations(plan, eventId);
-}
+});
 function hotelPlace(plan: PlanVersionRecord, eventId: string, token: string | null): Place {
   const event = plan.events.find((e) => e.id === eventId)!;
   if (!token && event.accommodationSelection?.kind === "hotel") {
@@ -29,6 +30,7 @@ function hotelPlace(plan: PlanVersionRecord, eventId: string, token: string | nu
   }
   const data = token ? verifySignedPayload(token) : null;
   if (!data || data.scope !== "place-selection" || data.tripId !== plan.tripId || data.version !== plan.versionNumber || data.eventId !== eventId || typeof data.exp !== "number" || data.exp <= Date.now()) throw new PlanConflictError("请先搜索并选择本次入住的具体酒店；候选过期后需重新搜索。");
+  assertCapturedGeneration(data.dataGeneration);
   const candidate = placeCandidateSchema.parse(data.candidate);
   if (/boundary:|place:|地名地址|行政地名/.test(candidate.category) || !/hotel|hostel|guest_house|motel|酒店|宾馆|旅馆|住宿/i.test(candidate.category)) throw new PlanValidationError("请选择地图中明确标为酒店或旅馆的具体地点，区域中点不能作为实际酒店。");
   const city = (v: string) => v.replace(/市|\s/g, "").toLowerCase();
@@ -36,7 +38,7 @@ function hotelPlace(plan: PlanVersionRecord, eventId: string, token: string | nu
   return placeSchema.parse({ ...candidate, id: placeIdentity(candidate, "poi"), precision: "poi", confirmation: "user_confirmed", confirmedAt: new Date().toISOString(), source: candidate.provider === "osm" ? "OpenStreetMap / Nominatim" : "高德地图地点搜索" });
 }
 
-export async function previewAccommodation(tripId: string, version: number, eventId: string, raw: StayInput, signal?: AbortSignal): Promise<StayPreview> {
+export const previewAccommodation = businessOperation(async function previewAccommodation(tripId: string, version: number, eventId: string, raw: StayInput, signal?: AbortSignal): Promise<StayPreview> {
   active(signal);
   const input = stayInputSchema.parse(raw), plan = await getPlanVersion(tripId, version);
   const data = buildStayRecommendations(plan, eventId), area = data.areas.find((a) => a.id === input.areaId);
@@ -150,13 +152,14 @@ export async function previewAccommodation(tripId: string, version: number, even
       `次日${input.morningDepartureTime}从住宿出发；相邻路线、费用和红线按同一版本重新计算。`, "只确认地点与入住资料，不表示已预订、有房或已付款；实际酒店价格、房态需分别核对。"],
     warnings: [...new Set(warnings)], conflicts: [...new Set(conflicts)], canApply: conflicts.length === 0,
     routes: proposed.routeLegs.filter((r) => ids.has(r.fromEventId) || ids.has(r.toEventId)).map((r) => ({ label: `${events.find((e) => e.id === r.fromEventId)?.locationName} → ${events.find((e) => e.id === r.toEventId)?.locationName}`, date: r.date, durationSeconds: r.durationSeconds, source: r.scheduleBasis })) };
-  previews.set(previewToken, { tripId, version, eventId, expires, result, edit: { tripId, expectedPlanVersion: version, eventId, targetType: "accommodation", action: "replace",
+  previews.set(previewToken, { dataGeneration: capturedGeneration(), tripId, version, eventId, expires, result, edit: { tripId, expectedPlanVersion: version, eventId, targetType: "accommodation", action: "replace",
     event: events.find((e) => e.id === eventId)!, relatedEvents: events.filter((e) => ids.has(e.id) && e.id !== eventId), places, costs: proposed.costs, routeLegs: proposed.routeLegs, pendingItems, warnings: result.warnings } });
   return result;
-}
-export async function applyAccommodation(tripId: string, version: number, eventId: string, token: string, signal?: AbortSignal) {
+});
+export const applyAccommodation = businessOperation(async function applyAccommodation(tripId: string, version: number, eventId: string, token: string, signal?: AbortSignal) {
   active(signal);
   const cached = previews.get(token);
+  if (cached) assertCapturedGeneration(cached.dataGeneration);
   if (!cached || cached.tripId !== tripId || cached.version !== version || cached.eventId !== eventId || cached.expires <= Date.now()) throw new PlanConflictError("住宿预览已过期或不属于本计划，请重新预览。");
   if (!cached.result.canApply) throw new PlanValidationError(cached.result.conflicts[0]);
   const ids = new Set([cached.eventId, ...(cached.edit.relatedEvents ?? []).map((e) => e.id)]);
@@ -164,4 +167,4 @@ export async function applyAccommodation(tripId: string, version: number, eventI
   const saved = await savePlanRecommendationEdit({ ...cached.edit, abortSignal: signal });
   previews.delete(token);
   return saved;
-}
+});

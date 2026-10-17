@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import { ClipboardPenLine, Info, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -75,7 +76,7 @@ export function TripDraftForm() {
     });
 
     try {
-      const response = await fetch("/api/trips", {
+      const response = await businessFetch("/api/trips", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

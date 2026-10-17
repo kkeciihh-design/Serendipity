@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { NextResponse } from "next/server";
 import { hasAppAccess, unauthorizedResponse } from "@/lib/access";
 import {
@@ -30,7 +32,7 @@ function plansErrorResponse(error: unknown) {
   );
 }
 
-export async function GET(request: Request, context: RouteContext) {
+export const GET = businessRoute(async function GET(request: Request, context: RouteContext) {
   if (!hasAppAccess(request)) {
     return unauthorizedResponse();
   }
@@ -40,6 +42,7 @@ export async function GET(request: Request, context: RouteContext) {
     const plans = await listPlanVersions(id);
     return NextResponse.json({ plans });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     return plansErrorResponse(error);
   }
-}
+});

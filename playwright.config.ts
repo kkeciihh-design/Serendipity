@@ -7,6 +7,8 @@ export default defineConfig({
   testDir: "tests/e2e",
   timeout: 60_000,
   fullyParallel: false,
+  // The shared isolated instance has stateful settings and whole-travel restores.
+  workers: 1,
   retries: 0,
   use: {
     baseURL: "http://127.0.0.1:3100",

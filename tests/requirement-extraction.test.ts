@@ -1,4 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isolatedDatabase } from "./helpers/test-database";
+let database: ReturnType<typeof isolatedDatabase>;
+beforeAll(() => { database = isolatedDatabase("unit-extraction-generation"); });
+afterAll(() => database?.cleanup());
 import { emptyRequestSnapshot } from "../lib/trip-request";
 
 const mocked = vi.hoisted(() => ({ completeText: vi.fn(), getRecord: vi.fn(), save: vi.fn() }));

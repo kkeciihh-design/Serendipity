@@ -1,3 +1,4 @@
+import { businessOperation, businessTransaction } from "./business-guard";
 import { createHash } from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
@@ -41,10 +42,10 @@ function view(plan: PlanVersionRecord, ctx: Context, weatherState?: AdvisoryWeat
     missingWeatherEventIds: plan.events.filter((e) => ["activity", "meal", "accommodation"].includes(e.type) && !weatherTarget(plan, e)).map((e) => e.id) };
 }
 
-export async function getAdvisories(tripId: string, version: number) {
+export const getAdvisories = businessOperation(async function getAdvisories(tripId: string, version: number) {
   const plan = await getPlanVersion(tripId, version);
-  return prisma.$transaction(async (tx) => view(plan, await context(tx, plan)));
-}
+  return businessTransaction(prisma, async (tx) => view(plan, await context(tx, plan)));
+});
 
 async function explain(items: AdvisoryItem[], signal?: AbortSignal): Promise<AdvisoryWeatherState["aiStatus"]> {
   if (!items.length) return "not_configured";
@@ -60,9 +61,9 @@ async function explain(items: AdvisoryItem[], signal?: AbortSignal): Promise<Adv
   } catch { return "failed"; }
 }
 
-export async function saveAdvisories(tripId: string, raw: unknown, signal?: AbortSignal) {
+export const saveAdvisories = businessOperation(async function saveAdvisories(tripId: string, raw: unknown, signal?: AbortSignal) {
   const input = advisoryWriteSchema.parse(raw), plan = await getPlanVersion(tripId, input.expectedPlanVersion);
-  const captured = await prisma.$transaction((tx) => context(tx, plan));
+  const captured = await businessTransaction(prisma, (tx) => context(tx, plan));
   if ((captured.state?.revision ?? 0) !== input.expectedRevision) throw new AdvisoryError("提醒已在其他页面更新，请重新读取后核对。", 409);
   let weatherState: AdvisoryWeatherState | undefined, generated: AdvisoryItem[] | undefined;
   if (input.action === "refresh") {
@@ -90,7 +91,7 @@ export async function saveAdvisories(tripId: string, raw: unknown, signal?: Abor
     weatherState.aiStatus = await explain(generated, signal);
   }
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await businessTransaction(prisma, async (tx) => {
       if (signal?.aborted) throw new AdvisoryError("请求已取消，请重新读取核对。", 409);
       const latest = await context(tx, plan);
       if ((latest.state?.revision ?? 0) !== input.expectedRevision || latest.basis !== captured.basis) throw new AdvisoryError("计划关联资料、清单或提醒已变化，请重新读取后再试。", 409);
@@ -114,5 +115,5 @@ export async function saveAdvisories(tripId: string, raw: unknown, signal?: Abor
     if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034", "P2028", "P1008"].includes(error.code)) throw new AdvisoryError("提醒正在被另一项操作更新，请重新读取后核对。", 409);
     throw error;
   }
-}
+});
 export async function closeAdvisoryStore() { await prisma.$disconnect(); }

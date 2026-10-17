@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 
 import {
   CircleAlert,
@@ -104,7 +105,7 @@ export function TripEditor({
     setIsSaving(true);
     setFeedback({ tone: "info", message: "正在保存标题..." });
     try {
-      const response = await fetch(`/api/trips/${trip.id}`, {
+      const response = await businessFetch(`/api/trips/${trip.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title.trim() }),
@@ -142,7 +143,7 @@ export function TripEditor({
     setIsDeleting(true);
     setFeedback({ tone: "info", message: "正在删除这趟旅行..." });
     try {
-      const response = await fetch(`/api/trips/${trip.id}`, {
+      const response = await businessFetch(`/api/trips/${trip.id}`, {
         method: "DELETE",
       });
       if (!response.ok) {

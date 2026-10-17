@@ -1,4 +1,5 @@
 "use client";
+import { businessFetch } from "@/lib/business-fetch";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { CalendarClock, MapPin, Route, Search } from "lucide-react";
@@ -80,7 +81,7 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
     const active = new AbortController(); controller.current?.abort(); controller.current = active;
     setBusy(true); setCandidates([]); setSelectedToken(""); setFeedback("正在搜索地点…");
     try {
-      const response = await fetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/places`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ eventId: editing.id, city, keywords }), signal: active.signal });
+      const response = await businessFetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/places`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ eventId: editing.id, city, keywords }), signal: active.signal });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "地点搜索失败。");
       if (active.signal.aborted) return;
@@ -92,7 +93,7 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
     if (!editing) return;
     const active = new AbortController(); controller.current = active; setBusy(true); setSaving(true);
     try {
-      const response = await fetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/places`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ eventId: editing.id, selectionToken: remove ? null : selectedToken, precision: areaOnly ? "area_reference" : precision }), signal: active.signal });
+      const response = await businessFetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/places`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ eventId: editing.id, selectionToken: remove ? null : selectedToken, precision: areaOnly ? "area_reference" : precision }), signal: active.signal });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "保存地点失败。");
       if (!active.signal.aborted) onSaved(data.plan);
@@ -105,7 +106,7 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
     setRouteBusyKey(key);
     setRouteFeedback((current) => ({ ...current, [key]: "正在查询适用时刻的路线…" }));
     try {
-      const response = await fetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/routes`, {
+      const response = await businessFetch(`/api/trips/${tripId}/plans/${plan.versionNumber}/routes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

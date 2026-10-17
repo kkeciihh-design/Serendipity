@@ -1,3 +1,4 @@
+import { businessOperation, businessTransaction } from "./business-guard";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { getDatabaseUrl } from "./data-directory";
 import { serializePlan } from "./plan-service";
@@ -12,18 +13,18 @@ async function context(tx: Prisma.TransactionClient, tripId: string) {
   if (!trip.currentPlanVersion) throw new ExecutionError("请先生成旅行计划。", 400);
   return { trip, plan: serializePlan({ ...trip.currentPlanVersion, trip: { currentPlanVersionId: trip.currentPlanVersionId } }) };
 }
-export async function getExecution(tripId: string) {
-  return prisma.$transaction(async (tx) => {
+export const getExecution = businessOperation(async function getExecution(tripId: string) {
+  return businessTransaction(prisma, async (tx) => {
     const { trip, plan } = await context(tx, tripId);
     const execution: ExecutionView = { ...parseExecution(trip.execution?.payload), revision: trip.execution?.revision ?? 0,
       planVersion: plan.versionNumber, updatedAt: trip.execution?.updatedAt.toISOString() ?? null };
     return { execution, plan, serverNow: new Date().toISOString() };
   });
-}
-export async function saveExecution(tripId: string, raw: unknown, signal?: AbortSignal, now = new Date().toISOString()) {
+});
+export const saveExecution = businessOperation(async function saveExecution(tripId: string, raw: unknown, signal?: AbortSignal, now: string = new Date().toISOString()) {
   const input = executionWriteSchema.parse(raw);
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await businessTransaction(prisma, async (tx) => {
       if (signal?.aborted) throw new ExecutionError("请求已取消，请重新读取进度核对。");
       const { trip, plan } = await context(tx, tripId);
       if (plan.versionNumber !== input.expectedPlanVersion || (trip.execution?.revision ?? 0) !== input.expectedRevision) throw new ExecutionError("计划或旅行进度已更新，请重新读取后再操作。本次未覆盖新记录。");
@@ -42,5 +43,5 @@ export async function saveExecution(tripId: string, raw: unknown, signal?: Abort
     if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034", "P2028", "P1008"].includes(error.code)) throw new ExecutionError("旅行进度正在更新，请重新读取后再试。");
     throw error;
   }
-}
+});
 export async function closeExecutionStore() { await prisma.$disconnect(); }

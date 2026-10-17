@@ -50,7 +50,7 @@ test("hotel search candidates remain distinct from availability and confirm with
   const trip = await seed(request, 2); const { createSignedPayload } = await import("../../lib/security");
   await page.route(`**/api/trips/${trip.id}/plans/*/places`, async (route) => {
     const c = { provider: "osm", poiId: "node:888", name: "演练酒店", city: "长沙", district: "测试区域", address: "合成地址，仅供验证", adcode: "", category: "tourism:hotel", longitude: 112.97, latitude: 28.19, coordinateSystem: "WGS84", retrievedAt: new Date().toISOString() };
-    await route.fulfill({ json: { candidates: [{ ...c, selectionToken: createSignedPayload({ scope: "place-selection", tripId: trip.id, version: Number(new URL(route.request().url()).pathname.split("/").at(-2)), eventId: "d1-hotel", candidate: c, exp: Date.now() + 60000 }) }] } });
+    await route.fulfill({ json: { candidates: [{ ...c, selectionToken: createSignedPayload({ scope: "place-selection", dataGeneration: route.request().headers()["x-data-generation"], tripId: trip.id, version: Number(new URL(route.request().url()).pathname.split("/").at(-2)), eventId: "d1-hotel", candidate: c, exp: Date.now() + 60000 }) }] } });
   });
   await open(page, trip.id); await propose(page); await page.getByRole("button", { name: "应用住宿选择", exact: true }).click(); await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
   await page.getByRole("radio", { name: "确认具体酒店", exact: true }).check(); await page.getByLabel("酒店完整名称").fill("演练酒店"); await page.getByRole("button", { name: "搜索酒店地点", exact: true }).click(); await page.getByRole("radio", { name: /演练酒店 · 长沙/ }).check();

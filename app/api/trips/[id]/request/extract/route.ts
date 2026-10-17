@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { NextResponse } from "next/server";
 import { appWriteAccessError } from "@/lib/access";
 import { extractTripRequest, TripRequestExtractionError } from "@/lib/requirement-extraction";
@@ -40,7 +42,7 @@ function extractionErrorResponse(error: unknown) {
   );
 }
 
-export async function POST(request: Request, context: RouteContext) {
+export const POST = businessRoute(async function POST(request: Request, context: RouteContext) {
   const accessError = appWriteAccessError(request);
   if (accessError) return accessError;
 
@@ -64,6 +66,7 @@ export async function POST(request: Request, context: RouteContext) {
     const tripRequest = await extractTripRequest(id, expectedRequestRevision);
     return NextResponse.json({ request: tripRequest });
   } catch (error) {
+    if (error instanceof RestoreGuardError) throw error;
     if (error instanceof SyntaxError) {
       return NextResponse.json(
         { error: "请求格式不正确，请重新理解需求。" },
@@ -72,4 +75,4 @@ export async function POST(request: Request, context: RouteContext) {
     }
     return extractionErrorResponse(error);
   }
-}
+});

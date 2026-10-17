@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { hasAppAccess } from "@/lib/access";
 import { mapApiError } from "@/lib/map-api";
 import { getPlanVersion } from "@/lib/plan-service";
@@ -5,7 +7,7 @@ import { buildPlanRedlines } from "@/lib/redline-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export async function GET(request: Request, context: { params: Promise<{ id: string; versionNumber: string }> }) {
+export const GET = businessRoute(async function GET(request: Request, context: { params: Promise<{ id: string; versionNumber: string }> }) {
   if (!hasAppAccess(request)) return Response.json({ error: "请先登录。" }, { status: 401 });
   try {
     const { id, versionNumber } = await context.params;
@@ -15,5 +17,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const serverNow = new Date().toISOString();
     const redlines = await buildPlanRedlines(plan, serverNow);
     return Response.json({ planId: plan.id, isCurrent: plan.isCurrent, serverNow, redlines }, { headers: { "Cache-Control": "no-store" } });
-  } catch (error) { return mapApiError(error); }
-}
+  } catch (error) {
+    if (error instanceof RestoreGuardError) throw error; return mapApiError(error); }
+});

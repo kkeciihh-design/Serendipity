@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { appWriteAccessError } from "@/lib/access";
 import { confirmPlanPlace, searchPlanPlaces } from "@/lib/map-service";
 import { mapApiError } from "@/lib/map-api";
@@ -17,7 +19,8 @@ async function handle(request: Request, context: Context, search: boolean) {
     const plan = await confirmPlanPlace(id, version, input, request.signal);
     const evidenceFacts = (await listEvidenceFacts(id)).filter((fact) => fact.planVersionId === plan.id);
     return Response.json({ plan: { ...plan, evidenceFacts } });
-  } catch (error) { return mapApiError(error); }
+  } catch (error) {
+    if (error instanceof RestoreGuardError) throw error; return mapApiError(error); }
 }
-export async function POST(request: Request, context: Context) { return handle(request, context, true); }
-export async function PATCH(request: Request, context: Context) { return handle(request, context, false); }
+export const POST = businessRoute(async function POST(request: Request, context: Context) { return handle(request, context, true); });
+export const PATCH = businessRoute(async function PATCH(request: Request, context: Context) { return handle(request, context, false); });

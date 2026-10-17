@@ -1,3 +1,4 @@
+import { businessOperation, businessTransaction, capturedGeneration, assertCapturedGeneration } from "./business-guard";
 import { createHash } from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { completeText } from "./ai-adapter";
@@ -47,11 +48,12 @@ async function readContext(tx: Prisma.TransactionClient, tripId: string) {
   };
 }
 type Context = Awaited<ReturnType<typeof readContext>>;
-type Capture = Pick<Context, "requestRevision" | "requestSnapshot" | "confirmedRequest" | "checklistRevision" | "advisoryRevision" | "evidenceBasis" | "executionRevision"> & { planId: string; planVersion: number };
-const capture = (ctx: Context): Capture => ({ requestRevision: ctx.requestRevision, requestSnapshot: ctx.requestSnapshot, confirmedRequest: ctx.confirmedRequest,
+type Capture = Pick<Context, "requestRevision" | "requestSnapshot" | "confirmedRequest" | "checklistRevision" | "advisoryRevision" | "evidenceBasis" | "executionRevision"> & { dataGeneration: string; planId: string; planVersion: number };
+const capture = (ctx: Context): Capture => ({ dataGeneration: capturedGeneration(), requestRevision: ctx.requestRevision, requestSnapshot: ctx.requestSnapshot, confirmedRequest: ctx.confirmedRequest,
   executionRevision: ctx.executionRevision,
   checklistRevision: ctx.checklistRevision, advisoryRevision: ctx.advisoryRevision, evidenceBasis: ctx.evidenceBasis, planId: ctx.plan.id, planVersion: ctx.plan.versionNumber });
 function checkCapture(before: Capture, latest: Context, states = false) {
+  assertCapturedGeneration(before.dataGeneration);
   // Pre-phase23 candidates have no execution capture and must be regenerated;
   // never attach today's progress revision to an old AI response.
   if (before.executionRevision !== latest.executionRevision) throw new ReplanError("旅行执行进度或位置已经变化，旧候选不能应用。请重新生成预览。");
@@ -63,7 +65,7 @@ function checkCapture(before: Capture, latest: Context, states = false) {
   }
 }
 
-export async function refreshReplanRoutes(base: PlanVersionRecord, proposed: PlanVersionRecord, signal?: AbortSignal, now = clock()) {
+export async function refreshReplanRoutes(base: PlanVersionRecord, proposed: PlanVersionRecord, signal?: AbortSignal, now: string = clock()) {
   let result = structuredClone(proposed);
   const warnings: string[] = [];
   const changes = replanChanges(base, proposed), changed = new Set(changes.map((c) => c.eventId));
@@ -191,7 +193,7 @@ async function reviewPlan(ctx: Context, proposed: PlanVersionRecord, signal: Abo
   if (until <= Date.parse(checkedAt)) throw new ReplanError("可行性窗口已经失效，请重新规划。");
   validation.warnings = [...new Set(warnings)]; validation.status = validation.warnings.length ? "needs_review" : "valid";
   plan.validationResults = validation;
-  const checklist = await prisma.$transaction(async (tx) => {
+  const checklist = await businessTransaction(prisma, async (tx) => {
     checkCapture(capture(ctx), await readContext(tx, ctx.plan.tripId), true);
     return projectChecklist(tx, ctx.checklistItems, plan);
   });
@@ -199,9 +201,9 @@ async function reviewPlan(ctx: Context, proposed: PlanVersionRecord, signal: Abo
   return { plan, remainingFrom, verifiedAt: checkedAt, validUntil: new Date(until).toISOString(), redlines, warnings: validation.warnings, checklist };
 }
 
-export async function previewReplan(input: { tripId: string; reason: string; expectedPlanVersion: number; expectedRequestRevision: number; signal?: AbortSignal }, deps: Dependencies = {}) {
+export const previewReplan = businessOperation(async function previewReplan(input: { tripId: string; reason: string; expectedPlanVersion: number; expectedRequestRevision: number; signal?: AbortSignal }, deps: Dependencies = {}) {
   const signal = AbortSignal.any([...(input.signal ? [input.signal] : []), AbortSignal.timeout(100_000)]);
-  const ctx = await prisma.$transaction((tx) => readContext(tx, input.tripId));
+  const ctx = await businessTransaction(prisma, (tx) => readContext(tx, input.tripId));
   if (ctx.plan.versionNumber !== input.expectedPlanVersion || ctx.requestRevision !== input.expectedRequestRevision) throw new ReplanError("页面需求或计划已过期，请重新读取。");
   const config = await storedAIConfiguration();
   if (!config) throw new ReplanError("请先在设置页配置并测试 AI 服务。", 400);
@@ -225,46 +227,46 @@ export async function previewReplan(input: { tripId: string; reason: string; exp
     }
   }
   if (!proposed || !replanChanges(ctx.plan, proposed).length) throw new ReplanError("没有产生需要应用的行程变更。", 400);
-  const latest = await prisma.$transaction((tx) => readContext(tx, input.tripId));
+  const latest = await businessTransaction(prisma, (tx) => readContext(tx, input.tripId));
   checkCapture(capture(ctx), latest);
   const review = await reviewPlan(latest, proposed, signal, deps, now);
   return storeCandidate({ kind: "replan", reason: input.reason, capture: capture(latest), base: ctx.plan, review }, signal);
-}
+});
 
 async function storeCandidate(payload: Payload, signal?: AbortSignal) {
-  return prisma.$transaction(async (tx) => {
+  return businessTransaction(prisma, async (tx) => {
     assertActive(signal); checkCapture(payload.capture, await readContext(tx, payload.base.tripId), true);
     const row = await tx.replanCandidate.create({ data: { tripId: payload.base.tripId, payload: JSON.stringify(payload) } });
     assertActive(signal);
     return candidateView(row, payload);
   });
 }
-export async function getReplanState(tripId: string) {
+export const getReplanState = businessOperation(async function getReplanState(tripId: string) {
   const rows = await prisma.replanCandidate.findMany({ where: { tripId, status: "preview" }, orderBy: { createdAt: "desc" }, take: 20 });
   const applied = await prisma.replanCandidate.findFirst({ where: { tripId, status: "applied" }, orderBy: { createdAt: "desc" } });
-  const ctx = await prisma.$transaction((tx) => readContext(tx, tripId));
+  const ctx = await businessTransaction(prisma, (tx) => readContext(tx, tripId));
   const current = rows.find((r) => r.status === "preview" && (JSON.parse(r.payload) as Payload).capture.planId === ctx.plan.id);
   const undo = applied !== null && (JSON.parse(applied.payload) as Payload).appliedVersion === ctx.plan.versionNumber;
   return { candidate: current ? candidateView(current, JSON.parse(current.payload) as Payload) : null, canUndo: undo };
-}
-export async function cancelReplan(tripId: string, id: string, revision: number) {
-  const result = await prisma.replanCandidate.updateMany({ where: { id, tripId, revision, status: "preview" }, data: { status: "cancelled", revision: { increment: 1 } } });
+});
+export const cancelReplan = businessOperation(async function cancelReplan(tripId: string, id: string, revision: number) {
+  const result = await businessTransaction(prisma, (tx) => tx.replanCandidate.updateMany({ where: { id, tripId, revision, status: "preview" }, data: { status: "cancelled", revision: { increment: 1 } } }));
   if (result.count !== 1) throw new ReplanError("候选已变化或已提交，请重新读取当前计划。");
-}
+});
 
-export async function applyReplan(tripId: string, id: string, revision: number, inputSignal?: AbortSignal, deps: Dependencies = {}) {
+export const applyReplan = businessOperation(async function applyReplan(tripId: string, id: string, revision: number, inputSignal?: AbortSignal, deps: Dependencies = {}) {
   const signal = AbortSignal.any([...(inputSignal ? [inputSignal] : []), AbortSignal.timeout(60_000)]);
   const row = await prisma.replanCandidate.findFirst({ where: { id, tripId } });
   if (!row || row.status !== "preview" || row.revision !== revision) throw new ReplanError("候选已变化、取消或应用，请重新读取。");
   const payload = JSON.parse(row.payload) as Payload;
-  const ctx = await prisma.$transaction((tx) => readContext(tx, tripId));
+  const ctx = await businessTransaction(prisma, (tx) => readContext(tx, tripId));
   checkCapture(payload.capture, ctx);
   // This is a new application-time review, not a relabel of the old R/V.
   const review = await reviewPlan(ctx, payload.review.plan, signal, deps, payload.review.remainingFrom);
   const next = { ...payload, capture: capture(ctx), review };
   if (material(review) !== material(payload.review) || payload.capture.checklistRevision !== ctx.checklistRevision ||
     payload.capture.advisoryRevision !== ctx.advisoryRevision || payload.capture.evidenceBasis !== ctx.evidenceBasis) {
-    return prisma.$transaction(async (tx) => {
+    return businessTransaction(prisma, async (tx) => {
       checkCapture(next.capture, await readContext(tx, tripId), true); assertActive(signal);
       const saved = await tx.replanCandidate.updateMany({ where: { id, tripId, revision, status: "preview" }, data: { payload: JSON.stringify(next), revision: { increment: 1 } } });
       if (saved.count !== 1) throw new ReplanError("候选刚有更新，请重新读取。");
@@ -272,7 +274,7 @@ export async function applyReplan(tripId: string, id: string, revision: number, 
     });
   }
   await deps.beforeCommit?.();
-  return prisma.$transaction(async (tx) => {
+  return businessTransaction(prisma, async (tx) => {
     assertActive(signal);
     const latest = await readContext(tx, tripId);
     checkCapture(next.capture, latest, true);
@@ -298,10 +300,10 @@ export async function applyReplan(tripId: string, id: string, revision: number, 
     if (Date.parse(finalNow) < Date.parse(review.verifiedAt) || Date.parse(finalNow) >= Date.parse(review.validUntil)) throw new ReplanError("提交期间可行性窗口失效，已回滚，请重新检查。");
     return { outcome: "applied" as const, plan: saved };
   });
-}
+});
 
-export async function previewUndo(input: { tripId: string; expectedPlanVersion: number; expectedRequestRevision: number; signal?: AbortSignal }, deps: Dependencies = {}) {
-  const ctx = await prisma.$transaction((tx) => readContext(tx, input.tripId));
+export const previewUndo = businessOperation(async function previewUndo(input: { tripId: string; expectedPlanVersion: number; expectedRequestRevision: number; signal?: AbortSignal }, deps: Dependencies = {}) {
+  const ctx = await businessTransaction(prisma, (tx) => readContext(tx, input.tripId));
   if (ctx.plan.versionNumber !== input.expectedPlanVersion || ctx.requestRevision !== input.expectedRequestRevision) throw new ReplanError("当前版本已变化，请重新读取。");
   const rows = await prisma.replanCandidate.findMany({ where: { tripId: input.tripId, status: "applied" }, orderBy: { createdAt: "desc" } });
   const source = rows.map((r) => JSON.parse(r.payload) as Payload).find((p) => p.appliedVersion === ctx.plan.versionNumber);
@@ -319,5 +321,5 @@ export async function previewUndo(input: { tripId: string; expectedPlanVersion: 
   const review = await reviewPlan(ctx, plan, input.signal, deps);
   if (!replanChanges(ctx.plan, review.plan).length) throw new ReplanError("剩余安排已无可撤销变更；已经发生的事项保持原样。");
   return storeCandidate({ kind: "undo", reason: "撤销上次重新规划，恢复仍可行的剩余安排", capture: capture(ctx), base: ctx.plan, review }, input.signal);
-}
+});
 export async function closeReplanStore() { await prisma.$disconnect(); }

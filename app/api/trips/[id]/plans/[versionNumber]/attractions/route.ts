@@ -1,3 +1,5 @@
+import { businessRoute } from "@/lib/business-route";
+import { RestoreGuardError } from "@/lib/business-guard";
 import { z } from "zod";
 import { appWriteAccessError, hasAppAccess, unauthorizedResponse } from "@/lib/access";
 import {
@@ -34,15 +36,16 @@ async function parameters(context: Context) {
   if (!Number.isSafeInteger(version) || version < 1 || String(version) !== versionNumber) throw new PlanValidationError("计划版本号不正确。");
   return { id, version };
 }
-export async function GET(request: Request, context: Context) {
+export const GET = businessRoute(async function GET(request: Request, context: Context) {
   if (!hasAppAccess(request)) return unauthorizedResponse();
   try {
     const { id, version } = await parameters(context);
     const eventId = eventIdSchema.parse(new URL(request.url).searchParams.get("eventId"));
     return json({ recommendations: await getPlanAttractions(id, version, eventId) });
-  } catch (error) { return apiError(error); }
-}
-export async function POST(request: Request, context: Context) {
+  } catch (error) {
+    if (error instanceof RestoreGuardError) throw error; return apiError(error); }
+});
+export const POST = businessRoute(async function POST(request: Request, context: Context) {
   const accessError = appWriteAccessError(request);
   if (accessError) return accessError;
   try {
@@ -54,5 +57,6 @@ export async function POST(request: Request, context: Context) {
       : await keepPlanAttraction(id, version, body.eventId, body.candidateId, request.signal);
     const evidenceFacts = (await listEvidenceFacts(id)).filter((fact) => fact.planVersionId === plan.id);
     return json({ plan: { ...plan, evidenceFacts } });
-  } catch (error) { return apiError(error); }
-}
+  } catch (error) {
+    if (error instanceof RestoreGuardError) throw error; return apiError(error); }
+});
