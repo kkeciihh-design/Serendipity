@@ -1,8 +1,9 @@
 ﻿param(
-  [string]$BuildDirectory = '.next-phase30-verified',
+  [Parameter(Mandatory = $true)][string]$BuildDirectory,
   [string]$DataDirectory = (Join-Path ([Environment]::GetFolderPath('UserProfile')) 'SerendipityData'),
   [int]$PreferredPort = 3003,
-  [string]$ShortcutDirectory = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Serendipity 日常使用')
+  [string]$ShortcutDirectory = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Serendipity 日常使用'),
+  [switch]$PinnedBuild
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'resolve-physical-path.ps1')
@@ -23,7 +24,7 @@ $configPath = Join-Path $runtimeDirectory 'launcher.json'
 # Updating an installed release is explicit; never redirect a running instance.
 $statePath = Join-Path $runtimeDirectory 'service.json'
 if (Test-Path -LiteralPath $statePath) { throw '请先停止当前桌面实例，再安装或更新入口。' }
-$config = @{ version = 1; projectRoot = $projectRoot; dataDirectory = $dataRoot; nodePath = $nodePath; buildDirectory = $BuildDirectory; preferredPort = $PreferredPort; databaseRequired = (Test-Path -LiteralPath (Join-Path $dataRoot 'data\serendipity.db')) }
+$config = @{ version = 1; projectRoot = $projectRoot; dataDirectory = $dataRoot; nodePath = $nodePath; buildDirectory = $BuildDirectory; autoBuild = -not $PinnedBuild; preferredPort = $PreferredPort; databaseRequired = (Test-Path -LiteralPath (Join-Path $dataRoot 'data\serendipity.db')) }
 [IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
 New-Item -ItemType Directory -Path $ShortcutDirectory -Force | Out-Null
 $shell = New-Object -ComObject WScript.Shell
@@ -37,10 +38,15 @@ foreach ($entry in @(@('启动旅行助手', 'start'), @('停止旅行助手', '
   $shortcut.IconLocation = (Join-Path $env:SystemRoot 'System32\shell32.dll') + $(if ($entry[1] -eq 'stop') { ',27' } elseif ($entry[1] -eq 'status') { ',23' } else { ',14' })
   $shortcut.Save()
 }
+$startupGuide = if ($PinnedBuild) {
+  '本入口固定使用安装时所选版本。重复启动会复用同一个应用；更新版本需由维护者重新配置入口。'
+} else {
+  '每次启动会自动检查源码。首次启用或源码有改动时，会先构建最新版，可能需要一两分钟；没有改动时会复用已完成的构建。运行中再次点击启动也会应用最新修改，请先保存编辑内容。更新构建失败时会提示原因并继续使用上一次可用版本。'
+}
 $guide = @"
 Serendipity 日常使用
 
-1. 双击“启动旅行助手”，稍等片刻，网页会自动打开。重复启动会复用同一个应用。
+1. 双击“启动旅行助手”，等待启动窗口完成检查，网页会自动打开。$startupGuide
 2. 先保存编辑内容，再双击“停止旅行助手”。只关闭浏览器不会停止后台应用。
 3. 重启电脑后重新双击启动即可，不需要命令，不会自动开机启动。
 4. 若打不开，请双击“运行状态”。端口冲突会自动换用空闲地址，始终从启动入口打开正确网页。

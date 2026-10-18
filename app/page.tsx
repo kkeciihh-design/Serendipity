@@ -78,7 +78,7 @@ export default async function HomePage() {
               </p>
               <Link
                 href="/trips"
-                className="home-navigation-link"
+                className="home-navigation-link home-navigation-trips"
               >
                 我的旅行
                 <ArrowUpRight aria-hidden="true" className="size-3.5" />
@@ -103,7 +103,7 @@ export default async function HomePage() {
               <span>把旅行想法</span><span>整理成能执行的计划</span>
             </h1>
             <p className="home-cover-description">
-              Serendipity 面向个人旅行：先理解你的想法，再让时间、地点、预算和待确认事实保持一致。
+              <span>Serendipity 面向个人旅行：先理解你的想法，</span><span>再让时间、地点、预算和待确认事实保持一致。</span>
             </p>
             <div className="home-cover-actions">
               <a
@@ -120,7 +120,7 @@ export default async function HomePage() {
                 查看展示样例
               </a>
               <p className="home-cover-aside">
-              现在可以用一句话保存原话草稿，再让 AI 核对需求和关键问题。
+                现在可以用一句话保存原话草稿，再让 AI 核对需求和关键问题。
               </p>
             </div>
           </div>
@@ -131,6 +131,12 @@ export default async function HomePage() {
         </div>
       </section>
 
+      <div className="home-issue-strip home-container" aria-hidden="true">
+        <span className="home-issue-number">ISSUE NO.01 <span>—</span> LOCAL-FIRST TRAVEL ATELIER</span>
+        <span className="home-issue-caption">一册山水，一段自己的旅程。</span>
+        <span className="home-issue-index">灵感 / 目的地 / 出发 <ArrowDown size={13} strokeWidth={1.2} /></span>
+      </div>
+
       <section
         id="sample-trips"
         className="home-showcase home-section"
@@ -140,10 +146,11 @@ export default async function HomePage() {
             <div>
               <div className="home-section-kicker"><span aria-hidden="true">SHOWCASE ·</span><p>展示样例</p></div>
               <h2 className="home-section-title">先看它要整理什么样的信息</h2>
+              <p className="home-section-note">
+                以下是人工编写的展示样例，用来说明信息层级；它们不是 AI 实时生成，也不是你的个人旅行。
+              </p>
             </div>
-            <p className="home-section-note">
-              以下是人工编写的展示样例，用来说明信息层级；它们不是 AI 实时生成，也不是你的个人旅行。
-            </p>
+            <span className="home-section-folio" aria-hidden="true">01 — 03<span>DESTINATION STUDIES</span></span>
           </div>
           <div className="home-sample-grid">
             {sampleTrips.map((trip, index) => (

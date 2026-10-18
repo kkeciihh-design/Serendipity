@@ -155,22 +155,21 @@ export function TripDraftForm() {
               填入示例
             </button>
           </div>
-          <p className={styles.keyboardHint}>
-            用一句或多句中文描述都可以；按 Enter 保存，按 Shift + Enter 换行。中文输入法选词时的 Enter 不会误提交。
-          </p>
-          <textarea
-            ref={textareaRef}
-            id="trip-request"
-            name="trip-request"
-            value={requestText}
-            onChange={(event) => setRequestText(event.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={7}
-            aria-describedby="trip-request-hint trip-request-feedback"
-            aria-invalid={isOverLength || feedback?.tone === "error"}
-            className={styles.textarea}
-            placeholder="例如：我想 12 月初从北京去成都玩三天，两个人，预算 3000 元，喜欢美食和轻松的市区路线。"
-          />
+          <div className={styles.writingSurface}>
+            <textarea
+              ref={textareaRef}
+              id="trip-request"
+              name="trip-request"
+              value={requestText}
+              onChange={(event) => setRequestText(event.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={7}
+              aria-describedby="trip-request-hint trip-request-feedback"
+              aria-invalid={isOverLength || feedback?.tone === "error"}
+              className={styles.textarea}
+              placeholder="例如：我想 12 月初从北京去成都玩三天，两个人，预算 3000 元，喜欢美食和轻松的市区路线。"
+            />
+          </div>
           <div className={styles.actions}>
             <button
               type="submit"
@@ -180,35 +179,44 @@ export function TripDraftForm() {
               <Send aria-hidden="true" className="size-4" />
               {isSaving ? "正在保存..." : "保存旅行草稿"}
             </button>
+            <span className={styles.pageMark} aria-hidden="true">FIELD NOTES / 01</span>
+          </div>
+        </div>
+
+        <div className={styles.statusFooter} tabIndex={0} role="region" aria-label="输入与保存说明">
+          <div className={styles.marginNotes}>
+            <p className={styles.keyboardHint}>
+              用一句或多句中文描述都可以；按 Enter 保存，按 Shift + Enter 换行。中文输入法选词时的 Enter 不会误提交。
+            </p>
+            <span className={styles.separator} aria-hidden="true"> | </span>
+            <p
+              id="trip-request-hint"
+              className={`${styles.characterHint} ${
+                isOverLength ? styles.error : ""
+              }`}
+            >
+              当前 <span className={styles.counter}>{characterCount}/{MAX_DRAFT_LENGTH}</span> 字；保存后仅创建原话草稿，不会解析需求或调用 AI。
+            </p>
+            <span className={styles.separator} aria-hidden="true"> | </span>
             <p className={styles.inputBadge}>
               <Info aria-hidden="true" className="size-3.5" />
               支持多行输入和粘贴
             </p>
-          </div>
-        </div>
-
-        <div className={styles.statusFooter}>
-          <p
-            id="trip-request-hint"
-            className={`${styles.characterHint} ${
-              isOverLength ? styles.error : ""
-            }`}
-          >
-            当前 <span className={styles.counter}>{characterCount}/{MAX_DRAFT_LENGTH}</span> 字；保存后仅创建原话草稿，不会解析需求或调用 AI。
-          </p>
-          <div
-            id="trip-request-feedback"
-            aria-live="polite"
-            className={`${styles.feedback} ${
-              feedback?.tone === "error"
-                ? styles.error
-                : feedback?.tone === "success"
-                  ? styles.success
-                  : styles.info
-            }`}
-          >
-            {feedback?.message ??
-              "保存后会在这里显示状态。空白、过长、重复点击或数据库写入失败都会有明确提示。"}
+            <span className={styles.separator} aria-hidden="true"> | </span>
+            <div
+              id="trip-request-feedback"
+              aria-live="polite"
+              className={`${styles.feedback} ${feedback ? styles.activeFeedback : ""} ${
+                feedback?.tone === "error"
+                  ? styles.error
+                  : feedback?.tone === "success"
+                    ? styles.success
+                    : styles.info
+              }`}
+            >
+              {feedback?.message ??
+                "保存后会在这里显示状态。空白、过长、重复点击或数据库写入失败都会有明确提示。"}
+            </div>
           </div>
         </div>
       </form>

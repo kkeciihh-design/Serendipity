@@ -7,7 +7,8 @@ import { setTimeout as delay } from "node:timers/promises";
 export function readConfig(filename) {
   const config = JSON.parse(fs.readFileSync(filename, "utf8").replace(/^\uFEFF/, ""));
   if (config.version !== 1 || ![config.projectRoot, config.dataDirectory, config.nodePath].every((p) => typeof p === "string" && path.isAbsolute(p)) ||
-      !/^\.next-[a-z0-9-]+$/.test(config.buildDirectory) || !Number.isInteger(config.preferredPort) || config.preferredPort < 1024 || config.preferredPort > 65515) {
+      !/^\.next-[a-z0-9-]+$/.test(config.buildDirectory) || (config.autoBuild !== undefined && typeof config.autoBuild !== "boolean") ||
+      !Number.isInteger(config.preferredPort) || config.preferredPort < 1024 || config.preferredPort > 65515) {
     throw new Error("启动配置不完整，请让维护者修复桌面入口；旅行数据没有更换。");
   }
   return { ...config, runtimeDirectory: path.join(config.dataDirectory, "runtime") };
@@ -50,8 +51,8 @@ export async function acquireLock(config, kind, timeout = 150_000) {
   }
 }
 
-export async function withOperationLock(config, operation) {
-  const release = await acquireLock(config, "operation");
+export async function withOperationLock(config, operation, timeout = 150_000) {
+  const release = await acquireLock(config, "operation", timeout);
   try { return await operation(); }
   finally { await release(); }
 }
