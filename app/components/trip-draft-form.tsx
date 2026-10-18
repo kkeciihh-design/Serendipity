@@ -2,7 +2,7 @@
 
 import { AlertCircle, ArrowRight, LoaderCircle, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useImperativeHandle, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { businessFetch } from "@/lib/business-fetch";
 import styles from "./trip-draft-form.module.css";
@@ -23,7 +23,9 @@ const readApiError = async (response: Response) => {
     `保存失败（HTTP ${response.status}）。你输入的内容没有丢，请稍后重试。`;
 };
 
-export function TripDraftForm() {
+export type TripDraftFormHandle = { fillInspiration: (text: string) => void };
+
+export function TripDraftForm({ ref }: { ref?: Ref<TripDraftFormHandle> }) {
   const router = useRouter();
   const [requestText, setRequestText] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -89,6 +91,10 @@ export function TripDraftForm() {
     setErrorMessage(null);
     textareaRef.current?.focus();
   };
+
+  // Gallery prompts share the same validation reset and save lock as the
+  // existing inspiration buttons. Changing scenery never remounts this form.
+  useImperativeHandle(ref, () => ({ fillInspiration }));
 
   return (
     <div id="trip-input" className={styles.studio}>

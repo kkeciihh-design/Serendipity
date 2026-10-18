@@ -1,5 +1,8 @@
+import Image from "next/image";
 import { ArrowUpRight } from "lucide-react";
+import { samplePhotography } from "@/lib/destination-gallery";
 import type { SampleTrip } from "@/lib/home-samples";
+import { LandscapeSketch } from "./landscape-sketch";
 import styles from "./sample-trip-card.module.css";
 
 export type { SampleTrip } from "@/lib/home-samples";
@@ -7,17 +10,28 @@ export type { SampleTrip } from "@/lib/home-samples";
 export function SampleTripCard({
   trip,
   issue,
+  mode = "photo",
 }: {
   trip: SampleTrip;
   issue?: string;
+  mode?: "photo" | "sketch";
 }) {
+  const photo = samplePhotography[trip.destination as keyof typeof samplePhotography];
   return (
     <article className={styles.card} data-testid="sample-trip-card">
       <div
         className={styles.preview}
         data-destination={trip.destinationLatin}
         data-testid="sample-trip-preview"
+        data-aesthetic={mode}
       >
+        <div className={styles.landscape} aria-hidden="true">
+          {mode === "photo" && photo ? (
+            <Image fill src={photo.src} alt="" sizes="(max-width: 800px) 100vw, 400px" className={styles.photo} style={{ objectPosition: photo.position }} />
+          ) : (
+            <LandscapeSketch scene={trip.destinationLatin.toLowerCase()} className={styles.sketch} />
+          )}
+        </div>
         <div className={styles.ticketHeader}>
           <p className={styles.destination}>
             {issue ? <span className={styles.issue}>{issue} / </span> : null}

@@ -156,6 +156,13 @@
 .prompt > span { color: #d6ba81; font-size: 10px; }
 .prompt:nth-child(2) > span { color: #83c5a2; }
 .prompt:hover:not(:disabled) { border-color: rgb(255 255 255 / 40%); background: rgb(14 25 20 / 85%); }
+:global([data-aesthetic="sketch"]) .card { border-color: rgb(113 126 91 / 30%); background: rgb(247 244 226 / 55%); box-shadow: 0 22px 48px -15px rgb(78 79 45 / 24%); }
+:global([data-aesthetic="sketch"]) .card:focus-within { border-color: #8d9f79; box-shadow: 0 22px 48px -15px rgb(78 79 45 / 24%), 0 0 0 2px rgb(102 124 77 / 12%); }
+:global([data-aesthetic="sketch"]) .inner { background: rgb(252 249 237 / 95%); }
+:global([data-aesthetic="sketch"]) .prompt { border-color: rgb(92 114 73 / 25%); background: rgb(248 246 230 / 80%); color: #526747; box-shadow: none; }
+:global([data-aesthetic="sketch"]) .prompt > span { color: #9b704a; }
+:global([data-aesthetic="sketch"]) .prompt:nth-child(2) > span { color: #638259; }
+:global([data-aesthetic="sketch"]) .prompt:hover:not(:disabled) { background: #fcfaee; border-color: #91a17f; }
 .feedback {
   position: fixed;
   z-index: 100;

@@ -14,10 +14,27 @@
   --ticket-end: #263d30;
   position: relative;
   padding: 23px 23px 29px;
+  overflow: hidden;
+  isolation: isolate;
   border-bottom: 1px dashed rgb(244 240 232 / 32%);
   color: #f4f0e8;
   background: linear-gradient(135deg, var(--ticket-start), var(--ticket-end));
 }
+
+.landscape { position: absolute; inset: 0; z-index: -2; pointer-events: none; }
+.photo { object-fit: cover; filter: saturate(.78); }
+.sketch { display: block; width: 100%; height: 100%; }
+.preview::after { position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, rgb(10 24 18 / 37%), rgb(10 24 18 / 52%) 40%, rgb(10 24 18 / 88%)); content: ""; pointer-events: none; }
+.ticketHeader { position: relative; }
+.preview .miniTimeline { position: relative; margin-top: 75px; }
+.preview[data-aesthetic="sketch"] { color: #344c3a; background: #edeedb; border-bottom-color: rgb(86 107 71 / 35%); }
+.preview[data-aesthetic="sketch"]::after { background: linear-gradient(180deg, rgb(245 241 222 / 12%), rgb(245 241 222 / 18%) 30%, rgb(245 241 222 / 85%)); }
+.preview[data-aesthetic="sketch"] .destination, .preview[data-aesthetic="sketch"] .previewTitle { color: #304b36; }
+.preview[data-aesthetic="sketch"] .issue { color: #936346; }
+.preview[data-aesthetic="sketch"] .previewDay { color: #586b4d; }
+.preview[data-aesthetic="sketch"] .duration { background: rgb(248 246 231 / 70%); border-color: rgb(86 107 71 / 28%); color: #3d5237; }
+.preview[data-aesthetic="sketch"] .miniTimeline li:not(:last-child)::after { border-top-color: rgb(72 94 57 / 40%); }
+.preview[data-aesthetic="sketch"] .previewDot { background: #65835f; }
 
 .preview[data-destination="CHENGDU"] {
   --ticket-start: #2b261f;
