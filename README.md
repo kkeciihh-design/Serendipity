@@ -20,7 +20,7 @@
 
 当前[首页](http://127.0.0.1:3003)、[运行状态与数据位置](http://127.0.0.1:3003/runtime)。端口如变化，以启动器自动打开的网页为准。此地址只对本机有效；手机请提前保存文字、长图或 PDF，离线内容不会实时更新，也不能在线 AI 重规划。未部署个人外网实例。
 
-维护者：当前生产构建为 `.next-phase30-verified`，设置 `SERENDIPITY_BUILD_DIR=.next-phase30-verified` 后执行 `npm run build`。`scripts/windows/install-launcher.ps1` 安装当前 Windows 用户的三个快捷方式，并将绝对应用路径、Node 路径、数据目录和首选端口保存在实例 `runtime/launcher.json`。先停止再升级，见[阶段30交接](docs/阶段交接/阶段-30.md)。不要在运行时覆盖发布构建目录，或把不同正式启动器同时指向同一数据库。
+维护者：当前生产构建为 `.next-phase30-verified`，设置 `SERENDIPITY_BUILD_DIR=.next-phase30-verified` 后执行 `npm run build`。`scripts/windows/install-launcher.ps1` 安装当前 Windows 用户的三个快捷方式，并将实际应用路径、Node 路径、数据目录和首选端口保存在实例 `runtime/launcher.json`。桌面安装默认使用用户目录下的 `SerendipityData`，避免 Windows 应用包对 LocalAppData 的重定向；发现旧数据时会要求先保全并显式指定目录，不自动创建替代数据库。先停止再升级，见[阶段30交接](docs/阶段交接/阶段-30.md)。不要在运行时覆盖发布构建目录，或把不同正式启动器同时指向同一数据库。
 
 本项目已采用 Node.js 24、npm、Next.js、TypeScript、SQLite/Prisma。依赖使用 package-lock.json 固定；新环境安装使用 npm ci。
 
@@ -38,7 +38,7 @@
 
 技术恢复由维护者使用 `scripts/technical-restore.mjs`，明确指定目标实例与JSON/SQLite备份的绝对路径；第一次仅预览，带该摘要的确认值才执行。SQLite备份也只提取旅行表，走同一屏障、安全副本与换代协议，不覆盖数据库文件。不得用历史 `.db` 文件直接替换当前数据库或回退实例元数据。旧结构缺列的备份须先在独立环境升级后校验。
 
-默认业务数据在 Windows 当前用户的 LOCALAPPDATA/Serendipity/data/serendipity.db。AI 服务与密钥通过网页设置配置，勿把密钥放进聊天、Git 或测试报告。
+当前桌面实例数据在 `C:/Users/user/SerendipityData/data/serendipity.db`，启动配置在同一根目录的 `runtime/launcher.json`。2026-10-18启动修复已保全旧目录、数据库、设置和密钥，详见[修复记录](docs/阶段验收/桌面启动修复-2026-10-18.md)。手动运行 npm 命令时须显式将 `SERENDIPITY_DATA_DIR` 设为同一数据根目录；未指定时，开发脚本仍默认使用 LOCALAPPDATA/Serendipity。AI 服务与密钥通过网页设置配置，勿把密钥放进聊天、Git 或测试报告。
 
 SERENDIPITY_DATA_DIR 可为隔离实例指定独立根目录，数据库位于该根目录的 data 子目录。正式数据和 test-data 必须分开；不要用真实旅行测试删除、恢复或迁移失败。
 

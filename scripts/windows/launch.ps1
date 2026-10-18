@@ -7,6 +7,9 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName System.Windows.Forms
 try {
+  if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
+    throw "启动配置找不到：$ConfigPath`n请让维护者核对桌面入口与实际数据目录；不要删除数据或创建空白数据库。"
+  }
   $config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
   $controller = Join-Path $config.projectRoot 'scripts\desktop-control.mjs'
   $resultText = & $config.nodePath $controller $Action --config $ConfigPath

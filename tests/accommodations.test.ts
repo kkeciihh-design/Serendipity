@@ -34,7 +34,7 @@ describe("住宿比较与按夜计算", () => {
     expect(buildStayRecommendations(p, "d1-hotel").areas[0].id).toBe("return");
   });
   it("explicitly reports no solution under a hard budget and keeps unknown prices unknown", () => {
-    const p = fixture(); p.requestSnapshot.constraints = ["总预算上限 1 元"];
+    const p = fixture(); p.requestSnapshot.constraints = ["总预算上限 1 元。尽量住地铁口"];
     expect(buildStayRecommendations(p, "d1-hotel").conclusion).toContain("暂无可行");
     p.costs.find((c) => c.linkedEventId === "d1-hotel")!.unitAmountCents = null;
     expect(buildStayRecommendations(p, "d1-hotel").price.minCents).toBeNull();

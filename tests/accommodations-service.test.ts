@@ -21,9 +21,9 @@ beforeAll(async () => { database = isolatedDatabase("unit-accommodations"); db =
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); clearRouteCache(); });
 afterAll(async () => { await Promise.all([trips?.closeTripStore(), requests?.closeTripRequestStore(), plans?.closePlanStore(), settings?.closeSettingsStore(), evidence?.closeEvidenceStore(), execution?.closeExecutionStore(), db?.$disconnect()]); database?.cleanup(); });
 const candidate = (id: string, name = "测试酒店"): PlaceCandidate => ({ provider: "osm", poiId: id, name, city: "长沙", district: "", address: "隔离测试地址", adcode: "", category: "tourism:hotel", longitude: 112.97, latitude: 28.19, coordinateSystem: "WGS84", retrievedAt: new Date().toISOString() });
-async function fixture(days = 3, located = false) {
+async function fixture(days = 3, located = false, constraints?: string[]) {
   const trip = await trips.createTrip({ originalRequest: "隔离住宿测试" });
-  const draft = await requests.saveRequestDraft(trip.id, { expectedRequestRevision: 1, request: requestFixture(days) });
+  const draft = await requests.saveRequestDraft(trip.id, { expectedRequestRevision: 1, request: requestFixture(days, constraints ? { constraints } : {}) });
   await requests.confirmRequest(trip.id, { expectedRequestRevision: draft.requestRevision });
   const capture = await plans.getPlanGenerationContext(trip.id, draft.requestRevision), content = planFixture(capture.requestSnapshot);
   let p = await plans.savePlanVersion({ capture, plan: content, validationResults: validatePlan(content, capture.requestSnapshot) });
@@ -46,6 +46,14 @@ describe("住宿确认服务", () => {
     expect(saved.events.filter((e) => e.type === "accommodation").every((e) => e.accommodationSelection?.kind === "area" && e.accommodationSelection.nightCount === 2 && e.placeId === null)).toBe(true);
     expect((await plans.getPlanVersion(p.tripId, 2)).events).toEqual(saved.events);
     await expect(apply(p, proposal.previewToken)).rejects.toThrow("过期");
+  });
+  it("M1 blocks an over-budget stay despite an unrelated soft lodging preference", async () => {
+    const p = await fixture(2, false, ["总预算不超过1000元。尽量住地铁口"]);
+    const proposal = await preview(p, { minCents: 200000, maxCents: 200000 });
+    expect(proposal.canApply).toBe(false);
+    expect(proposal.conflicts.join()).toContain("明确预算上限");
+    await expect(apply(p, proposal.previewToken)).rejects.toThrow();
+    expect(await plans.listPlanVersions(p.tripId)).toHaveLength(1);
   });
   it("blocks an unlocated area with 11:00 departure before a 10:00 activity even though checkout is 12:00", async () => {
     const p = await fixture(2), proposal = await preview(p, { morningDepartureTime: "11:00", checkOutBy: "12:00" });

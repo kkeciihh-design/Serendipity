@@ -15,15 +15,16 @@ import { renderPdfHtml } from "../../lib/pdf-html";
 import type { AdvisoryView } from "../../lib/advisories";
 
 const db = new PrismaClient({ datasources: { db: { url: `file:${path.resolve("test-data/e2e/data/serendipity.db").replaceAll("\\", "/")}` } } });
-const output = verificationEvidenceDirectory("phase30-export-regression");
 test.afterAll(async () => { await db.$disconnect(); });
 
-test("R30-01/05/06: actual five-format exports preserve public places and saved advice while excluding residential details", async ({ request, browser }) => {
+for (const publicName of [restaurantCatalog.find((entry) => entry.id === "xinyuloudong-wanjiali")!.name, "我家酸菜鱼（五一广场店）"]) {
+test(`R30-01/05/06 + M1: actual five-format exports preserve ${publicName} and saved advice while excluding residential details`, async ({ request, browser }) => {
   test.setTimeout(120_000);
+  const output = path.join(verificationEvidenceDirectory("phase30-export-regression"), publicName.startsWith("我家") ? "m1-home-brand" : "r30-public-number");
   await fs.mkdir(output, { recursive: true });
   const fixture = await exportFixture(2), plan = fixture.plan, date = plan.requestSnapshot.startDate!;
   const selectedEventIds = plan.events.filter((event) => event.date === date).map((event) => event.id).sort();
-  const restaurant = restaurantCatalog.find((entry) => entry.id === "xinyuloudong-wanjiali")!;
+  const restaurant = { ...restaurantCatalog.find((entry) => entry.id === "xinyuloudong-wanjiali")!, name: publicName };
   const privateName = "合成天鹅湾", privateAddress = "合成星河小区3栋1201室";
   const privateNote = "我家：北京市海淀区安宁庄东路一号二单元三零二室";
   plan.events.find((event) => event.id === "d1-activity")!.title = "合成公开场馆参观";
@@ -147,3 +148,4 @@ test("R30-01/05/06: actual five-format exports preserve public places and saved 
     expectedPublicMapMarkers: 2, acknowledgedAdvisory: advisory.id, files,
     checks: "Downloaded HTML/TXT/Markdown semantics; PNG/PDF source projection, exact bytes, event coverage, and offline HTML. PNG/PDF visual review is recorded separately." }, null, 2));
 });
+}

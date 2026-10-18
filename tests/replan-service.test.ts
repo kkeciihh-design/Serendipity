@@ -112,8 +112,8 @@ describe("阶段22：候选、时间与原子提交", () => {
     await evidence("fare-recheck", { outcome: result.outcome, planCount: (await plans.listPlanVersions(p.tripId)).length,
       oldCost: c.plan.costs.find((cost) => cost.linkedEventId === "d2-activity"), newCost: result.outcome === "review_required" ? result.candidate.plan.costs.find((cost) => cost.linkedEventId === "d2-activity") : null });
   });
-  it("rejects the review's 2216-yuan proposal against an explicit 1000-yuan hard cap without storing a candidate", async () => {
-    const p = await fixture(false, { budgetAmountCents: 100000, constraints: ["不自驾", "总预算不超过1000元"] }), before = await state(p);
+  it.each(["总预算不超过1000元", "总预算不超过1000元。最好少走路", "最好少走路，总预算控制在1000元以内"])("rejects the review's 2216-yuan proposal against '%s' without storing a candidate", async (constraint) => {
+    const p = await fixture(false, { budgetAmountCents: 100000, constraints: ["不自驾", constraint] }), before = await state(p);
     const proposal = edit("d2-activity", { title: "室内活动", locationName: "室内馆", costDraftCents: 200000 });
     const proposed = applyReplanProposal(p, p.requestSnapshot, p.requestRevision, proposal, new Date().toISOString());
     expect(calculateBudgetSummary(proposed.costs, proposed.requestSnapshot).totalMinCents).toBe(221600);
@@ -121,7 +121,7 @@ describe("阶段22：候选、时间与原子提交", () => {
     expect(await state(p)).toEqual(before);
     expect(await db.replanCandidate.count({ where: { tripId: p.tripId } })).toBe(0);
   });
-  it.each(["总预算1000元左右", "总预算尽量不超过1000元"])("keeps the soft preference '%s' as a warning and allows the reviewed proposal", async (constraint) => {
+  it.each(["总预算1000元左右", "总预算尽量不超过1000元", "总预算尽量控制在1000元以内。最好少走路"])("keeps the soft preference '%s' as a warning and allows the reviewed proposal", async (constraint) => {
     const p = await fixture(false, { budgetAmountCents: 100000, constraints: [constraint] });
     const c = await service.previewReplan(input(p), { completion: completion(edit("d2-activity", { costDraftCents: 200000 })) });
     expect(c.warnings.join()).toContain("预算");
@@ -143,8 +143,8 @@ describe("阶段22：候选、时间与原子提交", () => {
     expect(calculateBudgetSummary(c.plan.costs, c.plan.requestSnapshot).totalMinCents).toBe(200000);
     expect((await service.applyReplan(p.tripId, c.id, c.revision)).outcome).toBe("applied");
   });
-  it("rechecks the hard cap after application-time route prices change and retains the original plan and candidate", async () => {
-    const p = await fixture(false, { budgetAmountCents: 100000, constraints: ["总预算不超过1000元"] });
+  it.each(["总预算不超过1000元", "总预算不超过1000元。最好少走路"])("rechecks '%s' after application-time route prices change and retains the original plan and candidate", async (constraint) => {
+    const p = await fixture(false, { budgetAmountCents: 100000, constraints: [constraint] });
     const c = await service.previewReplan(input(p), { completion: completion() }), before = await state(p);
     const candidateBefore = await db.replanCandidate.findUniqueOrThrow({ where: { id: c.id } });
     await expect(service.applyReplan(p.tripId, c.id, c.revision, undefined, { routes: async (_base, proposed) => {

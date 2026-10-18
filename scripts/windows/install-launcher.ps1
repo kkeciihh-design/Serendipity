@@ -1,14 +1,22 @@
 ﻿param(
   [string]$BuildDirectory = '.next-phase30-verified',
-  [string]$DataDirectory = (Join-Path $env:LOCALAPPDATA 'Serendipity'),
+  [string]$DataDirectory = (Join-Path ([Environment]::GetFolderPath('UserProfile')) 'SerendipityData'),
   [int]$PreferredPort = 3003,
   [string]$ShortcutDirectory = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Serendipity 日常使用')
 )
 $ErrorActionPreference = 'Stop'
-$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $PSScriptRoot 'resolve-physical-path.ps1')
+$projectRoot = Resolve-PhysicalPath (Join-Path $PSScriptRoot '..\..')
 $dataRoot = [IO.Path]::GetFullPath($DataDirectory)
-$nodePath = (Get-Command node.exe -ErrorAction Stop).Source
+$nodePath = Resolve-PhysicalPath (Get-Command node.exe -ErrorAction Stop).Source
 if ($BuildDirectory -notmatch '^\.next-[a-z0-9-]+$' -or -not (Test-Path -LiteralPath (Join-Path $projectRoot "$BuildDirectory\BUILD_ID"))) { throw '请先完成并验证所选生产构建。' }
+# A new default must never silently replace an existing user's database.
+if (-not $PSBoundParameters.ContainsKey('DataDirectory') -and -not (Test-Path -LiteralPath (Join-Path $dataRoot 'data\serendipity.db'))) {
+  $legacyRoot = Join-Path $env:LOCALAPPDATA 'Serendipity'
+  if (Test-Path -LiteralPath $legacyRoot) { throw '发现旧数据目录。请先备份并迁移原数据，或用 -DataDirectory 明确指定已核验的数据目录；未创建空白数据库。' }
+}
+New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
+$dataRoot = Resolve-PhysicalPath $dataRoot
 $runtimeDirectory = Join-Path $dataRoot 'runtime'
 New-Item -ItemType Directory -Path $runtimeDirectory -Force | Out-Null
 $configPath = Join-Path $runtimeDirectory 'launcher.json'
@@ -22,7 +30,7 @@ $shell = New-Object -ComObject WScript.Shell
 foreach ($entry in @(@('启动旅行助手', 'start'), @('停止旅行助手', 'stop'), @('运行状态', 'status'))) {
   $shortcut = $shell.CreateShortcut((Join-Path $ShortcutDirectory ($entry[0] + '.lnk')))
   $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
-  $shortcut.Arguments = '"' + (Join-Path $PSScriptRoot 'launch.vbs') + '" "' + $configPath + '" "' + $entry[1] + '"'
+  $shortcut.Arguments = '"' + (Join-Path $projectRoot 'scripts\windows\launch.vbs') + '" "' + $configPath + '" "' + $entry[1] + '"'
   $shortcut.WorkingDirectory = $projectRoot
   $shortcut.WindowStyle = 7
   $shortcut.Description = 'Serendipity 本机旅行助手：' + $entry[0]

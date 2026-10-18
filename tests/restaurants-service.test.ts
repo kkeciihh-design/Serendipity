@@ -113,7 +113,7 @@ describe("restaurant preview and atomic persistence", () => {
     vi.stubGlobal("fetch", vi.fn(async () => routeResponse(7200)));
     const late = await preview(plan, "xinyuloudong-wanjiali"); expect(late.canApply).toBe(false); expect(late.conflicts.join(" ")).toContain("晚于下一项");
     await expect(apply(plan, late.previewToken)).rejects.toThrow();
-    const limited = await fixture({ constraints: ["总预算上限 10 元"] }); expect((await preview(limited)).canApply).toBe(false);
+    const limited = await fixture({ constraints: ["最好少走路，总预算控制在10元以内"] }); expect((await preview(limited)).canApply).toBe(false);
     expect((await plans.listPlanVersions(plan.tripId))[0].id).toBe(plan.id);
   });
   it("protects paid and locked meals, rejects old versions, other trips and cancelled/expired tokens", async () => {

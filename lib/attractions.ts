@@ -57,11 +57,17 @@ export function attractionVisitMinutes(entry: AttractionCatalogEntry, plan: Plan
 }
 
 export function confirmedBudgetLimit(plan: PlanVersionRecord) {
-  const constraints = plan.requestSnapshot.constraints.filter((value) => !/左右|尽量|最好|大约|大概|争取/.test(value));
-  const explicit = constraints.join("；").match(/((?:人均|每人)?(?:总预算|预算|总费用))\s*(?:上限|不超过|不能超过|最多|至多)\s*[为是：:]?\s*(\d+(?:\.\d{1,2})?)\s*元/);
-  if (!explicit) return null;
-  const perPerson = /人均|每人/.test(explicit[1]) || (!/总/.test(explicit[1]) && plan.requestSnapshot.budgetScope === "per_person");
-  return Math.round(Number(explicit[2]) * 100) * (perPerson ? plan.requestSnapshot.travelerCount ?? 1 : 1);
+  // Judge softness within the budget clause. Unrelated walking, lodging or
+  // arrival preferences must not erase a confirmed cap. Preserve decimal dots.
+  const clauses = plan.requestSnapshot.constraints.flatMap((value) => value.split(/[。；;！？!?\r\n，,]+|(?<!\d)\.|\.(?!\d)/));
+  for (const clause of clauses) {
+    if (/左右|尽量|最好|大约|大概|争取/.test(clause)) continue;
+    const explicit = clause.match(/((?:人均|每人)?(?:总预算|预算|总费用))\s*(?:(?:上限|不超过|不能超过|最多|至多)\s*[为是：:]?\s*(\d+(?:\.\d{1,2})?)\s*元|(?:控制在)?\s*[为是：:]?\s*(\d+(?:\.\d{1,2})?)\s*元\s*(?:以内|以下))/);
+    if (!explicit) continue;
+    const perPerson = /人均|每人/.test(explicit[1]) || (!/总/.test(explicit[1]) && plan.requestSnapshot.budgetScope === "per_person");
+    return Math.round(Number(explicit[2] ?? explicit[3]) * 100) * (perPerson ? plan.requestSnapshot.travelerCount ?? 1 : 1);
+  }
+  return null;
 }
 
 export function attractionExclusionReasons(entry: AttractionCatalogEntry, plan: PlanVersionRecord, event: PlanEvent) {

@@ -15,7 +15,19 @@ export function exportPrivacy(snapshot: ExportSnapshot, options: MobileExportOpt
   // A street number also identifies public shops. Residential context, an
   // apartment/unit, or the saved private journey endpoints establish privacy.
   const residentialDetails = (s: string) => /(?:住址|住宅|小区|单元|[\d零〇一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+\s*(?:栋|幢|室)|我家\s*[:：]|我家(?:在|位于))/.test(s);
-  const looksPrivate = (s: string) => residentialDetails(s) || /(?:家中|家门|我家|返家|回家)/.test(s);
+  // Exempt only a complete commercial name, never a POI category or an address.
+  // Home directions remain private even when followed by a restaurant suffix.
+  const publicHomeBrands = [...new Set([
+    ...plan.places.map((p) => p.name), ...events.flatMap((e) => [e.title, e.locationName ?? ""]),
+  ])].filter((name) => !residentialDetails(name) &&
+    /^我家(?!附近|楼下|楼上|门口|旁边|对面|隔壁|的|在|位于)(?:[\p{L}\p{N}·]{1,40}[（(][^（）()\r\n]{1,30}店[）)]|[\p{L}\p{N}·]{0,40}(?:酸菜鱼|餐厅|餐馆|饭店|饭馆|面馆|面店|火锅|小吃店|咖啡馆|咖啡店|茶馆|超市|便利店|商店|酒店))$/u.test(name))
+    .sort((a, b) => b.length - a.length)
+    .map((name) => new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "gu"));
+  const looksPrivate = (s: string) => {
+    if (residentialDetails(s) || /(?:家中|家门|返家|回家)/.test(s)) return true;
+    for (const name of publicHomeBrands) s = s.replace(name, "公开商户");
+    return /我家/.test(s);
+  };
   // Notes can also contain unrelated contact addresses. Only an explicit
   // declaration about this activity's location can make its map point private.
   // Require a boundary after the home label so a shop such as “我家酸菜鱼” is

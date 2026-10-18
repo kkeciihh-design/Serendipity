@@ -66,6 +66,25 @@ describe("attraction recommendations and field truth", () => {
     expect(attractionExclusionReasons(attractionCatalog[0], plan, event)).toEqual([]);
   });
 
+  it.each([
+    ["总预算不超过1000元。最好少走路", 100000],
+    ["最好少走路，总预算控制在1000元以内", 100000],
+    ["总预算不超过1000元", 100000],
+    ["总预算尽量不超过1000元", null],
+    ["总预算1000元左右", null],
+    ["最好总预算控制在1000元以内。少走路", null],
+    ["总预算不超过1000元左右；少走路", null],
+    ["预算不超过1000.50元。大概下午三点到", 100050],
+  ])("M1 judges only the budget clause: %s", (constraint, expected) => {
+    const plan = fixture(); plan.requestSnapshot.constraints = [constraint as string];
+    expect(confirmedBudgetLimit(plan)).toBe(expected);
+  });
+
+  it.each(["。", "；", ";", "！", "!", "？", "?", "\n", "\r\n", "，", ",", "."])("M1 separates unrelated soft preferences at %j", (separator) => {
+    const plan = fixture(); plan.requestSnapshot.constraints = [`尽量住地铁口${separator}总预算不超过1000元${separator}大概下午三点到`];
+    expect(confirmedBudgetLimit(plan)).toBe(100000);
+  });
+
   it.each(["预算不超过 50 元", "预算不能超过 50 元", "预算至多 50 元"])("recognizes the explicit maximum %s", (constraint) => {
     const plan = fixture(); plan.requestSnapshot.constraints = [constraint];
     expect(confirmedBudgetLimit(plan)).toBe(5000);
@@ -79,7 +98,7 @@ describe("attraction recommendations and field truth", () => {
     entry.ticket.status = "verified";
     plan.requestSnapshot.budgetAmountCents = 1;
     expect(attractionExclusionReasons(entry, plan, event)).toEqual([]);
-    plan.requestSnapshot.constraints = ["总预算上限 1 元"];
+    plan.requestSnapshot.constraints = ["总预算上限 1 元。最好少走路"];
     expect(attractionExclusionReasons(entry, plan, event).join(" ")).toContain("预算上限");
     plan.requestSnapshot.constraints = ["不去岳麓书院"];
     expect(attractionExclusionReasons(entry, plan, event).join(" ")).toContain("明确保留");

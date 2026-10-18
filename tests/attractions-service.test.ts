@@ -235,7 +235,7 @@ describe("atomic attraction choice", () => {
     vi.stubGlobal("fetch", vi.fn(async () => routeResponse(600, 1200)));
     const preview = await service.previewAttractionReplacement(walking.tripId, walking.versionNumber, "d1-activity", "yuelu-academy");
     expect(preview.canApply).toBe(false); expect(preview.conflicts.join(" ")).toContain("每日步行上限");
-    const budget = await fixture({ constraints: ["预算不超过 50 元"] });
+    const budget = await fixture({ constraints: ["预算不超过 50 元。最好少走路"] });
     const overspend = await service.previewAttractionReplacement(budget.tripId, budget.versionNumber, "d1-activity", "yuelu-academy");
     expect(overspend.canApply).toBe(false); expect(overspend.conflicts.join(" ")).toContain("总预算上限");
   });

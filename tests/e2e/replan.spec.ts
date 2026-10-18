@@ -21,7 +21,7 @@ test.beforeAll(async () => {
     if (prompt.includes("用户变化=执行并发演练")) await new Promise<void>((resolve) => { releaseExecutionModel = resolve; });
     const remove = prompt.includes("用户变化=不去"), late = prompt.includes("用户变化=晚起"), requirement = prompt.includes("用户变化=改去");
     const proposal = { requirementChange: requirement ? "目的地发生变化" : null, edits: requirement ? [] : [{ eventId: late ? "d2-breakfast" : "d2-activity", remove,
-      fields: remove ? {} : late ? { startTime: "09:00", endTime: "09:30" } : { title: "室内展览", locationName: "室内展馆", costDraftCents: 3000 } }] };
+      fields: remove ? {} : late ? { startTime: "09:00", endTime: "09:30" } : { title: "室内展览", locationName: "室内展馆", costDraftCents: prompt.includes("用户变化=M1超预算") ? 200000 : 3000 } }] };
     res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(proposal) } }] }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -31,9 +31,12 @@ test.beforeAll(async () => {
   await settings.saveAIConfiguration(config, settings.createTestToken(config));
 });
 test.afterAll(async () => { await db.$disconnect(); await settings?.closeSettingsStore(); await new Promise<void>((resolve) => server?.close(() => resolve())); });
-async function seed(request: APIRequestContext) {
+async function seed(request: APIRequestContext, constraint?: string) {
   const response = await request.post("/api/trips", { data: { originalRequest: "阶段22合成旅行，仅用于自动测试。" } }); expect(response.status()).toBe(201);
   const { trip } = await response.json(), snapshot = requestFixture();
+  // Match the request form's saved list format; raw mixed-clause strings are
+  // separately covered by the parser and service integration tests.
+  if (constraint) { snapshot.constraints = constraint.split(/[、,，;]/).map((item) => item.trim()).filter(Boolean); snapshot.budgetAmountCents = 100000; }
   await request.patch(`/api/trips/${trip.id}/request`, { data: { expectedRequestRevision: 1, request: snapshot } });
   await request.post(`/api/trips/${trip.id}/request/confirm`, { data: { expectedRequestRevision: 2 } });
   const content = preparePlanForStorage(planFixture(snapshot)), costs = derivePlanCosts(content.events);
@@ -43,6 +46,28 @@ async function seed(request: APIRequestContext) {
 const panel = (page: Page) => page.getByRole("tabpanel", { name: "AI 重新规划", exact: true });
 async function open(page: Page, id: string) { await page.goto(`/trips/${id}?view=replan`); await expect(panel(page).getByLabel("这次想怎么调整？")).toBeVisible(); }
 async function preview(page: Page, reason: string) { await panel(page).getByLabel("这次想怎么调整？").fill(reason); await panel(page).getByRole("button", { name: "生成调整预览", exact: true }).click(); await expect(panel(page).getByTestId("replan-preview")).toBeVisible(); }
+
+for (const constraint of ["总预算不超过1000元。最好少走路", "最好少走路，总预算控制在1000元以内"]) {
+  test(`M1 hard budget blocks the 2216-yuan preview: ${constraint}`, async ({ page, request }) => {
+    const id = await seed(request, constraint); await open(page, id);
+    await panel(page).getByLabel("这次想怎么调整？").fill("M1超预算");
+    await panel(page).getByRole("button", { name: "生成调整预览", exact: true }).click();
+    await expect(panel(page).getByRole("status")).toContainText("明确预算上限");
+    await expect(panel(page).getByTestId("replan-preview")).toHaveCount(0);
+    expect(await db.planVersion.count({ where: { tripId: id } })).toBe(1);
+    expect(await db.replanCandidate.count({ where: { tripId: id } })).toBe(0);
+  });
+}
+
+for (const constraint of ["总预算尽量不超过1000元", "总预算1000元左右"]) {
+  test(`M1 soft budget warns and permits reviewed application: ${constraint}`, async ({ page, request }) => {
+    const id = await seed(request, constraint); await open(page, id); await preview(page, "M1超预算");
+    await expect(panel(page).getByTestId("replan-preview")).toContainText("预算");
+    await panel(page).getByRole("button", { name: "确认应用这份方案", exact: true }).click();
+    await expect(panel(page).getByRole("button", { name: "预览撤销上次调整", exact: true })).toBeVisible();
+    expect(await db.planVersion.count({ where: { tripId: id } })).toBe(2);
+  });
+}
 test("rain, late and removal each apply through one version and persist across browser reopen", async ({ page, request, browser }) => {
   await fs.mkdir(evidence, { recursive: true });
   for (const reason of ["下雨了", "晚起一小时", "不去这个景点"]) {

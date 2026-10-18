@@ -114,6 +114,64 @@ describe("shared export privacy and saved advisories", () => {
     expect(renderGeographicMap(snapshot, options, snapshot.plan.events[0].date)).not.toContain("<circle ");
   });
 
+  it.each(["我家酸菜鱼（五一广场店）", "我家酸菜鱼(五一广场店)", "我家酸菜鱼", "我家面馆", "我家便利店"])("M1 preserves the public brand '%s' in all five formats and maps", async (name) => {
+    const snapshot = await exportFixture(), event = snapshot.plan.events.find((e) => e.id === "d1-lunch")!;
+    event.title = name;
+    addPlace(snapshot, event.id, name, `${name}，合成商业路88号`, 113, 28.3);
+    const original = JSON.stringify(snapshot);
+    expect(exportPrivacy(snapshot, options).privateIds.has(event.id)).toBe(false);
+    for (const [index, document] of (await documents(snapshot)).entries()) {
+      expect(document).toContain(index === 2 ? name.replace(/[()]/g, "\\$&") : name);
+    }
+    const map = renderGeographicMap(snapshot, options, event.date);
+    expect(map).toContain(name);
+    expect(map.match(/<circle /g)).toHaveLength(1);
+    expect(JSON.stringify(snapshot)).toBe(original);
+  });
+
+  it.each(["我家", "回我家", "从我家出发", "我家附近", "我家楼下", "我家附近餐厅", "我家楼下面馆", "我家附近（五一广场店）"])("M1 keeps the home reference '%s' private even with a restaurant category", async (name) => {
+    const snapshot = await exportFixture(), event = snapshot.plan.events.find((e) => e.id === "d1-rest")!;
+    event.title = name;
+    addPlace(snapshot, event.id, name, "合成梧桐路88号", 113, 28.3).category = "amenity:restaurant";
+    expect(exportPrivacy(snapshot, options).privateIds.has(event.id)).toBe(true);
+    expect(renderGeographicMap(snapshot, options, event.date)).not.toContain("<circle ");
+    for (const document of await documents(snapshot)) expect(document).not.toContain(name);
+  });
+
+  it.each(["residence", "endpoint-name", "endpoint-address", "declared-home"])("M1 commercial names cannot bypass %s or its aliases", async (kind) => {
+    const snapshot = await exportFixture(), name = "我家酸菜鱼（五一广场店）";
+    const event = snapshot.plan.events.find((e) => e.id === "d1-rest")!;
+    event.title = name;
+    const place = addPlace(snapshot, event.id, name, kind === "residence" ? "合成星河小区3栋1201室" : "合成梧桐路88号", 113, 28.3);
+    place.category = "amenity:restaurant";
+    if (kind === "endpoint-name") snapshot.plan.tickets[0].chainOriginName = name;
+    if (kind === "endpoint-address") snapshot.plan.tickets[0].chainOriginName = place.address;
+    if (kind === "declared-home") event.note = "本活动地点为我家。";
+    Object.assign(snapshot.plan.events.find((e) => e.id === "d1-hotel")!, { placeId: place.id, locationName: "合成住宅别名" });
+    const privacy = exportPrivacy(snapshot, options);
+    expect(privacy.privateIds.has(event.id)).toBe(true);
+    expect(privacy.privateIds.has("d1-hotel")).toBe(true);
+    expect(renderGeographicMap(snapshot, options, event.date)).not.toContain("<circle ");
+    for (const document of await documents(snapshot)) {
+      for (const secret of [name, place.address, "合成住宅别名"]) expect(document).not.toContain(secret);
+    }
+  });
+
+  it("M1 a public brand cannot exempt a longer home reference elsewhere in the same snapshot", async () => {
+    const snapshot = await exportFixture(), name = "我家酸菜鱼";
+    addPlace(snapshot, "d1-lunch", name, "合成商业路88号", 113, 28.3);
+    const homeName = `${name}附近的住处`;
+    addPlace(snapshot, "d1-rest", homeName, "合成梧桐路88号", 112.95, 28.24);
+    const privacy = exportPrivacy(snapshot, options), date = snapshot.plan.events[0].date;
+    expect(privacy.privateIds.has("d1-lunch")).toBe(false);
+    expect(privacy.privateIds.has("d1-rest")).toBe(true);
+    expect(renderGeographicMap(snapshot, options, date).match(/<circle /g)).toHaveLength(1);
+    for (const document of await documents(snapshot)) {
+      expect(document).toContain(name);
+      expect(document).not.toContain(homeName);
+    }
+  });
+
   it("R30-01 an explicit current-location home declaration hides its point, aliases and incoming route", async () => {
     const snapshot = await exportFixture(), date = snapshot.plan.events[0].date;
     addPlace(snapshot, "d1-activity", "合成公共地标甲", "公共公园", 112.90, 28.20);
