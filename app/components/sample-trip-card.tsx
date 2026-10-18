@@ -13,7 +13,11 @@ export function SampleTripCard({
 }) {
   return (
     <article className={styles.card} data-testid="sample-trip-card">
-      <div className={styles.preview} data-testid="sample-trip-preview">
+      <div
+        className={styles.preview}
+        data-destination={trip.destinationLatin}
+        data-testid="sample-trip-preview"
+      >
         <div className={styles.ticketHeader}>
           <p className={styles.destination}>
             {issue ? <span className={styles.issue}>{issue} / </span> : null}

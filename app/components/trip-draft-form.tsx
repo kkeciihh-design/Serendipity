@@ -136,7 +136,7 @@ export function TripDraftForm() {
       <div className={styles.quickPrompts} role="group" aria-label="一键灵感">
         {quickPrompts.map((prompt) => (
           <button key={prompt} type="button" disabled={isSaving} onClick={() => fillInspiration(prompt)} className={styles.prompt} data-testid="quick-prompt">
-            <span aria-hidden="true">“</span>{prompt}<span aria-hidden="true">”</span>
+            <span aria-hidden="true">✦</span>{prompt}
           </button>
         ))}
       </div>
