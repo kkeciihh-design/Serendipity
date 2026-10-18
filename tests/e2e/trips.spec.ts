@@ -17,7 +17,7 @@ test("旅行可保存、打开、修改并跨刷新保留", async ({ page }) => 
 
   await page.goto("/");
   await page.locator("#trip-request").fill(originalText);
-  await page.getByRole("button", { name: "保存旅行草稿" }).click();
+  await page.getByTestId("create-trip-submit").click();
 
   await expect(page).toHaveURL(/\/trips$/);
   await expect(
@@ -64,12 +64,12 @@ test("旅行可保存、打开、修改并跨刷新保留", async ({ page }) => 
 test("确认删除只删除当前旅行", async ({ page }) => {
   await page.goto("/");
   await page.locator("#trip-request").fill("成都三日美食与周边");
-  await page.getByRole("button", { name: "保存旅行草稿" }).click();
+  await page.getByTestId("create-trip-submit").click();
   await expect(page).toHaveURL(/\/trips$/);
 
   await page.goto("/");
   await page.locator("#trip-request").fill("青岛三日海岸线");
-  await page.getByRole("button", { name: "保存旅行草稿" }).click();
+  await page.getByTestId("create-trip-submit").click();
   await expect(page).toHaveURL(/\/trips$/);
 
   await page
@@ -154,7 +154,7 @@ test("写入失败不显示已保存也不清空输入", async ({ page }) => {
   const failedText = "这趟旅行保存失败时必须保留原话。";
   await page.goto("/");
   await page.locator("#trip-request").fill(failedText);
-  await page.getByRole("button", { name: "保存旅行草稿" }).click();
+  await page.getByTestId("create-trip-submit").click();
 
   await expect(page.getByText("保存失败：数据库暂时不可写。")).toBeVisible();
   await expect(page.locator("#trip-request")).toHaveValue(failedText);
@@ -170,7 +170,7 @@ test("响应式布局可读且无横向溢出", async ({ page }) => {
 
   await page.goto("/");
   await page.locator("#trip-request").fill("响应式布局专属两日漫步");
-  await page.getByRole("button", { name: "保存旅行草稿" }).click();
+  await page.getByTestId("create-trip-submit").click();
   await expect(page).toHaveURL(/\/trips$/);
 
   for (const viewport of viewports) {
@@ -207,18 +207,17 @@ test("响应式布局可读且无横向溢出", async ({ page }) => {
   }
 });
 
-test("受影响的首页与 404 旧功能仍可用", async ({ page }) => {
+test("新建旅行锚点、首页样本与 404 返回路径仍可用", async ({ page }) => {
+  await page.goto("/trips");
+  await page.getByRole("link", { name: "新建旅行", exact: true }).click();
+  await expect(page).toHaveURL(/\/#trip-input$/);
+  await expect(page.getByTestId("hero-composer")).toBeInViewport();
+  await expect(page.locator("#trip-request")).toBeEditable();
+
   await page.goto("/");
-
-  await page.getByRole("link", { name: "开始创建旅行" }).click();
-  await expect(page.locator("#trip-input")).toBeInViewport();
-
-  await page.getByRole("link", { name: "查看展示样例" }).click();
-  await expect(page).toHaveURL(/#sample-trips$/);
-
-  const firstSample = page.getByRole("article").first();
-  await firstSample.getByText("查看样例内容").click();
-  await expect(firstSample.getByRole("list")).toBeVisible();
+  const firstSample = page.getByTestId("sample-trip-card").first();
+  await firstSample.getByText("展开完整样本", { exact: true }).click();
+  await expect(firstSample.getByTestId("sample-trip-details")).toBeVisible();
 
   await page.goto("/missing");
   await expect(
