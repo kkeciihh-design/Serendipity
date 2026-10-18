@@ -78,8 +78,9 @@ test("顶部导航继续打开旅行列表、运行状态与设置", async ({ pa
   }
 });
 
-test("三份精选样本可展开完整时间轴并收起，保留核验注脚", async ({ page }) => {
+test("三份精选样本在原页打开完整规划卡片，逐日行程与出行准备均可阅读", async ({ page }) => {
   await page.goto("/");
+  const originalUrl = page.url();
   const cards = page.getByTestId("sample-trip-card");
   await expect(cards).toHaveCount(3);
   const samples = [
@@ -112,23 +113,149 @@ test("三份精选样本可展开完整时间轴并收起，保留核验注脚",
     await expect(card.getByText(sample.duration, { exact: true })).toBeVisible();
     await expect(card.getByText(sample.description, { exact: true })).toBeVisible();
     for (const stop of sample.preview) await expect(card.getByTestId("sample-trip-preview")).toContainText(stop);
-    const details = card.locator("details");
-    const panel = card.getByTestId("sample-trip-details");
-    await expect(details).not.toHaveAttribute("open");
-    await expect(panel).not.toBeVisible();
-    await card.getByText("展开完整样本", { exact: true }).click();
-    await expect(details).toHaveAttribute("open", "");
-    await expect(panel).toBeVisible();
-    await expect(panel.locator("ol").first().locator(":scope > li")).toHaveCount(sample.days);
-    await expect(panel).toContainText("Day 1");
-    await expect(panel.getByText("交通接驳", { exact: true })).toBeVisible();
-    await expect(panel.getByText("门票核验", { exact: true })).toBeVisible();
-    await card.getByText("收起完整样本", { exact: true }).click();
-    await expect(details).not.toHaveAttribute("open");
-    await expect(panel).not.toBeVisible();
+    const trigger = card.getByRole("button", { name: "查看完整规划：" + sample.title, exact: true });
+    await expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+    await expect(card.getByText("查看完整规划", { exact: true })).toBeVisible();
+    await card.scrollIntoViewIfNeeded();
+    const cardBefore = await card.boundingBox();
+    // Click the photograph rather than the footer to exercise the whole-card target.
+    await trigger.click({ position: { x: 30, y: 30 } });
+    const dialog = page.getByRole("dialog", { name: sample.title, exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(page).toHaveURL(originalUrl);
+    await expect(dialog.getByTestId("sample-trip-details")).toBeVisible();
+    const cardAfter = await card.boundingBox();
+    expect(cardBefore).not.toBeNull();
+    expect(cardAfter).not.toBeNull();
+    expect(cardAfter!.height).toBeCloseTo(cardBefore!.height, 0);
+    expect(cardAfter!.width).toBeCloseTo(cardBefore!.width, 0);
+
+    const sections = dialog.getByRole("tablist", { name: "规划内容", exact: true });
+    await expect(sections.getByRole("tab", { name: "每日行程", exact: true })).toHaveAttribute("aria-selected", "true");
+    const days = dialog.getByRole("tablist", { name: "选择行程日期", exact: true });
+    await expect(days.getByRole("tab")).toHaveCount(sample.days);
+    for (let day = 1; day <= sample.days; day += 1) {
+      const dayName = new RegExp("^Day " + day + "\\b");
+      const dayTab = days.getByRole("tab", { name: dayName });
+      await dayTab.click();
+      await expect(dayTab).toHaveAttribute("aria-selected", "true");
+      const dayPanel = dialog.getByRole("tabpanel", { name: dayName });
+      await expect(dayPanel).toBeVisible();
+      await expect(dayPanel).toContainText(/\b\d{1,2}:\d{2}\b/);
+      expect(await dayPanel.getByRole("listitem").count()).toBeGreaterThanOrEqual(3);
+      if (day > 1) await expect(dialog.getByRole("tabpanel", { name: new RegExp("^Day " + (day - 1) + "\\b") })).not.toBeVisible();
+    }
+
+    await sections.getByRole("tab", { name: "交通与住宿", exact: true }).click();
+    for (const heading of ["交通接驳", "门票核验", "住宿建议"]) {
+      await expect(dialog.getByText(heading, { exact: true })).toBeVisible();
+    }
+    await sections.getByRole("tab", { name: "预算与准备", exact: true }).click();
+    // Switching panels must not let scroll anchoring tuck the budget under the sticky tabs.
+    await expect.poll(async () => {
+      const tabBounds = await sections.boundingBox();
+      const headingBounds = await dialog.getByRole("heading", { name: "预算参考", exact: true }).boundingBox();
+      return Boolean(tabBounds && headingBounds && headingBounds.y >= tabBounds.y + tabBounds.height);
+    }).toBe(true);
+    for (const heading of ["预算参考", "行前清单", "天气与备选"]) {
+      await expect(dialog.getByText(heading, { exact: true })).toBeVisible();
+    }
+    await dialog.getByRole("button", { name: "关闭完整规划", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+    await expect(page).toHaveURL(originalUrl);
     await expect(page.getByText(sampleDisclaimer, { exact: true })).toBeVisible();
   }
 });
+
+test("完整规划支持键盘切换，焦点留在卡片窗口内且 Escape 返回原样本", async ({ page }) => {
+  await page.goto("/");
+  const trigger = page.getByRole("button", { name: "查看完整规划：杭州两日轻松漫步", exact: true });
+  await trigger.focus();
+  await trigger.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "杭州两日轻松漫步", exact: true });
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+
+  const dayTabs = dialog.getByRole("tablist", { name: "选择行程日期", exact: true });
+  await dayTabs.getByRole("tab", { name: /^Day 1\b/ }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(dayTabs.getByRole("tab", { name: /^Day 2\b/ })).toBeFocused();
+  await expect(dayTabs.getByRole("tab", { name: /^Day 2\b/ })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("tabpanel", { name: /^Day 2\b/ })).toBeVisible();
+
+  const sections = dialog.getByRole("tablist", { name: "规划内容", exact: true });
+  await sections.getByRole("tab", { name: "每日行程", exact: true }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(sections.getByRole("tab", { name: "交通与住宿", exact: true })).toBeFocused();
+  await expect(sections.getByRole("tab", { name: "交通与住宿", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByText("住宿建议", { exact: true })).toBeVisible();
+
+  // Traverse beyond a full cycle in each direction; background controls must stay inert.
+  const controls = await dialog.locator('button, a[href], input, select, textarea, [tabindex="0"]').count();
+  for (const key of ["Tab", "Shift+Tab"]) {
+    for (let step = 0; step < controls + 2; step += 1) {
+      await page.keyboard.press(key);
+      await expect.poll(() => dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+    }
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+});
+
+for (const viewport of [{ width: 390, height: 844 }, { width: 540, height: 900 }, { width: 768, height: 1024 }, { width: 1440, height: 900 }]) {
+  test("完整规划在 " + viewport.width + "px 可完整阅读，关闭遮罩后恢复页面滚动", async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    const originalUrl = page.url();
+    const trigger = page.getByRole("button", { name: "查看完整规划：成都五日美食与周边", exact: true });
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "成都五日美食与周边", exact: true });
+    await expect(dialog).toBeVisible();
+    const scrollAtOpen = await page.evaluate(() => window.scrollY);
+    const bounds = await dialog.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+    await expect(dialog.getByRole("button", { name: "关闭完整规划", exact: true })).toBeInViewport({ ratio: 1 });
+
+    const dayTabs = dialog.getByRole("tablist", { name: "选择行程日期", exact: true });
+    await dayTabs.getByRole("tab", { name: /^Day 5\b/ }).click();
+    const lastDay = dialog.getByRole("tabpanel", { name: /^Day 5\b/ });
+    await expect(lastDay).toBeVisible();
+    const finalStop = lastDay.getByRole("listitem").last();
+    await finalStop.scrollIntoViewIfNeeded();
+    await expect(finalStop).toBeInViewport();
+
+    await dialog.getByRole("tab", { name: "预算与准备", exact: true }).click();
+    const alternatives = dialog.getByText("天气与备选", { exact: true });
+    await alternatives.scrollIntoViewIfNeeded();
+    await expect(alternatives).toBeInViewport();
+    const layout = await page.evaluate(() => ({
+      width: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width);
+    const dialogLayout = await dialog.evaluate((element) => ({ width: element.clientWidth, scrollWidth: element.scrollWidth }));
+    expect(dialogLayout.scrollWidth).toBeLessThanOrEqual(dialogLayout.width);
+
+    // A wheel over the backdrop cannot move the page behind the open itinerary.
+    await page.mouse.move(1, 1);
+    await page.mouse.wheel(0, -600);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollAtOpen);
+    await page.mouse.click(1, 1);
+    await expect(dialog).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+    await expect(page).toHaveURL(originalUrl);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollAtOpen);
+    await page.mouse.wheel(0, -600);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(scrollAtOpen);
+  });
+}
 
 test("填入灵感示例只填充原话并聚焦，字数按 Unicode 字符显示", async ({ page }) => {
   const posts = collectDraftPosts(page);

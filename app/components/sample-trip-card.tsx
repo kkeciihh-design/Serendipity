@@ -1,8 +1,12 @@
+"use client";
+
+import { useState } from "react";
 import Image from "next/image";
 import { ArrowUpRight } from "lucide-react";
 import { samplePhotography } from "@/lib/destination-gallery";
 import type { SampleTrip } from "@/lib/home-samples";
 import { LandscapeSketch } from "./landscape-sketch";
+import { SampleTripDialog } from "./sample-trip-dialog";
 import styles from "./sample-trip-card.module.css";
 
 export type { SampleTrip } from "@/lib/home-samples";
@@ -16,9 +20,18 @@ export function SampleTripCard({
   issue?: string;
   mode?: "photo" | "sketch";
 }) {
+  const [open, setOpen] = useState(false);
   const photo = samplePhotography[trip.destination as keyof typeof samplePhotography];
   return (
+    <>
     <article className={styles.card} data-testid="sample-trip-card">
+      <button
+        type="button"
+        className={styles.openButton}
+        aria-label={`查看完整规划：${trip.title}`}
+        aria-haspopup="dialog"
+        onClick={() => setOpen(true)}
+      />
       <div
         className={styles.preview}
         data-destination={trip.destinationLatin}
@@ -52,41 +65,13 @@ export function SampleTripCard({
       <div className={styles.body}>
         <h3 className={styles.title}>{trip.title}</h3>
         <p className={styles.description}>{trip.style}</p>
-        <details className={styles.details}>
-          <summary className={styles.summary}>
-            <span className={styles.expandLabel}>展开完整样本</span>
-            <span className={styles.collapseLabel}>收起完整样本</span>
+        <div className={styles.summary} aria-hidden="true">
+            <span>查看完整规划</span>
             <ArrowUpRight aria-hidden="true" className={styles.arrow} />
-          </summary>
-          <div className={styles.expanded} data-testid="sample-trip-details">
-            <ol className={styles.dayTimeline} aria-label={`${trip.destination}逐日行程`}>
-              {trip.days.map((day) => (
-                <li key={day.day}>
-                  <p className={styles.dayLabel}>{day.day}</p>
-                  <h4 className={styles.dayTitle}>{day.title}</h4>
-                  <p className={styles.route}>{day.route}</p>
-                  <p className={styles.rhythm}>{day.rhythm}</p>
-                </li>
-              ))}
-            </ol>
-            <div className={styles.checks}>
-              <p className={styles.checksHeading}>
-                <span aria-hidden="true" /> 出发前，再确认一遍
-              </p>
-              <dl>
-                <div>
-                  <dt>交通接驳</dt>
-                  <dd>{trip.transport}</dd>
-                </div>
-                <div>
-                  <dt>门票核验</dt>
-                  <dd>{trip.tickets}</dd>
-                </div>
-              </dl>
-            </div>
-          </div>
-        </details>
+        </div>
       </div>
     </article>
+    {open ? <SampleTripDialog trip={trip} issue={issue} mode={mode} onClose={() => setOpen(false)} /> : null}
+    </>
   );
 }

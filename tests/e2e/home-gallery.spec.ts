@@ -82,7 +82,7 @@ test("服务端始终输出九寨沟实景，客户端恢复记忆且无水合�
   expect(errors).toEqual([]);
 });
 
-test("双生模式同步替换首屏与三座城市画境，并保留输入及样本展开状态", async ({ page }) => {
+test("双生模式同步替换首屏、样本与规划弹窗画境，并保留输入", async ({ page }) => {
   const posts = collectDraftPosts(page);
   const errors = collectBrowserErrors(page);
   await page.goto("/");
@@ -91,12 +91,27 @@ test("双生模式同步替换首屏与三座城市画境，并保留输入及�
   const original = "  保留我的杭州想法🌿\n第二天只去茶园，不赶路。  ";
   await input.fill(original);
   const card = page.getByTestId("sample-trip-card").first();
-  await card.getByText("展开完整样本", { exact: true }).click();
+  const trigger = card.getByRole("button", { name: "查看完整规划：杭州两日轻松漫步", exact: true });
+  const dialog = page.getByRole("dialog", { name: "杭州两日轻松漫步", exact: true });
+  const cover = dialog.getByTestId("sample-trip-cover");
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await expect(cover).toHaveAttribute("data-aesthetic", "photo");
+  await expectLoadedPhoto(cover);
+  await dialog.getByRole("button", { name: "关闭完整规划", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
 
   await page.getByRole("button", { name: "素描手账模式", exact: true }).click();
   await expectMode(page, "sketch");
   await expect(input).toHaveValue(original);
-  await expect(card.locator("details")).toHaveAttribute("open", "");
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await expect(cover).toHaveAttribute("data-aesthetic", "sketch");
+  await expect(cover.locator("img")).toHaveCount(0);
+  await expect(cover.locator("svg").first()).toBeVisible();
+  await expect(dialog.getByTestId("sample-trip-details")).toBeVisible();
+  await dialog.getByRole("button", { name: "关闭完整规划", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
   await page.getByRole("button", { name: "偶遇下一处风景", exact: true }).click();
   await expect(page.getByTestId("home-gallery")).toHaveAttribute("data-destination", "west-lake");
   await expect(input).toHaveValue(original);
@@ -104,7 +119,12 @@ test("双生模式同步替换首屏与三座城市画境，并保留输入及�
   await page.getByRole("button", { name: "实景画廊模式", exact: true }).click();
   await expectMode(page, "photo");
   await expect(input).toHaveValue(original);
-  await expect(card.locator("details")).toHaveAttribute("open", "");
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await expect(cover).toHaveAttribute("data-aesthetic", "photo");
+  await expectLoadedPhoto(cover);
+  await dialog.getByRole("button", { name: "关闭完整规划", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
   await expect(page.getByTestId("trip-request-feedback")).toHaveCount(0);
   expect(posts).toHaveLength(0);
   expect(errors).toEqual([]);
