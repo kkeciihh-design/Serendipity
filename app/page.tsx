@@ -2,7 +2,10 @@ import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowDown,
+  ArrowUpRight,
+  Compass,
   ExternalLink,
+  Leaf,
   Settings,
 } from "lucide-react";
 import { requirePageAppAccess } from "@/lib/page-access";
@@ -47,90 +50,104 @@ export default async function HomePage() {
   await requirePageAppAccess();
 
   return (
-    <main className="min-h-dvh bg-cream">
-      <section className="relative flex min-h-[70svh] max-h-[820px] flex-col overflow-hidden">
+    <main className="editorial-home">
+      <section className="home-cover">
         <Image
           priority
           fill
           src="/images/jiuzhaigou-home.jpg"
           alt="九寨沟五花海：蓝色湖水与远处山林构成的旅行场景。"
           sizes="100vw"
-          className="object-cover"
+          className="home-cover-image"
         />
-        <div aria-hidden="true" className="absolute inset-0 bg-charcoal/55" />
-        <div className="relative z-10 flex flex-1 flex-col">
-          <header className="flex items-center justify-between px-5 py-6 sm:px-10 lg:px-16">
-            <div>
-              <p className="text-sm font-medium text-cream/85">AI 旅行规划助手</p>
-              <p className="text-xl font-semibold text-white">Serendipity</p>
+        <div aria-hidden="true" className="home-cover-shade" />
+        <div className="home-cover-content">
+          <header className="home-navigation">
+            <div className="home-brand">
+              <Compass aria-hidden="true" className="home-brand-symbol" strokeWidth={1.2} />
+              <div>
+                <p className="home-wordmark">Serendipity</p>
+                <p className="home-brand-caption">AI 旅行规划助手</p>
+              </div>
             </div>
-            <div className="max-w-[45%] text-right">
-              <p className="text-sm leading-6 text-cream/85">
-                本地优先
-                <br className="hidden sm:block" />
-                个人旅行助手
+            <div className="home-navigation-actions">
+              <p className="home-local-note">
+                <span className="home-local-dot" aria-hidden="true" />
+                <span>本地优先</span>
+                <span className="home-personal-note">个人旅行助手</span>
               </p>
               <Link
                 href="/trips"
-                className="mt-2 inline-flex min-h-11 items-center rounded-md border border-cream/70 px-3 py-2 text-sm font-medium text-cream transition-colors hover:border-cream hover:bg-cream/10"
+                className="home-navigation-link"
               >
                 我的旅行
+                <ArrowUpRight aria-hidden="true" className="size-3.5" />
               </Link>
+              <Link href="/runtime" className="home-navigation-link">运行状态</Link>
               <Link
                 href="/settings"
                 title="个人设置"
                 aria-label="个人设置"
-                className="mt-2 inline-flex min-h-11 w-11 items-center justify-center rounded-md border border-cream/70 text-cream transition-colors hover:border-cream hover:bg-cream/10"
+                className="home-settings-link"
               >
-                <Settings aria-hidden="true" className="size-5" />
+                <Settings aria-hidden="true" className="size-4" strokeWidth={1.5} />
               </Link>
-              <Link href="/runtime" className="mt-2 block py-2 text-sm text-cream underline underline-offset-4">运行状态</Link>
             </div>
           </header>
-          <div className="mt-auto max-w-3xl px-5 pb-10 sm:px-10 lg:px-16 lg:pb-14">
-            <h1 className="max-w-2xl text-4xl font-bold leading-10 text-white sm:text-5xl sm:leading-12">
-              把旅行想法整理成能执行的计划
+          <div className="home-cover-story home-container">
+            <div className="home-cover-kicker" aria-hidden="true">
+              <span className="home-fine-rule" />
+              THE ART OF A WELL-PLANNED JOURNEY
+            </div>
+            <h1 className="home-cover-title" aria-label="把旅行想法整理成能执行的计划">
+              <span>把旅行想法</span><span>整理成能执行的计划</span>
             </h1>
-            <p className="mt-5 max-w-xl text-lg leading-8 text-cream/90">
+            <p className="home-cover-description">
               Serendipity 面向个人旅行：先理解你的想法，再让时间、地点、预算和待确认事实保持一致。
             </p>
-            <div className="mt-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+            <div className="home-cover-actions">
               <a
                 href="#trip-input"
-                className="inline-flex min-h-12 items-center gap-2 rounded-md bg-cream px-5 py-3 text-base font-semibold text-charcoal transition-colors hover:bg-white focus-visible:outline-cream"
+                className="home-cover-button home-cover-button-primary"
               >
                 开始创建旅行
-                <ArrowDown aria-hidden="true" className="size-5" />
+                <ArrowDown aria-hidden="true" className="size-4" />
               </a>
               <a
                 href="#sample-trips"
-                className="inline-flex min-h-12 items-center rounded-md border border-cream/70 px-5 py-3 text-base font-medium text-cream transition-colors hover:border-cream hover:bg-cream/10 focus-visible:outline-cream"
+                className="home-cover-button home-cover-button-secondary"
               >
                 查看展示样例
               </a>
-              <p className="text-base leading-7 text-cream/85">
+              <p className="home-cover-aside">
               现在可以用一句话保存原话草稿，再让 AI 核对需求和关键问题。
               </p>
             </div>
+          </div>
+          <div className="home-cover-colophon home-container" aria-hidden="true">
+            <span><span className="home-coordinate-cross">+</span> JIUZHAIGOU, CHINA <span className="home-coordinate">33°15′ N · 103°55′ E</span></span>
+            <span>VOL. 01 <span className="home-colophon-divider">/</span> 山水之间，自有方向</span>
           </div>
         </div>
       </section>
 
       <section
         id="sample-trips"
-        className="scroll-mt-4 bg-cream px-5 py-12 sm:px-10 sm:py-16 lg:px-16"
+        className="home-showcase home-section"
       >
-        <div className="mx-auto max-w-6xl">
-          <p className="text-sm font-medium text-clay">展示样例</p>
-          <h2 className="mt-2 max-w-2xl text-3xl font-bold leading-9 text-charcoal">
-            先看它要整理什么样的信息
-          </h2>
-          <p className="mt-4 max-w-3xl text-base leading-7 text-graphite">
-            以下是人工编写的展示样例，用来说明信息层级；它们不是 AI 实时生成，也不是你的个人旅行。
-          </p>
-          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {sampleTrips.map((trip) => (
-              <SampleTripCard key={trip.title} trip={trip} />
+        <div className="home-container">
+          <div className="home-section-heading">
+            <div>
+              <div className="home-section-kicker"><span aria-hidden="true">SHOWCASE ·</span><p>展示样例</p></div>
+              <h2 className="home-section-title">先看它要整理什么样的信息</h2>
+            </div>
+            <p className="home-section-note">
+              以下是人工编写的展示样例，用来说明信息层级；它们不是 AI 实时生成，也不是你的个人旅行。
+            </p>
+          </div>
+          <div className="home-sample-grid">
+            {sampleTrips.map((trip, index) => (
+              <SampleTripCard key={trip.title} trip={trip} issue={String(index + 1).padStart(2, "0")} />
             ))}
           </div>
         </div>
@@ -138,32 +155,57 @@ export default async function HomePage() {
 
       <section
         id="trip-input"
-        className="scroll-mt-4 bg-shell px-5 py-12 sm:px-10 sm:py-16 lg:px-16"
+        className="home-studio home-section"
       >
-        <div className="mx-auto max-w-6xl">
-          <p className="text-sm font-medium text-sage">我的旅行</p>
-          <h2 className="mt-2 text-3xl font-bold leading-9 text-charcoal">
-            用一句话开始一趟旅行
-          </h2>
-          <p className="mt-4 max-w-3xl text-base leading-7 text-graphite">
+        <div className="home-container">
+          <div className="home-studio-heading">
+            <div>
+              <div className="home-section-kicker"><span aria-hidden="true">YOUR TRAVEL STUDIO ·</span><p>我的旅行</p></div>
+              <h2 className="home-section-title">用一句话开始一趟旅行</h2>
+            </div>
+            <span className="home-studio-edition" aria-hidden="true">每一次出发，始于一个念头。<ArrowDown className="size-4" /></span>
+          </div>
+          <p className="home-studio-description">
             先写下你的想法，应用会完整保留原话并保存到本机数据库。AI 只生成待确认的需求摘要，不会直接生成行程。
           </p>
-          <TripDraftForm />
+          <div className="home-studio-grid">
+            <TripDraftForm />
+            <aside className="home-manifesto" aria-hidden="true">
+              <div className="home-manifesto-topline"><span>FROM THOUGHT TO ITINERARY</span><Compass size={21} strokeWidth={1} /></div>
+              <div className="home-manifesto-intro">
+                <p className="home-manifesto-title">让灵感有迹可循。</p>
+                <p>留一份随性，也留一份笃定。</p>
+              </div>
+              <ol className="home-workflow">
+                <li><span>01</span><div><p>原话留存</p><small>珍藏出发时的念头</small></div><span className="home-workflow-mark">↗</span></li>
+                <li><span>02</span><div><p>要素拆解</p><small>把时间、地点与偏好慢慢理清</small></div><span className="home-workflow-mark">↗</span></li>
+                <li><span>03</span><div><p>预算与红线校验</p><small>为每一份期待留出余地</small></div><span className="home-workflow-mark">↗</span></li>
+                <li><span>04</span><div><p>离线随身导出</p><small>将确认好的安排带在身边</small></div><span className="home-workflow-mark">↗</span></li>
+              </ol>
+              <div className="home-manifesto-footer">
+                <div><Leaf size={15} strokeWidth={1.4} /><p>灵感归你，原话留在本机。<br /><span>LOCAL FIRST. ALWAYS YOURS.</span></p></div>
+                <span className="home-local-seal">本机<br />留存</span>
+              </div>
+            </aside>
+          </div>
         </div>
       </section>
 
-      <footer className="bg-cream px-5 py-8 sm:px-10 lg:px-16">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 border-t border-sand pt-6 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm leading-6 text-graphite">
+      <footer className="home-footer">
+        <div className="home-container">
+          <div className="home-footer-signature" aria-hidden="true"><span>Serendipity</span><span>A LITTLE WONDER. A WELL-MADE PLAN.</span></div>
+          <div className="home-footer-colophon">
+          <p>
             首页图片：Chensiyuan，CC BY-SA 4.0，via Wikimedia Commons，2026-10-08 获取。
           </p>
           <a
             href="https://commons.wikimedia.org/wiki/File:1_jiuzhaigou_valley_wu_hua_hai_2011b.jpg"
-            className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-sage hover:text-charcoal"
+            className="home-license-link"
           >
             查看图片许可
-            <ExternalLink aria-hidden="true" className="size-4" />
+            <ExternalLink aria-hidden="true" className="size-3" />
           </a>
+          </div>
         </div>
       </footer>
     </main>

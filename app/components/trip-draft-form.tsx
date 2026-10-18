@@ -4,6 +4,7 @@ import { businessFetch } from "@/lib/business-fetch";
 import { ClipboardPenLine, Info, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import styles from "./trip-draft-form.module.css";
 
 const MAX_DRAFT_LENGTH = 3000;
 
@@ -134,82 +135,83 @@ export function TripDraftForm() {
   };
 
   return (
-    <div className="mt-8 max-w-3xl space-y-5">
+    <div className={styles.card}>
       <form
         ref={formRef}
         onSubmit={submitDraft}
-        className="rounded-lg border border-sand/80 bg-white p-5 shadow-[0_1px_2px_rgba(35,42,38,0.06)] sm:p-6"
+        className={styles.form}
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <label
-            htmlFor="trip-request"
-            className="text-lg font-semibold text-charcoal"
-          >
-            旅行想法原话
-          </label>
-          <button
-            type="button"
-            onClick={fillExample}
-            className="inline-flex min-h-11 items-center gap-2 rounded-md bg-sage-soft px-3 py-2 text-sm font-medium text-sage transition-colors hover:bg-sand/70"
-          >
-            <ClipboardPenLine aria-hidden="true" className="size-4" />
-            填入示例
-          </button>
-        </div>
-        <p className="mt-2 text-sm leading-6 text-graphite">
-          用一句或多句中文描述都可以；按 Enter 保存，按 Shift + Enter 换行。中文输入法选词时的 Enter 不会误提交。
-        </p>
-        <textarea
-          ref={textareaRef}
-          id="trip-request"
-          name="trip-request"
-          value={requestText}
-          onChange={(event) => setRequestText(event.target.value)}
-          onKeyDown={handleKeyDown}
-          rows={7}
-          aria-describedby="trip-request-hint trip-request-feedback"
-          aria-invalid={isOverLength || feedback?.tone === "error"}
-          className="mt-4 min-h-36 w-full resize-y rounded-md border border-sand bg-cream px-4 py-3 text-base leading-7 text-charcoal placeholder:text-graphite/65 focus:border-sage focus:outline-none"
-          placeholder="例如：我想 12 月初从北京去成都玩三天，两个人，预算 3000 元，喜欢美食和轻松的市区路线。"
-        />
-        <p
-          id="trip-request-hint"
-          className={`mt-2 text-sm leading-6 ${
-            isOverLength ? "text-clay" : "text-graphite"
-          }`}
-        >
-          当前 {characterCount}/{MAX_DRAFT_LENGTH} 字；保存后仅创建原话草稿，不会解析需求或调用 AI。
-        </p>
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <button
-            type="submit"
-            disabled={isSaving}
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-sage px-5 py-3 text-base font-semibold text-white transition-colors hover:bg-focus focus-visible:outline-white disabled:cursor-not-allowed disabled:bg-graphite/70"
-          >
-            <Send aria-hidden="true" className="size-5" />
-            {isSaving ? "正在保存..." : "保存旅行草稿"}
-          </button>
-          <p className="flex items-center gap-2 text-sm leading-6 text-graphite">
-            <Info aria-hidden="true" className="size-4 text-sage" />
-            支持多行输入和粘贴
+        <div className={styles.content}>
+          <div className={styles.header}>
+            <label htmlFor="trip-request" className={styles.label}>
+              旅行想法原话
+            </label>
+            <button
+              type="button"
+              onClick={fillExample}
+              className={styles.exampleButton}
+            >
+              <ClipboardPenLine aria-hidden="true" className="size-4" />
+              填入示例
+            </button>
+          </div>
+          <p className={styles.keyboardHint}>
+            用一句或多句中文描述都可以；按 Enter 保存，按 Shift + Enter 换行。中文输入法选词时的 Enter 不会误提交。
           </p>
+          <textarea
+            ref={textareaRef}
+            id="trip-request"
+            name="trip-request"
+            value={requestText}
+            onChange={(event) => setRequestText(event.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={7}
+            aria-describedby="trip-request-hint trip-request-feedback"
+            aria-invalid={isOverLength || feedback?.tone === "error"}
+            className={styles.textarea}
+            placeholder="例如：我想 12 月初从北京去成都玩三天，两个人，预算 3000 元，喜欢美食和轻松的市区路线。"
+          />
+          <div className={styles.actions}>
+            <button
+              type="submit"
+              disabled={isSaving}
+              className={styles.saveButton}
+            >
+              <Send aria-hidden="true" className="size-4" />
+              {isSaving ? "正在保存..." : "保存旅行草稿"}
+            </button>
+            <p className={styles.inputBadge}>
+              <Info aria-hidden="true" className="size-3.5" />
+              支持多行输入和粘贴
+            </p>
+          </div>
+        </div>
+
+        <div className={styles.statusFooter}>
+          <p
+            id="trip-request-hint"
+            className={`${styles.characterHint} ${
+              isOverLength ? styles.error : ""
+            }`}
+          >
+            当前 <span className={styles.counter}>{characterCount}/{MAX_DRAFT_LENGTH}</span> 字；保存后仅创建原话草稿，不会解析需求或调用 AI。
+          </p>
+          <div
+            id="trip-request-feedback"
+            aria-live="polite"
+            className={`${styles.feedback} ${
+              feedback?.tone === "error"
+                ? styles.error
+                : feedback?.tone === "success"
+                  ? styles.success
+                  : styles.info
+            }`}
+          >
+            {feedback?.message ??
+              "保存后会在这里显示状态。空白、过长、重复点击或数据库写入失败都会有明确提示。"}
+          </div>
         </div>
       </form>
-
-      <div
-        id="trip-request-feedback"
-        aria-live="polite"
-        className={`min-h-11 rounded-md px-4 py-3 text-base leading-7 ${
-          feedback?.tone === "error"
-            ? "bg-clay-soft text-clay"
-            : feedback?.tone === "success"
-              ? "bg-sage-soft text-sage"
-              : "bg-shell text-graphite"
-        }`}
-      >
-        {feedback?.message ??
-          "保存后会在这里显示状态。空白、过长、重复点击或数据库写入失败都会有明确提示。"}
-      </div>
     </div>
   );
 }

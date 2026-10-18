@@ -85,7 +85,9 @@
     ".next-phase30-final/types/**/*.ts",
     ".next-phase30-final/dev/types/**/*.ts",
     ".next-phase30-verified/types/**/*.ts",
-    ".next-phase30-verified/dev/types/**/*.ts"
+    ".next-phase30-verified/dev/types/**/*.ts",
+    ".next-editorial-home-20261018/types/**/*.ts",
+    ".next-editorial-home-20261018/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

@@ -20,7 +20,7 @@
 
 当前[首页](http://127.0.0.1:3003)、[运行状态与数据位置](http://127.0.0.1:3003/runtime)。端口如变化，以启动器自动打开的网页为准。此地址只对本机有效；手机请提前保存文字、长图或 PDF，离线内容不会实时更新，也不能在线 AI 重规划。未部署个人外网实例。
 
-维护者：当前生产构建为 `.next-phase30-verified`，设置 `SERENDIPITY_BUILD_DIR=.next-phase30-verified` 后执行 `npm run build`。`scripts/windows/install-launcher.ps1` 安装当前 Windows 用户的三个快捷方式，并将实际应用路径、Node 路径、数据目录和首选端口保存在实例 `runtime/launcher.json`。桌面安装默认使用用户目录下的 `SerendipityData`，避免 Windows 应用包对 LocalAppData 的重定向；发现旧数据时会要求先保全并显式指定目录，不自动创建替代数据库。先停止再升级，见[阶段30交接](docs/阶段交接/阶段-30.md)。不要在运行时覆盖发布构建目录，或把不同正式启动器同时指向同一数据库。
+维护者：本机首页新版生产构建为 `.next-editorial-home-20261018`；实际启动版本以实例 `runtime/launcher.json` 的 `buildDirectory` 为准。设置 `SERENDIPITY_BUILD_DIR=.next-editorial-home-20261018` 后执行 `npm run build`。同步源码后还需更新启动器的构建选择，详见[首页本地启动更新](docs/阶段验收/首页视觉重构-本地启动更新-2026-10-18.md)。`scripts/windows/install-launcher.ps1` 安装当前 Windows 用户的三个快捷方式，并将实际应用路径、Node 路径、数据目录和首选端口保存在实例 `runtime/launcher.json`。桌面安装默认使用用户目录下的 `SerendipityData`，避免 Windows 应用包对 LocalAppData 的重定向；发现旧数据时会要求先保全并显式指定目录，不自动创建替代数据库。先停止再升级，见[阶段30交接](docs/阶段交接/阶段-30.md)。不要在运行时覆盖发布构建目录，或把不同正式启动器同时指向同一数据库。
 
 本项目已采用 Node.js 24、npm、Next.js、TypeScript、SQLite/Prisma。依赖使用 package-lock.json 固定；新环境安装使用 npm ci。
 

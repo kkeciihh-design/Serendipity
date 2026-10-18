@@ -1,0 +1,240 @@
+.card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 25px;
+  border: 1px solid rgb(30 42 34 / 10%);
+  border-radius: 12px;
+  background: #fcfbf8;
+  box-shadow:
+    0 14px 38px -12px rgb(24 34 28 / 8%),
+    0 2px 6px -1px rgb(24 34 28 / 4%);
+  transition:
+    transform 300ms ease,
+    border-color 300ms ease,
+    box-shadow 300ms ease;
+}
+
+.contours {
+  position: absolute;
+  z-index: -1;
+  top: -42px;
+  right: -66px;
+  width: 245px;
+  height: 255px;
+  border-radius: 48% 52% 60% 40%;
+  background: repeating-radial-gradient(
+    ellipse at 70% 26%,
+    transparent 0 13px,
+    rgb(30 53 43 / 3.5%) 14px 15px,
+    transparent 16px 27px
+  );
+  pointer-events: none;
+  transform: rotate(-22deg);
+  mask-image: linear-gradient(#000, transparent 90%);
+}
+
+.issue {
+  position: absolute;
+  z-index: -1;
+  top: 63px;
+  right: 22px;
+  color: rgb(184 100 62 / 6%);
+  font-family: var(--font-mono);
+  font-size: 76px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: -0.08em;
+  pointer-events: none;
+}
+
+.ticketHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 19px;
+  border-bottom: 1px solid rgb(30 42 34 / 9%);
+}
+
+.destination {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border: 1px solid rgb(30 53 43 / 6%);
+  border-radius: 999px;
+  background: #e9eee5;
+  color: #1e352b;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.duration {
+  padding: 5px 8px;
+  border: 1px solid rgb(30 42 34 / 10%);
+  border-radius: 4px;
+  background: rgb(245 241 232 / 75%);
+  color: #4e5a53;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 20px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.title {
+  margin-top: 22px;
+  color: #18201c;
+  font-family: var(--font-serif);
+  font-size: 23px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.description {
+  min-height: 50px;
+  margin-top: 9px;
+  color: #4e5a53;
+  font-size: 14px;
+  line-height: 25px;
+}
+
+.details {
+  margin-top: 19px;
+}
+
+.summary {
+  display: flex;
+  min-height: 44px;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgb(30 42 34 / 5%);
+  border-radius: 6px;
+  background: #f5f2ea;
+  color: #1e352b;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 22px;
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease;
+}
+
+.summary::-webkit-details-marker {
+  display: none;
+}
+
+.summary::marker {
+  content: "";
+}
+
+.summary:focus-visible {
+  outline: 2px solid #1e352b;
+  outline-offset: 3px;
+}
+
+.chevron {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  transition: transform 200ms ease;
+}
+
+.details[open] .summary {
+  border-color: rgb(184 100 62 / 15%);
+  background: #f3eee3;
+  color: #a55634;
+}
+
+.details[open] .chevron {
+  transform: rotate(180deg);
+}
+
+.highlights {
+  display: grid;
+  gap: 10px;
+  margin-top: 15px;
+  padding: 0 2px;
+  color: #4e5a53;
+  font-size: 13px;
+  line-height: 23px;
+}
+
+.highlights li {
+  position: relative;
+  padding-left: 13px;
+}
+
+.highlights li::before {
+  position: absolute;
+  top: 10px;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #b8643e;
+  content: "";
+}
+
+.footnote {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px dashed rgb(30 42 34 / 15%);
+  color: #7a827c;
+  font-size: 11px;
+  line-height: 19px;
+}
+
+@media (hover: hover) {
+  .card:hover {
+    border-color: rgb(184 100 62 / 25%);
+    box-shadow:
+      0 20px 42px -14px rgb(24 34 28 / 13%),
+      0 3px 8px -2px rgb(24 34 28 / 5%);
+    transform: translateY(-4px);
+  }
+
+  .summary:hover {
+    border-color: rgb(30 53 43 / 13%);
+    background: #eaece3;
+  }
+}
+
+@media (max-width: 480px) {
+  .card {
+    padding: 23px;
+  }
+
+  .title {
+    font-size: 22px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .summary,
+  .chevron {
+    transition: none;
+  }
+
+  .card:hover {
+    transform: none;
+  }
+}
