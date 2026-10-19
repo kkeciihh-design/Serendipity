@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { asModelRecord, normalizeMoneyCents, parseModelJson } from "./ai-normalizer";
 
 export const REQUEST_FIELD_KEYS = [
   "destination",
@@ -215,6 +216,21 @@ function nextWeekend(today: string) {
   return addDateDays(today, (6 - weekday + 7) % 7);
 }
 
+/** Resolve the month before the generic weekend branch (including December rollover). */
+function requestedWeekendMonth(text: string, today: string) {
+  const [year, month] = today.split("-").map(Number);
+  const relative = text.match(/下下个?月|下个?月|本月|这个月/);
+  if (relative) {
+    const offset = relative[0].startsWith("下下") ? 2 : relative[0].startsWith("下") ? 1 : 0;
+    return new Date(Date.UTC(year, month - 1 + offset, 1)).toISOString().slice(0, 10);
+  }
+  const explicit = text.match(/(?:(\d{4})年)?(1[0-2]|0?[1-9])月(?!\d)/);
+  if (!explicit) return null;
+  const targetMonth = Number(explicit[2]);
+  const targetYear = explicit[1] ? Number(explicit[1]) : year + (targetMonth < month ? 1 : 0);
+  return `${targetYear}-${String(targetMonth).padStart(2, "0")}-01`;
+}
+
 function explicitDates(text: string, now: Date) {
   const today = requestToday(now);
   const dates: string[] = [];
@@ -237,7 +253,7 @@ function explicitDates(text: string, now: Date) {
   return dates;
 }
 
-function explicitTripDays(text: string) {
+export function explicitTripDays(text: string) {
   const chinese: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
   if (/[\d一二两三四五六七八九十]\s*(?:到|至|[-–—~～])\s*[\d一二两三四五六七八九十]\s*(?:天|日游)/.test(text)) return null;
   const counts = [...text.matchAll(/(?<![\d一二两三四五六七八九十])(\d{1,3}|[一二两三四五六七八九十])\s*(?:天|日游)/g)]
@@ -272,7 +288,11 @@ export function resolveRelativeDates(
     return fromStart(addDateDays(today, 2));
   }
   if (/周末/.test(text)) {
-    const start = nextWeekend(today);
+    const targetMonth = requestedWeekendMonth(text, today);
+    // A complete weekend begins on Saturday, even if the month opens on Sunday.
+    const anchor = targetMonth ? (targetMonth.slice(0, 7) === today.slice(0, 7) ? today : targetMonth) : today;
+    const weekOffset = !targetMonth && /下下周末/.test(text) ? 14 : !targetMonth && /下周末/.test(text) ? 7 : 0;
+    const start = addDateDays(nextWeekend(anchor), weekOffset);
     return withDates(start, addDateDays(start, (days ?? 2) - 1));
   }
 
@@ -373,22 +393,75 @@ export function remainingQuestions(
   return questions.filter((question) => !hasAnswer(question.field)).slice(0, 3);
 }
 
+function modelText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function modelStringList(value: unknown, maxLength: number, itemLength: number) {
+  const items = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[、,，;；\n]/) : [];
+  return [...new Set(items.map(modelText).filter((item): item is string => Boolean(item)))].slice(0, maxLength).map((item) => item.slice(0, itemLength));
+}
+
+function modelDate(value: unknown) {
+  const text = modelText(value);
+  if (!text) return null;
+  const parts = text.match(/^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?$/);
+  return parts ? `${parts[1]}-${parts[2].padStart(2, "0")}-${parts[3].padStart(2, "0")}` : text;
+}
+
+function modelTravelerCount(value: unknown) {
+  if (typeof value === "number") return Number.isFinite(value) && value >= 1 ? value : null;
+  if (typeof value !== "string") return null;
+  const count = value.match(/-?\d+/)?.[0];
+  if (count) return Number(count) >= 1 ? Number(count) : null;
+  const chinese: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+  return chinese[value.trim().charAt(0)] ?? null;
+}
+
 export function parseAIRequirementOutput(raw: string) {
-  const trimmed = raw.trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const candidate = fenced?.[1] ?? trimmed;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end <= start) {
-    throw new Error("模型没有返回 JSON 对象。");
+  const parsed = parseModelJson(raw, (value) => {
+    const object = asModelRecord(Array.isArray(value) && value.length === 1 ? value[0] : value);
+    const request = asModelRecord(object.request ?? object.requirements ?? object.tripRequest ?? object);
+    return Object.keys(request).some((key) => [...REQUEST_FIELD_KEYS, "city", "destinationName", "budget", "travelers", "start_date"].includes(key));
+  });
+  const payload = asModelRecord(Array.isArray(parsed) && parsed.length === 1 ? parsed[0] : parsed);
+  const request = asModelRecord(payload.request ?? payload.requirements ?? payload.tripRequest ?? payload);
+  if (!Object.keys(request).some((key) => [...REQUEST_FIELD_KEYS, "city", "destinationName", "budget", "travelers", "start_date"].includes(key))) {
+    throw new Error("模型未返回可识别的旅行需求字段，请重新理解需求。");
   }
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(candidate.slice(start, end + 1));
-  } catch {
-    throw new Error("模型返回的 JSON 无法解析。");
-  }
-
-  return aiRequirementOutputSchema.parse(payload);
+  const rawBudget = request.budgetAmountCents ?? request.budgetCents ?? request.budgetAmount ?? request.budgetYuan ?? request.budget;
+  const budgetInCents = request.budgetAmountCents !== null && request.budgetAmountCents !== undefined || request.budgetCents !== null && request.budgetCents !== undefined;
+  const budgetObject = asModelRecord(request.budget);
+  const scope = String(request.budgetScope ?? request.budget_scope ?? budgetObject.scope ?? "").toLowerCase();
+  const pace = String(request.pace ?? request.travelPace ?? "").toLowerCase();
+  const snapshot = {
+    destination: modelText(request.destination ?? request.destinationName ?? request.city),
+    startDate: modelDate(request.startDate ?? request.start_date ?? request.departureDate),
+    endDate: modelDate(request.endDate ?? request.end_date ?? request.returnDate),
+    travelerCount: modelTravelerCount(request.travelerCount ?? request.travelers ?? request.people ?? request.peopleCount),
+    budgetAmountCents: normalizeMoneyCents(rawBudget, budgetInCents ? "cents" : "yuan"),
+    budgetScope: /^(total|全程|总预算|全程总预算|总额|合计)$/.test(scope) ? "total" : /^(per_person|per person|人均|每人)$/.test(scope) ? "per_person" : null,
+    pace: /^(relaxed|轻松|休闲|慢游)$/.test(pace) ? "relaxed" : /^(packed|紧凑|充实|特种兵)$/.test(pace) ? "packed" : /^(balanced|均衡|适中)$/.test(pace) ? "balanced" : null,
+    interests: modelStringList(request.interests, 12, 40),
+    accommodation: modelText(request.accommodation ?? request.hotelPreference),
+    constraints: modelStringList(request.constraints, 12, 120),
+  };
+  const sources = asModelRecord(request.fieldSources);
+  const fieldSources = Object.fromEntries(REQUEST_FIELD_KEYS.map((key) => {
+    const source = requestFieldSourceSchema.safeParse(sources[key]);
+    const present = Array.isArray(snapshot[key]) ? snapshot[key].length > 0 : snapshot[key] !== null;
+    return [key, source.success ? source.data : present ? "ai_extracted" : "unspecified"];
+  }));
+  const questions = Array.isArray(payload.openQuestions) ? payload.openQuestions : [];
+  const openQuestions = questions.map((item, index) => {
+    const question = asModelRecord(item);
+    return requestQuestionSchema.safeParse({ ...question, id: modelText(question.id) ?? `ai-question-${index + 1}`,
+      reason: modelText(question.reason) ?? "需要补充此项旅行偏好。", suggestedAnswer: modelText(question.suggestedAnswer) });
+  }).flatMap((item) => item.success ? [item.data] : []).slice(0, 3);
+  const assumptions = Array.isArray(payload.defaultAssumptions) ? payload.defaultAssumptions : [];
+  const defaultAssumptions = assumptions.map((item) => {
+    const assumption = asModelRecord(item);
+    return defaultAssumptionSchema.safeParse({ ...assumption, reason: modelText(assumption.reason) ?? "根据当前需求暂作此项估算，可修改。" });
+  }).flatMap((item) => item.success ? [item.data] : []).slice(0, 8);
+  return aiRequirementOutputSchema.parse({ request: { ...snapshot, fieldSources }, openQuestions, defaultAssumptions });
 }

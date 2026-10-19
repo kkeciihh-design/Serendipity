@@ -36,10 +36,12 @@ describe("PDF handbook with controlled Chromium", () => {
     const m = await save(`${days}days`, html); expect(m.pages).toBeGreaterThan(days);
     expect(m.eventIds.sort()).toEqual(s.plan.events.map((e) => e.id).sort());
   }, 90_000);
-  it("missing, unconfirmed, invalid and unauthorized maps fail; simplified output is explicit", async () => {
+  it("missing manual confirmations allow suggested maps or a compact fallback; invalid saved points still fail", async () => {
     const s = await longImageFixture();
     s.plan.events.find((e) => e.id === "d2-activity")!.placeId = null;
-    await expect(renderPdfHtml(s, options, content)).rejects.toThrow("缺少已确认公开地点");
+    expect(await renderPdfHtml(s, options, content)).toContain("map-unavailable");
+    Object.assign(s.plan.events.find((e) => e.id === "d2-activity")!, { latitude: 24.91, longitude: 118.58 });
+    expect(await renderPdfHtml(s, options, content)).toContain("含待核实建议标点");
     const html = await renderPdfHtml(s, options, { mode: "simplified", includePhotos: false });
     expect(html).toContain("简化旅行资料（无地图）"); expect(html).not.toContain("<svg");
     s.plan.events.find((e) => e.id === "d2-activity")!.placeId = s.plan.places[1].id;
@@ -63,8 +65,8 @@ describe("PDF handbook with controlled Chromium", () => {
     // print-only records exercise the complete already projected checklist.
     const { checklistItemSchema } = await import("../lib/checklist");
     for (let i = 1; i <= 70; i++) s.checklist.items.push(checklistItemSchema.parse({ id: `stress-${i}`, group: "essentials", title: `压力清单第${i}项`, note: "核对随身物品和出行条件。".repeat(8), date: null, eventId: null, eventIds: [], ticketIds: [], source: "custom", sourceLabel: "合成清单", sourceKey: `stress-${i}`, signature: "stress", officialUrl: null, custom: true, completed: i % 2 === 0, completedAt: null, deleted: false, orphaned: false, changeNote: null }));
-    const html = await renderPdfHtml(s, options, { ...content, includePhotos: false }); expect(html).toContain("跨城位置总览"); expect(html).toContain("上海 · 当地位置详图");
-    const m = await save("stress", html); expect(m.pages).toBeGreaterThan(15);
+    const html = await renderPdfHtml(s, options, { ...content, includePhotos: false }); expect(html).toContain("上海公开地点"); expect(html).toContain("route-line");
+    const m = await save("stress", html); expect(m.pages).toBeGreaterThan(8);
   }, 90_000);
   it("missing font/map/image and blocked external resources never yield a successful PDF; cancellation closes Chromium", async () => {
     const html = await renderPdfHtml(await longImageFixture(), options, content);

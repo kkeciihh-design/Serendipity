@@ -4,6 +4,7 @@ export type SampleTrip = {
   destinationLatin: string;
   duration: string;
   style: string;
+  planningRequest: string;
   preview: { day: string; title: string }[];
   overview: { label: string; value: string }[];
   days: {
@@ -35,6 +36,7 @@ export const sampleTrips: SampleTrip[] = [
     destination: "杭州",
     destinationLatin: "HANGZHOU",
     duration: "2 天 1 晚",
+    planningRequest: "想去杭州玩 2 天 1 晚，两个人同行，按人均 600–1000 元安排市内交通、住宿、餐饮和门票，跨城往返另计。喜欢西湖晨间散步、法喜寺和龙井村喝茶，节奏轻松、少折返；住湖滨南段或定安路附近，第二天下午取行李返程。请留出吃饭、休息和交通接驳时间。",
     style: "西湖晨雾与南山茶事 · 适合初次造访、偏爱少折返慢节奏的你",
     preview: [
       { day: "Day 1", title: "湖滨漫步" },
@@ -104,6 +106,7 @@ export const sampleTrips: SampleTrip[] = [
     destination: "成都",
     destinationLatin: "CHENGDU",
     duration: "5 天 4 晚",
+    planningRequest: "想去成都玩 5 天 4 晚，两个人同行，按人均 1600–2650 元安排住宿、餐饮、市内交通、门票和都江堰往返，跨城往返另计。喜欢地道小馆、人民公园喝茶、少城街巷、杜甫草堂和玉林，留一天去都江堰、一天在三圣乡慢坐。住天府广场或人民公园附近，最后一天下午返程，每天留足休息时间。",
     style: "街巷烟火与川西林盘 · 兼顾老城慢逛与一日近郊的松弛排布",
     preview: [
       { day: "Day 1", title: "少城茶叙" },
@@ -216,6 +219,7 @@ export const sampleTrips: SampleTrip[] = [
     destination: "青岛",
     destinationLatin: "QINGDAO",
     duration: "3 天 2 晚",
+    planningRequest: "想去青岛玩 3 天 2 晚，两个人同行，按人均 950–1650 元安排住宿、餐饮、市内交通、门票和咖啡，跨城往返另计。喜欢老建筑、海边散步和海鲜，想去信号山、大学路、琴屿路、八大关、太平角和栈桥，按区域慢慢逛，不赶景点。住青岛站或中山路附近，第三天下午返程，海风大或下雨时安排室内备选。",
     style: "红瓦老城与礁石海风 · 在山海栈道与百年街区之间从容漫游",
     preview: [
       { day: "Day 1", title: "信号山俯瞰" },

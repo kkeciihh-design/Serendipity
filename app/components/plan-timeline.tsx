@@ -4,14 +4,20 @@ import { businessFetch } from "@/lib/business-fetch";
 import {
   ArrowDown,
   Banknote,
+  BedDouble,
+  BriefcaseBusiness,
   CircleAlert,
   BookOpenCheck,
+  Leaf,
   Lock,
   LockOpen,
   MapPin,
   PencilLine,
   Save,
+  Sofa,
+  TrainFront,
   Trash2,
+  Utensils,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -32,24 +38,15 @@ import type { PlanVersionClient } from "./plan-overview";
 import type { EvidenceFactClient, EvidenceField } from "@/lib/evidence";
 import { effectiveEvidenceStatus, evidenceFieldLabels, evidenceStatusLabels, summarizeEventEvidence } from "@/lib/evidence";
 import { numberPlanEvents } from "@/lib/map-link";
-import { RouteSummary } from "./route-summary";
+import { RouteSummary, routeModeLabels } from "./route-summary";
 import { EvidenceDrawer } from "./evidence-drawer";
 import type { AdvisoryItem } from "@/lib/advisories";
 import { AttractionTimelineCard } from "./attraction-card";
 import { RestaurantTimelineCard } from "./restaurant-card";
 import type { MapLinkTarget } from "./plan-map";
 import { useVersionedDraft } from "./use-versioned-draft";
-
-const eventTypeLabels: Record<PlanEvent["type"], string> = {
-  departure_transport: "去程",
-  local_transport: "市内交通",
-  return_transport: "返程",
-  meal: "餐饮",
-  activity: "活动",
-  accommodation: "住宿约束",
-  rest: "休息",
-  preparation: "准备",
-};
+import { predepartureBriefingIds, timelinePresentation } from "@/lib/timeline-presentation";
+import styles from "./plan-timeline.module.css";
 
 const eventStatusLabels: Record<PlanEventStatus, string> = {
   suggested: "AI建议",
@@ -113,9 +110,7 @@ function connectionLabel(current: PlanEvent, next: PlanEvent) {
   if (gapMinutes < 0) {
     return "时段冲突，请修改";
   }
-  return `${
-    gapMinutes === 0 ? "直接衔接" : `衔接 ${formatGap(gapMinutes)}`
-  }｜路线未核验`;
+  return gapMinutes === 0 ? null : `预留 ${formatGap(gapMinutes)}`;
 }
 
 async function readApiError(response: Response) {
@@ -134,6 +129,8 @@ export function PlanTimeline({
   day,
   onSaved,
   selectedEventId,
+  highlightedEventId,
+  onEventHover,
   onEventSelect,
   advisories = [],
   onAdvisories,
@@ -143,6 +140,8 @@ export function PlanTimeline({
   day: PlanOverviewDay;
   onSaved: (plan: PlanVersionClient) => void;
   selectedEventId: string | null;
+  highlightedEventId?: string | null;
+  onEventHover?: (eventId: string | null) => void;
   onEventSelect: (eventId: string, target: MapLinkTarget, dayNumber: number) => void;
   advisories?: AdvisoryItem[];
   onAdvisories?: () => void;
@@ -168,6 +167,7 @@ export function PlanTimeline({
   const currentFacts = evidenceFacts.filter((fact) => fact.planVersionId === plan.id)
     .map((fact) => ({ ...fact, effectiveStatus: effectiveEvidenceStatus(fact) }));
   const numberedEvents = useMemo(() => numberPlanEvents(day.events), [day.events]);
+  const briefingIds = useMemo(() => predepartureBriefingIds(day.events), [day.events]);
 
   const nextDayFirstEvent = useMemo(() => {
     const nextDayEvents = plan.events.filter(
@@ -256,7 +256,7 @@ export function PlanTimeline({
 
   return (
     <div>
-      <ol className="mt-3 space-y-3">
+      <ol className={styles.timeline} aria-label="当日行程时间轴">
         {numberedEvents.map(({ event, visitLabel }, index) => {
           const next =
             numberedEvents[index + 1]?.event ??
@@ -265,76 +265,77 @@ export function PlanTimeline({
           const eventFacts = currentFacts.filter(
             (fact) => fact.targetId === event.id,
           );
-          const sourceStatus = summarizeEventEvidence(eventFacts).label;
+          const evidence = summarizeEventEvidence(eventFacts);
+          const presentation = timelinePresentation(event);
+          // Never fold a day's transport or sightseeing into a transition row.
+          const compact = briefingIds.has(event.id);
+          const CategoryIcon = presentation.category === "sight" ? Leaf
+            : presentation.category === "food" ? Utensils
+            : presentation.category === "stay" ? BedDouble
+            : presentation.category === "transit" ? TrainFront
+            : presentation.category === "rest" ? Sofa : BriefcaseBusiness;
+          const openingConflict = advisories.some((item) => item.eventIds.includes(event.id) && item.category === "opening_hours" && item.severity === "action");
+          const status = openingConflict ? "conflict" : evidence.status;
+          const statusLabel = openingConflict ? "开放冲突 · 需调整" : status === "conflict" ? "需调整" : status === "stale" ? "待复核" : status === "verified" ? "已核实" : "待核实";
+          const eventAdvisories = advisories.filter((item) => item.eventIds.includes(event.id) && (!item.acknowledged || item.severity === "action"));
           const eventCost = eventCostSummary(event.id, plan.costs, plan.requestSnapshot);
           const route = next
             ? plan.routeLegs?.find((item) => item.fromEventId === event.id && item.toEventId === next.id)
             : undefined;
+          const routeReference = route?.manualReference;
+          const routeSeconds = routeReference
+            ? routeReference.durationMinutes == null ? null : routeReference.durationMinutes * 60
+            : route?.durationSeconds;
+          const routeUnavailable = route?.status === "unavailable" || routeReference?.availability === "no_service";
+          const connection = next ? connectionLabel(event, next) : null;
           return (
-            <li key={event.id} id={`timeline-event-${event.id}`} className="space-y-2">
-              <button
-                type="button"
-                onClick={() => onEventSelect(event.id, "timeline", day.dayNumber)}
-                aria-expanded={selectedEventId === event.id}
-                aria-label={`第 ${index + 1} 项：${event.title}`}
-                className={`grid w-full gap-2 rounded-md border p-4 text-left transition-colors sm:grid-cols-[130px_1fr_auto] sm:items-start ${
-                  selectedEventId === event.id
-                    ? "border-sage bg-sage-soft"
-                    : "border-sand/80 bg-white hover:border-sage"
-                }`}
-              >
-                <span className="text-sm font-semibold text-sage">
-                  <span aria-hidden="true" className="mr-2">{visitLabel}</span>
-                  {event.ticketTimingPending ? "票面时刻待补 / 冲突" : formatPlanEventTimeRange(event)}
-                </span>
-                <span className="min-w-0">
-                  <span className="block break-words text-base font-semibold text-charcoal">
-                    {event.title}
-                  </span>
-                  <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-graphite">
-                    <span>{eventTypeLabels[event.type]}</span>
-                    <span>
-                      {advisories.some((a) => a.eventIds.includes(event.id) && a.category === "opening_hours" && a.severity === "action") ? "开放冲突 · 需调整" : eventStatusLabels[event.status ?? "suggested"]}
-                    </span>
-                    <span>{sourceStatus}</span>
-                    {event.locationName ? <span>{event.locationName}</span> : null}
-                    {event.note ? <span>{event.note}</span> : null}
-                  </span>
-                </span>
-                <span className="inline-flex min-h-9 items-center gap-2 rounded-md bg-cream px-3 text-sm text-graphite sm:justify-self-end">
-                  <Banknote aria-hidden="true" className="size-4 shrink-0" />
-                  {formatMoneyRange(eventCost?.minCents ?? null, eventCost?.maxCents ?? null)}｜
-                  {eventCost ? costCertaintyLabels[eventCost.certainty] : "待确认"}
-                </span>
-                {locked ? (
-                  <span className="inline-flex min-h-9 items-center gap-2 rounded-md bg-shell px-3 text-sm font-medium text-charcoal sm:col-start-3 sm:justify-self-end">
-                    <Lock aria-hidden="true" className="size-4" />
-                    已锁定
-                  </span>
-                ) : null}
-              </button>
-              {advisories.filter((a) => a.eventIds.includes(event.id) && (!a.acknowledged || a.severity === "action")).map((a) => <button key={a.id} type="button" onClick={onAdvisories} className="block min-h-11 w-full rounded-md bg-clay-soft px-3 py-2 text-left text-sm leading-6 text-clay">行程提醒：{a.title}{a.acknowledged ? "（已知，限制仍适用）" : ""}</button>)}
-              {event.type === "activity" ? <AttractionTimelineCard key={`${scope}/${event.id}`} tripId={tripId} plan={plan} event={event} visitLabel={visitLabel} onSaved={(savedPlan) => { if (activeScope.current === scope && plan.isCurrent) onSaved(savedPlan); }} /> : null}
-              {event.type === "meal" ? <RestaurantTimelineCard key={`${scope}/${event.id}`} tripId={tripId} plan={plan} event={event} visitLabel={visitLabel} onSaved={(savedPlan) => { if (activeScope.current === scope && plan.isCurrent) onSaved(savedPlan); }} /> : null}
-              <div>
-                {event.type === "departure_transport" || event.type === "return_transport" ? <><button type="button" onClick={() => onEventSelect(event.id, "transport", event.dayNumber)} className="mr-2 inline-flex min-h-11 items-center rounded-md border border-sage bg-white px-3 text-sm font-medium text-sage">查看交通票面</button><a href="#time-redlines" className="mr-2 inline-flex min-h-11 items-center rounded-md border border-clay bg-white px-3 text-sm font-medium text-clay">查看时间红线</a></> : null}
+            <li key={event.id} id={`timeline-event-${event.id}`} data-timeline-level={compact ? "briefing" : "experience"}>
+              <div className={`${styles.eventCard} ${compact ? styles.briefingCard : ""}`} data-selected={selectedEventId === event.id} data-highlighted={highlightedEventId === event.id}
+                onMouseEnter={() => onEventHover?.(event.id)} onMouseLeave={() => onEventHover?.(null)}
+                onFocus={() => onEventHover?.(event.id)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) onEventHover?.(null); }}>
                 <button
                   type="button"
-                  onClick={() => onEventSelect(event.id, "map", day.dayNumber)}
-                  aria-label={`定位地图：${visitLabel}${event.title}`}
-                  className="inline-flex min-h-11 items-center gap-2 rounded-md border border-sand bg-cream px-3 text-sm font-medium text-graphite transition-colors hover:border-sage hover:text-sage"
+                  onClick={() => onEventSelect(event.id, "timeline", day.dayNumber)}
+                  aria-expanded={selectedEventId === event.id}
+                  aria-label={`第 ${index + 1} 项：${event.title}`}
+                  className={styles.eventMain}
+                  title={compact ? `${event.title}${event.note ? ` · ${event.note}` : ""}` : undefined}
                 >
-                  <MapPin aria-hidden="true" className="size-4" />
-                  定位地图
+                  {compact ? <>
+                    <span className={styles.visitBadge} data-testid="timeline-visit-number">{visitLabel}</span>
+                    <span className={styles.briefingBody}><span className={styles.briefingLabel}>行前提示 · {event.startTime}</span><strong>{event.title}</strong>{event.note ? <span>{event.note}</span> : null}</span>
+                  </> : <>
+                    <span className={styles.timeRail}>
+                      <span className={styles.visitBadge} data-testid="timeline-visit-number">{visitLabel}</span>
+                      <span className={styles.timeRange}>{event.ticketTimingPending ? "票面时刻待补 / 冲突" : formatPlanEventTimeRange(event)}</span>
+                      <span className={styles.categoryBadge} data-category={presentation.category}><CategoryIcon aria-hidden="true" className="size-3.5" />{presentation.label}</span>
+                    </span>
+                    <span className={styles.eventBody}>
+                      <span className={styles.titleRow}>
+                        <span className={styles.eventTitle}>{event.title}</span>
+                        <span className={styles.statusBadge} data-status={status} title={`${eventStatusLabels[event.status ?? "suggested"]} · ${evidence.label}`}>{statusLabel}</span>
+                      </span>
+                      {event.locationName && event.locationName !== event.title ? <span className={styles.eventLocation}>{event.locationName}</span> : null}
+                      {event.note ? <span className={styles.eventNote}>{event.note}</span> : null}
+                      <span className={styles.costRow}>
+                        <span className={styles.cost}><Banknote aria-hidden="true" className="size-3.5" />{formatMoneyRange(eventCost?.minCents ?? null, eventCost?.maxCents ?? null)}｜{eventCost ? costCertaintyLabels[eventCost.certainty] : "待确认"}</span>
+                        {locked ? <span className={styles.locked}><Lock aria-hidden="true" className="size-3" />已锁定</span> : null}
+                      </span>
+                    </span>
+                  </>}
                 </button>
+                {eventAdvisories.map((item) => <button key={item.id} type="button" onClick={onAdvisories} className={styles.advisory}><CircleAlert aria-hidden="true" className="size-3.5 shrink-0" /><span>行程提醒：{item.title}{item.acknowledged ? "（已知，限制仍适用）" : ""}</span></button>)}
+                {!compact && event.type === "activity" ? <AttractionTimelineCard key={`${scope}/${event.id}`} tripId={tripId} plan={plan} event={event} visitLabel={visitLabel} onMap={() => onEventSelect(event.id, "map", day.dayNumber)} onSaved={(savedPlan) => { if (activeScope.current === scope && plan.isCurrent) onSaved(savedPlan); }} /> : null}
+                {!compact && event.type === "meal" ? <RestaurantTimelineCard key={`${scope}/${event.id}`} tripId={tripId} plan={plan} event={event} visitLabel={visitLabel} onMap={() => onEventSelect(event.id, "map", day.dayNumber)} onSaved={(savedPlan) => { if (activeScope.current === scope && plan.isCurrent) onSaved(savedPlan); }} /> : null}
+                {!compact && event.type !== "activity" && event.type !== "meal" ? <div className={styles.eventFooter}>
+                  {event.type === "departure_transport" || event.type === "return_transport" ? <button type="button" onClick={() => onEventSelect(event.id, "transport", event.dayNumber)} className={styles.compactLink} aria-label="查看交通票面" title="查看交通票面"><TrainFront aria-hidden="true" className="size-3.5" /></button> : null}
+                  <button type="button" onClick={() => onEventSelect(event.id, "map", day.dayNumber)} aria-label={`定位地图：${visitLabel}${event.title}`} title="地图与详情" className={compact ? styles.compactLink : styles.mapLink}><MapPin aria-hidden="true" className="size-3.5" />{compact ? null : "地图与详情"}</button>
+                </div> : null}
               </div>
-              {next ? (
-            route ? <div className="ml-4 min-w-0"><RouteSummary route={route} compact /></div> :
-            <p className="flex items-center gap-2 pl-4 text-sm text-graphite">
-                  <ArrowDown aria-hidden="true" className="size-4 shrink-0 text-sage" />
-                  {connectionLabel(event, next)}
-                </p>
-              ) : null}
+              {route ? <details className={styles.routeConnection}>
+                <summary><ArrowDown aria-hidden="true" className="size-3 shrink-0" />{routeModeLabels[route.mode]}{routeUnavailable ? " · 暂无可用路线" : routeSeconds ? ` · 约 ${formatGap(Math.max(1, Math.round(routeSeconds / 60)))}` : ""}{routeReference?.requiresReconfirmation ? " · 原参考待复核" : ""}{route.conflict ? " · 衔接需调整" : ""}<span>查看路线</span></summary>
+                <RouteSummary route={route} compact />
+              </details> : connection ? <p className={styles.connection} data-conflict={Boolean(event.ticketTimingPending || next?.ticketTimingPending || connection.includes("冲突"))}><ArrowDown aria-hidden="true" className="size-3 shrink-0" />{connection}</p> : null}
             </li>
           );
         })}
@@ -462,8 +463,8 @@ export function PlanTimeline({
               <textarea
                 value={draft.note}
                 disabled={fieldsDisabled}
-                maxLength={240}
-                rows={2}
+                maxLength={6000}
+                rows={6}
                 onChange={(event) =>
                   setDraft({ ...draft, note: event.target.value })
                 }
@@ -565,11 +566,7 @@ export function PlanTimeline({
                   : "历史版本只读。")}
           </p>
         </section>
-      ) : (
-        <p className="mt-3 min-h-11 rounded-md bg-shell px-4 py-3 text-sm leading-6 text-graphite">
-          {canEdit ? "尚未选择日程。" : "历史版本只读。"}
-        </p>
-      )}
+      ) : null}
 
       {!canEdit ? (
         <p className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-md bg-clay-soft px-3 text-sm text-clay">

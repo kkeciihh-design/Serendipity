@@ -126,6 +126,14 @@ export function liveRedlineCheck(result: RedlineResult, now: number, reliable = 
   return check;
 }
 
+export function redlineNeedsAttention(result: RedlineResult, now: number, reliable = true) {
+  if (!reliable || result.conflicts.length > 0 || result.precision === "pending_confirmation" ||
+      !result.suggestedAt || result.suggestedCheck?.status !== "feasible") return true;
+  const urgency = redlineUrgency(result.suggestedAt, now);
+  return urgency.color === "orange" || urgency.color === "red" ||
+    liveRedlineCheck(result, now, reliable).status !== "feasible";
+}
+
 export function formatRedlineTime(at: string | null, relativeDate?: string) {
   if (!at) return "待补资料";
   const local = new Date(Date.parse(at) + 8 * 3600_000).toISOString();

@@ -75,9 +75,21 @@ export const ticketCoreSchema = z.object({
 
 export type TicketCore = z.infer<typeof ticketCoreSchema>;
 
-// Confirmation records a real-world fact. Missing or conflicting details are
-// kept verbatim and reported by validation; they must never block that fact.
-export const activeTicketCoreSchema = ticketCoreSchema;
+/** Missing fields remain editable; contradictory typed dates must be corrected before saving. */
+export function ticketTimingError(ticket: Pick<TicketCore, "date" | "departureTime" | "arrivalDate" | "arrivalTime">) {
+  const departure = ticketTimestamp(ticket.date, ticket.departureTime);
+  const arrival = ticketTimestamp(ticket.arrivalDate, ticket.arrivalTime);
+  if (departure !== null && arrival !== null && arrival <= departure) {
+    return "到达时间必须晚于出发时间；跨日车次请修改到达日期，填错的时刻可直接在此更正。";
+  }
+  return null;
+}
+
+const writableTicketCoreSchema = ticketCoreSchema.superRefine((ticket, context) => {
+  const message = ticketTimingError(ticket);
+  if (message) context.addIssue({ code: "custom", path: ["arrivalTime"], message });
+});
+export const activeTicketCoreSchema = writableTicketCoreSchema;
 
 export const ticketCostAllocationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("separate") }),
@@ -118,7 +130,7 @@ export const ticketActionSchema = z.discriminatedUnion("action", [
     action: z.literal("create_draft"),
     importSource: ticketImportSourceSchema.optional(),
     importResolution: importResolutionSchema.optional(),
-    ticket: ticketCoreSchema,
+    ticket: writableTicketCoreSchema,
   }),
   z.object({
     action: z.literal("activate"),
@@ -149,7 +161,7 @@ export const ticketActionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("update_details"),
     ticketId: z.string().trim().min(1).max(80),
-    ticket: ticketCoreSchema,
+    ticket: writableTicketCoreSchema,
     acknowledged: z.literal(true, { error: "请核对补充的票面资料及接驳参考。" }),
   }),
   z.object({
@@ -247,14 +259,18 @@ export function updateTicketDetails(existing: Ticket, core: TicketCore, now = ne
     throw new Error("历史票面保持只读，请补充当前有效票。");
   }
   if (existing.status === "active") {
+    const correctingInvalidTime = Boolean(ticketTimingError(existing));
+    const timeFields = new Set<keyof TicketCore>(["date", "departureTime", "arrivalDate", "arrivalTime"]);
     const protectedFields: Array<keyof TicketCore> = ["eventId", "direction", "mode", "serviceNumber", "date", "departureTime",
       "arrivalDate", "arrivalTime", "fromName", "fromDetail", "toName", "toDetail", "passengerCount", "fareCents", "seat"];
     for (const key of protectedFields) {
+      if (correctingInvalidTime && timeFields.has(key)) continue;
       if (existing[key] != null && existing[key] !== "" && existing[key] !== core[key]) {
         throw new Error("已确认的班次、日期、站点、人数或票面金额不能直接改写；仅可补空白资料，真实改签请使用替换指定票。");
       }
     }
   }
+  writableTicketCoreSchema.parse(core);
   return ticketSchema.parse({ ...existing, ...core,
     ...(existing.redlinePreferences ? { redlinePreferences: { ...existing.redlinePreferences, extraBufferSeconds: core.bufferMinutes * 60 } } : {}),
     updatedAt: now.toISOString() });
@@ -281,6 +297,28 @@ export function isActiveTicket(ticket: Ticket) {
 
 function ticketTimestamp(date: string | null, time: string | null) {
   return date && time ? Date.parse(`${date}T${time}:00+08:00`) : null;
+}
+
+function normalizedHubName(value: string | null | undefined) {
+  return (value ?? "").replace(/[\s·（）()]/g, "").replace(/(?:火车站|高铁站|铁路站)$/, "站");
+}
+
+/** A station transfer already occupies the ticket's access chain, not a preceding visit. */
+export function isTicketAccessEvent(event: PlanEvent, ticket: TicketCore) {
+  if (event.id === ticket.eventId || event.type !== "local_transport") return false;
+  if (event.ticketAccessForEventId) return event.ticketAccessForEventId === ticket.eventId;
+  if (event.locked || event.status === "confirmed") return false;
+  const departure = ticketTimestamp(ticket.date, ticket.departureTime);
+  if (departure === null || !ticket.fromName) return false;
+  const start = planEventStart(event).getTime(), end = planEventEnd(event).getTime();
+  if (start >= departure || departure - start > 6 * 3_600_000 || end > departure + 30 * 60_000) return false;
+  const hub = normalizedHubName(ticket.fromName);
+  const title = normalizedHubName(event.title), location = normalizedHubName(event.locationName);
+  // A note mentioning a station alone is not enough: it may describe a trip away from it.
+  const escapedHub = hub.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const arrivalAtHub = new RegExp(`(?:前往|前去|赶往|返回|到达|抵达|去|至|到|→)${escapedHub}`).test(title);
+  const waitingAtHub = location === hub && /(?:候车|候机|进站|安检|检票|前往车站|前往机场)/.test(title);
+  return arrivalAtHub || waitingAtHub;
 }
 
 /** Reference timing only; no official timetable or formal red-line inference. */
@@ -340,7 +378,7 @@ export function ticketWarnings(ticket: Ticket, events: PlanEvent[] = []) {
   if (typeof departure === "number" && typeof arrival === "number" && (arrival <= departure || arrival - departure > 86_400_000)) {
     warnings.push(`${prefix}票面到达须晚于出发，且当前单项日程最多表达 24 小时；票面原值保留，日程时刻仅供参考并标为冲突。`);
   }
-  const ordered = sortPlanEvents(events);
+  const ordered = sortPlanEvents(events.filter((event) => !isTicketAccessEvent(event, ticket)));
   const index = ordered.findIndex((event) => event.id === ticket.eventId);
   if (index >= 0) {
     const previous = ordered[index - 1];
@@ -415,6 +453,30 @@ export function validateTickets(tickets: Ticket[], events: PlanEvent[]) {
 
 export function applyTicketsToEvents(events: PlanEvent[], tickets: Ticket[], previousTickets: Ticket[] = []): PlanEvent[] {
   return events.map((event) => {
+    if (event.type === "local_transport") {
+      const owner = tickets.find((ticket) => isActiveTicket(ticket) && (isTicketAccessEvent(event, ticket) ||
+        previousTickets.some((previous) => previous.eventId === ticket.eventId && isActiveTicket(previous) && isTicketAccessEvent(event, previous))));
+      if (owner) {
+        const departure = ticketTimestamp(owner.date, owner.departureTime);
+        // Keep an earlier, conservative station-departure slot. The exact latest
+        // departure is calculated by the redline; the occupied interval is counted once.
+        const end = departure !== null && departure > planEventStart(event).getTime()
+          ? Math.min(planEventEnd(event).getTime(), departure) : planEventEnd(event).getTime();
+        const endLocal = new Date(end + 8 * 3_600_000).toISOString();
+        const sameHub = normalizedHubName(event.locationName) === normalizedHubName(owner.fromName);
+        return { ...event, endDate: endLocal.slice(0, 10), endTime: endLocal.slice(11, 16),
+          title: `前往${owner.fromName || "出发站点"} · 进站候车`,
+          locationName: owner.fromName, placeId: sameHub ? event.placeId : null,
+          latitude: sameHub ? event.latitude : null, longitude: sameHub ? event.longitude : null,
+          ticketAccessForEventId: owner.eventId, ticketManaged: true,
+          note: `${(event.note ?? "").split("\n票据接驳：")[0]}\n票据接驳：已并入${owner.serviceNumber || "本次车票"}的门到门交通链，接驳、进站和候车只计算一次；最晚出发时间见交通红线。`.trim().slice(0, 6000) };
+      }
+      if (event.ticketAccessForEventId) {
+        const { ticketAccessForEventId: _owner, ...rest } = event;
+        void _owner;
+        return { ...rest, ticketManaged: false, note: (event.note ?? "").split("\n票据接驳：")[0] || null };
+      }
+    }
     if (event.type !== "departure_transport" && event.type !== "return_transport") {
       return event;
     }
@@ -482,6 +544,7 @@ export function ticketChangedEventIds(before: PlanEvent[], after: PlanEvent[]) {
         old.endTime !== event.endTime ||
         old.status !== event.status ||
         old.locked !== event.locked ||
+        old.ticketAccessForEventId !== event.ticketAccessForEventId ||
         old.ticketManaged !== event.ticketManaged;
     })
     .map((event) => event.id);

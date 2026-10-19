@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Sparkles, RotateCcw } from "lucide-react";
 import { formatMoneyRange } from "@/lib/budget";
 import { formatRedlineTime } from "@/lib/redlines";
+import { getTripHardTimeConstraints } from "@/lib/trip-hard-constraints";
 import type { ReplanCandidateView } from "@/lib/replan-service";
 import type { PlanRequestState, PlanVersionClient } from "./plan-overview";
 
-export function ReplanPanel({ tripId, plan, requestState, onSaved }: { tripId: string; plan: PlanVersionClient; requestState: PlanRequestState; onSaved: (plan: PlanVersionClient) => void }) {
+export function ReplanPanel({ tripId, plan, requestState, onSaved, onOpenRequirements }: { tripId: string; plan: PlanVersionClient; requestState: PlanRequestState; onSaved: (plan: PlanVersionClient) => void; onOpenRequirements?: () => void }) {
   const [reason, setReason] = useState("");
   const [candidate, setCandidate] = useState<ReplanCandidateView | null>(null);
   const [canUndo, setCanUndo] = useState(false);
@@ -53,19 +54,25 @@ export function ReplanPanel({ tripId, plan, requestState, onSaved }: { tripId: s
   return <section className="rounded-2xl border border-sage/20 bg-white p-5 sm:p-7" aria-label="AI 重新规划">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="flex items-center gap-2 text-xl font-semibold text-ink"><Sparkles className="size-5 text-sage" />调整剩余旅行</h3><p className="mt-2 text-sm leading-6 text-graphite">说说发生了什么，先比较变化，再决定是否应用。已确定安排、有效票据和费用会受到保护。</p></div>
       <button type="button" disabled={!!busy} onClick={() => { void read(); }} className="min-h-11 px-3 text-sm text-sage">重新读取</button></div>
-    {!ready && <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm">请先保存并确认旅行需求。<a href="#request-workspace" className="ml-2 underline">前往旅行需求</a></p>}
+    {!ready && <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm">请先保存并确认旅行需求。<a href="#request-workspace" onClick={(event) => { if (onOpenRequirements) { event.preventDefault(); onOpenRequirements(); } }} className="ml-2 underline">前往旅行需求</a></p>}
+    {getTripHardTimeConstraints(plan.requestSnapshot).map((constraint) => <p key={`${constraint.kind}-${constraint.date}`} className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">硬时间红线 · {constraint.label}</p>)}
     <label htmlFor="replan-reason" className="mt-5 block text-sm font-semibold">这次想怎么调整？</label>
     <textarea id="replan-reason" maxLength={600} rows={3} value={reason} disabled={!!busy} onChange={(e) => setReason(e.target.value)} placeholder="例如：下雨了，把下午的户外游览改为室内；晚起一小时；不去某个景点" className="mt-2 w-full rounded-xl border border-sage/25 bg-paper p-3 text-sm leading-6" />
     <div className="mt-3 flex flex-wrap gap-2">{["下雨了，把户外活动换成室内", "晚起一小时，调整剩余安排"].map((text) => <button type="button" disabled={!!busy} onClick={() => setReason(text)} key={text} className="min-h-11 rounded-full bg-sage/10 px-3 text-sm text-sage">{text}</button>)}</div>
     <div className="mt-4 flex flex-wrap gap-3"><button type="button" onClick={() => { void submit("preview"); }} disabled={!!busy || !ready || reason.trim().length < 2} className="min-h-11 rounded-xl bg-sage px-5 py-3 font-semibold text-white disabled:opacity-50">{busy === "preview" ? "正在规划…" : "生成调整预览"}</button>
       {canUndo && <button type="button" disabled={!!busy || !ready} onClick={() => { void submit("undo"); }} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sage/30 px-4 text-sm text-sage"><RotateCcw className="size-4" />预览撤销上次调整</button>}
       {busy && busy !== "cancel" && <button type="button" onClick={() => controller.current?.abort()} className="min-h-11 px-3 text-sm text-graphite">停止等待</button>}</div>
-    {message && <p role="status" className="mt-4 rounded-xl bg-paper p-3 text-sm leading-6">{message}{needsRequest && <a href="#request-workspace" className="ml-2 text-sage underline">修改并确认旅行需求</a>}</p>}
+    {message && <p role="status" className="mt-4 rounded-xl bg-paper p-3 text-sm leading-6">{message}{needsRequest && <a href="#request-workspace" onClick={(event) => { if (onOpenRequirements) { event.preventDefault(); onOpenRequirements(); } }} className="ml-2 text-sage underline">修改并确认旅行需求</a>}</p>}
     {candidate && <div className="mt-6 border-t border-sage/20 pt-5" data-testid="replan-preview">
       <h4 className="text-lg font-semibold">{candidate.kind === "undo" ? "撤销预览" : "方案对比"}</h4>
       <p className="mt-2 text-sm text-graphite">基于计划 V{candidate.baseVersion} · 已确认需求 R{candidate.requestRevision} · {candidate.changes.length} 项变化</p>
+      <div className="mt-4 grid gap-3 rounded-xl bg-sage/5 p-4 text-sm leading-6 sm:grid-cols-3">
+        <div><p className="font-semibold text-graphite">移除项</p><p>{candidate.summary.removed.join("、") || "无"}</p></div>
+        <div><p className="font-semibold text-sage">新增替换项</p><p>{candidate.summary.added.join("、") || "仅调整时间或备注"}</p></div>
+        <div><p className="font-semibold">预算变化</p><p>{formatMoneyRange(candidate.budget.before.totalMinCents, candidate.budget.before.totalMaxCents)} → {formatMoneyRange(candidate.budget.after.totalMinCents, candidate.budget.after.totalMaxCents)}</p></div>
+      </div>
       <div className="mt-4 space-y-3">{candidate.changes.map((change) => <article key={change.eventId} className="rounded-xl bg-paper p-4">
-        <p className="font-semibold">{!change.after ? "取消" : !change.before ? "恢复" : change.before.title !== change.after.title ? "替换" : "调整"} · {change.before?.title ?? change.after?.title}</p>
+        <p className="font-semibold">{!change.after ? "移除" : !change.before ? candidate.kind === "undo" ? "恢复" : "新增" : change.before.title !== change.after.title ? "替换" : "调整"} · {change.before?.title ?? change.after?.title}</p>
         <div className="mt-2 grid gap-3 text-sm leading-6 sm:grid-cols-2"><div><span className="text-graphite">原安排</span><p>{change.before ? `${change.before.date} ${change.before.startTime}–${change.before.endTime} ${change.before.title}` : "无"}</p></div><div><span className="text-sage">新安排</span><p>{change.after ? `${change.after.date} ${change.after.startTime}–${change.after.endTime} ${change.after.title}` : "取消这项活动"}</p><p className="text-graphite">{change.after?.locationName} {change.after?.note}</p></div></div>
       </article>)}</div>
       <p className="mt-4 text-sm">预算：{formatMoneyRange(candidate.budget.before.totalMinCents, candidate.budget.before.totalMaxCents)} → {formatMoneyRange(candidate.budget.after.totalMinCents, candidate.budget.after.totalMaxCents)}。未知费用仍需确认，取消不代表退款。</p>

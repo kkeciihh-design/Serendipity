@@ -7,6 +7,7 @@ import type { RedlineResult } from "./redlines";
 import { imageContentSchema, type ImageContentOptions, type ImagePart } from "./long-image";
 import { pdfContentSchema, type PdfContentOptions, type PdfMetadata } from "./pdf";
 import type { AdvisoryItem } from "./advisories";
+import type { WeatherRecord } from "./weather";
 
 export class ExportError extends Error {
   constructor(message: string, public status = 400) { super(message); this.name = "ExportError"; }
@@ -28,6 +29,7 @@ export const exportWriteSchema = mobileExportWriteSchema.extend({ format: export
 export const exportFormatLabels: Record<ExportFormat, string> = { "mobile-html": "手机 HTML", "plain-text": "纯文字", markdown: "Markdown", "long-image": "旅行长图", pdf: "PDF旅行手册" };
 export type MobileExportOptions = z.infer<typeof mobileExportOptionsSchema>;
 export type ExportSnapshot = {
+  weather?: WeatherRecord[];
   advisories?: { revision: number; items: AdvisoryItem[] };
   schemaVersion: 1; id: string; generatedAt: string;
   plan: PlanVersionRecord;

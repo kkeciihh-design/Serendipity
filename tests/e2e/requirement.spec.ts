@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { openRequirements } from "./workspace-helpers";
 
 function futureDates() {
   const now = new Date();
@@ -54,6 +55,7 @@ test("requirement summary saves, confirms, and requires reconfirmation after edi
   expect(draftResponse.status()).toBe(200);
 
   await page.goto(`/trips/${trip.id}`);
+  await openRequirements(page);
   await expect(page.getByRole("heading", { name: /修订 2｜待确认/ })).toBeVisible();
   await expect(page.locator("#request-destination")).toHaveValue("长沙");
   await expect(page.locator("#request-start-date")).toHaveValue(dates.startDate);
@@ -86,6 +88,7 @@ test("requirement summary saves, confirms, and requires reconfirmation after edi
   await expect(page.getByRole("heading", { name: /修订 3｜已确认/ })).toBeVisible();
 
   await page.reload();
+  await openRequirements(page);
   await expect(page.locator("#request-destination")).toHaveValue("长沙和株洲");
   await expect(page.getByRole("heading", { name: /修订 3｜已确认/ })).toBeVisible();
 });
@@ -102,6 +105,7 @@ test("shows clear AI failures and invalid request handling", async ({
   };
 
   await page.goto(`/trips/${trip.id}`);
+  await openRequirements(page);
   await page.getByRole("button", { name: "AI 理解需求" }).click();
   await expect(
     page.getByText(
@@ -210,6 +214,7 @@ test("a late extraction result does not overwrite unsaved page edits", async ({
   });
 
   await page.goto(`/trips/${trip.id}`);
+  await openRequirements(page);
   await page.getByRole("button", { name: "AI 理解需求" }).click();
   await page.locator("#request-destination").fill("长沙和株洲");
   await expect(page.getByText("保存后将重新确认")).toBeVisible();

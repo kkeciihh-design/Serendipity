@@ -10,7 +10,7 @@ import {
   Save,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   emptyRequestSnapshot,
   REQUEST_FIELD_KEYS,
@@ -69,8 +69,10 @@ function formatMoney(cents: number) {
 export function TripRequestWorkspace({
   initialRequest,
   onStateChange,
+  onRecordChange,
 }: {
   initialRequest: TripRequestClient;
+  onRecordChange?: (record: TripRequestClient) => void;
   onStateChange?: (state: {
     requestRevision: number;
     confirmed: boolean;
@@ -119,20 +121,20 @@ export function TripRequestWorkspace({
   const originalDirty = originalRequest !== record.originalRequest;
   const snapshotDirty =
     !sameJson(snapshot, savedSnapshot) ||
-    !sameJson(
+    (interestsText !== snapshot.interests.join("、") && !sameJson(
       snapshot.interests,
       interestsText
         .split(/[、,，;]/)
         .map((item) => item.trim())
         .filter(Boolean),
-    ) ||
-    !sameJson(
+    )) ||
+    (constraintsText !== snapshot.constraints.join("、") && !sameJson(
       snapshot.constraints,
       constraintsText
         .split(/[、,，;]/)
         .map((item) => item.trim())
         .filter(Boolean),
-    ) ||
+    )) ||
     (snapshot.budgetAmountCents !== null &&
       budgetText !== formatMoney(snapshot.budgetAmountCents)) ||
     (snapshot.budgetAmountCents === null && budgetText !== "");
@@ -166,6 +168,10 @@ export function TripRequestWorkspace({
       hasUnsavedEdits,
     });
   }, [record.requestRevision, isConfirmed, hasUnsavedEdits, onStateChange]);
+
+  useEffect(() => {
+    onRecordChange?.(record);
+  }, [record, onRecordChange]);
 
   const setSnapshotField = <K extends RequestFieldKey>(
     field: K,
@@ -223,7 +229,7 @@ export function TripRequestWorkspace({
     setSnapshotField("budgetAmountCents", cents);
   };
 
-  const applyRecord = (next: TripRequestClient, keepLocalEdits: boolean) => {
+  const applyRecord = useCallback((next: TripRequestClient, keepLocalEdits: boolean) => {
     setRecord(next);
     if (!keepLocalEdits) {
       setOriginalRequest(next.originalRequest);
@@ -240,7 +246,25 @@ export function TripRequestWorkspace({
           : "",
       );
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (initialRequest.tripId !== record.tripId) return;
+    const hasNewRevision = initialRequest.requestRevision > record.requestRevision;
+    const hasNewConfirmation = initialRequest.requestRevision === record.requestRevision &&
+      initialRequest.confirmedRevision === initialRequest.requestRevision && initialRequest.confirmedRequest !== null &&
+      (!isConfirmed || Date.parse(initialRequest.confirmedAt ?? "") > Date.parse(record.confirmedAt ?? ""));
+    // Router refresh can bring back an older snapshot while a local save is in
+    // flight. Only a newer revision or confirmation may replace the saved base.
+    if (!hasNewRevision && !hasNewConfirmation) return;
+    applyRecord(initialRequest, hasUnsavedEdits);
+    setFeedback({
+      tone: hasUnsavedEdits ? "info" : "success",
+      message: hasUnsavedEdits
+        ? `已同步需求修订 ${initialRequest.requestRevision}；你在等待期间输入的内容已保留，请核对后保存并重新确认。`
+        : `已同步需求修订 ${initialRequest.requestRevision}${initialRequest.confirmedRevision === initialRequest.requestRevision ? "，当前需求已确认。" : "，请核对后确认。"}`,
+    });
+  }, [initialRequest, record, isConfirmed, hasUnsavedEdits, applyRecord]);
 
   const captureEdits = () => ({ originalRequest, snapshot, interestsText, constraintsText, budgetText });
   const editedSince = (sent: ReturnType<typeof captureEdits>) =>
@@ -328,20 +352,20 @@ export function TripRequestWorkspace({
       const localEdited =
         originalRequestRef.current !== sourceOriginal ||
         !sameJson(snapshotRef.current, sourceSnapshot ?? emptyRequestSnapshot()) ||
-        !sameJson(
+        (interestsTextRef.current !== snapshotRef.current.interests.join("、") && !sameJson(
           snapshotRef.current.interests,
           interestsTextRef.current
             .split(/[、,，;]/)
             .map((item) => item.trim())
             .filter(Boolean),
-        ) ||
-        !sameJson(
+        )) ||
+        (constraintsTextRef.current !== snapshotRef.current.constraints.join("、") && !sameJson(
           snapshotRef.current.constraints,
           constraintsTextRef.current
             .split(/[、,，;]/)
             .map((item) => item.trim())
             .filter(Boolean),
-        );
+        ));
 
       applyRecord(payload.request, localEdited);
       router.refresh();

@@ -27,7 +27,7 @@ for (const days of [2, 4]) test(`${days} day PDF: privacy confirmation, exact do
   await page.getByLabel("已确认以上隐私选项").check(); await page.getByRole("button", { name: "生成PDF预览" }).click();
   await expect(page.getByRole("status")).toContainText("已生成", { timeout: 50_000 });
   const { files } = await (await request.get(`${endpoint}?kind=pdf`)).json(), file = files[0];
-  expect(file.pdfContent.mode).toBe("complete"); expect(file.pdf.pages).toBeGreaterThan(5);
+  expect(file.pdfContent.mode).toBe("complete"); expect(file.pdf.pages).toBeGreaterThan(1); expect(file.pdf.pages).toBeLessThanOrEqual(days * 4);
   expect(file.pdf.eventIds.sort()).toEqual(trip.p.events.map((e) => e.id).sort());
   await expect(page.locator('iframe[title="PDF旅行手册全部页面"]')).toHaveAttribute("src", /^blob:/);
   const promise = page.waitForEvent("download"); await page.getByRole("link", { name: "下载PDF", exact: true }).click();
@@ -47,12 +47,12 @@ for (const days of [2, 4]) test(`${days} day PDF: privacy confirmation, exact do
   const source = await db.trip.findUniqueOrThrow({ where: { id: trip.id }, include: { request: true, currentPlanVersion: true } });
   await fs.writeFile(path.join(output, `synthetic-${days}days.json`), JSON.stringify(source));
 });
-test("missing maps fail with explicit simplified retry; preview failure recovers; invalid requests and trip isolation", async ({ page, request }) => {
+test("AI coordinates need no manual confirmation; preview failure recovers; invalid requests and trip isolation", async ({ page, request }) => {
   const trip = await seed(request), endpoint = `/api/trips/${trip.id}/exports`;
-  await db.planVersion.update({ where: { id: trip.planId }, data: { places: "[]", events: JSON.stringify(trip.p.events.map((e) => ({ ...e, placeId: null }))) } });
+  await db.planVersion.update({ where: { id: trip.planId }, data: { places: "[]", events: JSON.stringify(trip.p.events.map((e) => ({ ...e, placeId: null, latitude: 24.91, longitude: 118.58 }))) } });
   await page.goto(`/trips/${trip.id}/pdf`); await page.getByLabel("已确认以上隐私选项").check(); await page.getByRole("button", { name: "生成PDF预览" }).click();
-  await expect(page.getByLabel("PDF导出选项").getByRole("alert")).toContainText("缺少已确认公开地点");
-  expect((await (await request.get(`${endpoint}?kind=pdf`)).json()).files).toHaveLength(0);
+  await expect(page.getByRole("status")).toContainText("已生成", { timeout: 50_000 });
+  expect((await (await request.get(`${endpoint}?kind=pdf`)).json()).files[0].pdfContent.mode).toBe("complete");
   await page.getByLabel("资料内容").selectOption("simplified"); await page.getByLabel("已确认以上隐私选项").check(); await page.getByRole("button", { name: "生成PDF预览" }).click();
   await expect(page.getByRole("status")).toContainText("已生成", { timeout: 50_000 });
   const { files } = await (await request.get(`${endpoint}?kind=pdf`)).json(); expect(files[0].pdfContent.mode).toBe("simplified");

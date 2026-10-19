@@ -19,11 +19,11 @@ type AMapApi = {
 };
 declare global { interface Window { AMap?: AMapApi; _AMapSecurityConfig?: { serviceHost: string } } }
 
-function createPopup(marker: MapMarker, selectEvent: (eventId: string) => void) {
+function createPopup(marker: MapMarker, selectEvent: (eventId: string) => void, hoverEvent: (eventId: string | null) => void) {
   const popup = document.createElement("div");
   popup.className = "serendipity-map-popup";
   const title = document.createElement("strong");
-  title.textContent = `${marker.name}${marker.precision === "area_reference" ? " · 区域参考点" : ""}`;
+  title.textContent = `${marker.name}${marker.illustrative ? " · 建议位置（动线示意）" : marker.precision === "area_reference" ? " · 区域参考点" : ""}`;
   popup.append(title);
   for (const event of marker.events) {
     const button = document.createElement("button");
@@ -31,12 +31,17 @@ function createPopup(marker: MapMarker, selectEvent: (eventId: string) => void) 
     button.className = "serendipity-map-popup-event";
     button.textContent = `${event.visitLabel ?? event.visitNumber}. ${event.timeRange}｜${event.title}`;
     button.addEventListener("click", () => selectEvent(event.id));
+    button.addEventListener("mouseenter", () => hoverEvent(event.id));
+    button.addEventListener("mouseleave", () => hoverEvent(null));
+    button.addEventListener("focus", () => hoverEvent(event.id));
+    button.addEventListener("blur", () => hoverEvent(null));
     popup.append(button);
   }
   return popup;
 }
 
 function routeColor(route: MapRoute) {
+  if (route.illustrative) return "#7b8867";
   if (route.mode === "walking") return "#3f6212";
   if (route.mode === "public_transit") return "#1d4ed8";
   return "#9a3412";
@@ -50,8 +55,12 @@ export function MapFrame() {
     let disposeMap: (() => void) | undefined;
     let updateMarkers: ((markers: MapMarker[], routes: MapRoute[], focusEventId: string | null) => void) | undefined;
     let pending: { markers: MapMarker[]; routes: MapRoute[]; focusEventId: string | null } = { markers: [], routes: [], focusEventId: null };
+    let highlightedEventId: string | null = null;
+    let updateHighlight: (() => void) | undefined;
     let script: HTMLScriptElement | undefined;
-    const preview = new URLSearchParams(window.location.search).get("preview") === "1";
+    const parameters = new URLSearchParams(window.location.search);
+    const preview = parameters.get("preview") === "1";
+    const compact = parameters.get("compact") === "1";
     const send = (state: "ready" | "error" | "loading", error?: string) => {
       if (controller.signal.aborted) return;
       setMessage(error ?? "");
@@ -61,17 +70,29 @@ export function MapFrame() {
       if (controller.signal.aborted) return;
       window.parent.postMessage({ type: "serendipity-map", state: "event-selected", preview, eventId }, window.location.origin);
     };
+    const hoverEvent = (eventId: string | null) => {
+      if (controller.signal.aborted) return;
+      window.parent.postMessage({ type: "serendipity-map", state: "event-hovered", preview, eventId }, window.location.origin);
+    };
     let timer = window.setTimeout(() => send("error", "地图加载超时，文字地点仍可查看。请重试。"), 18000);
     const ready = () => { window.clearTimeout(timer); send("ready"); };
     const receive = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin || event.source !== window.parent || event.data?.type !== "serendipity-markers") return;
+      if (event.origin !== window.location.origin || event.source !== window.parent) return;
+      if (event.data?.type === "serendipity-map-highlight") {
+        const result = z.string().max(80).nullable().safeParse(event.data.eventId);
+        if (result.success) { highlightedEventId = result.data; updateHighlight?.(); }
+        return;
+      }
+      if (event.data?.type !== "serendipity-markers") return;
       const result = z.object({
         markers: z.array(mapMarkerSchema).max(64),
         routes: z.array(mapRouteSchema).max(64),
         focusEventId: z.string().nullable(),
+        highlightedEventId: z.string().max(80).nullable().optional(),
       }).safeParse(event.data);
       if (!result.success) return;
       pending = { markers: result.data.markers, routes: result.data.routes, focusEventId: result.data.focusEventId };
+      highlightedEventId = result.data.highlightedEventId ?? null;
       updateMarkers?.(pending.markers, pending.routes, pending.focusEventId);
     };
     window.addEventListener("message", receive);
@@ -98,8 +119,18 @@ export function MapFrame() {
           timer = window.setTimeout(() => send("error", "地图加载超时，文字地点仍可查看。请重试。"), 18000);
         });
         tiles.on("tileload", () => { loaded++; });
-        tiles.on("tileerror", () => { failed++; send("error", "部分地图未加载，请检查网络后重试。地点文字仍可查看。"); });
-        tiles.on("load", () => { if (loaded > 0 && failed === 0) ready(); });
+        tiles.on("tileerror", () => { failed++; });
+        tiles.on("load", () => {
+          // A failed peripheral tile must not replace a usable basemap with a
+          // diagram. Evaluate the completed batch, including successful tiles.
+          if (loaded > 0) {
+            ready();
+            if (failed > 0) setMessage("部分底图暂未加载，可拖动地图或稍后重试。");
+          } else if (failed > 0) {
+            window.clearTimeout(timer);
+            send("error", "地图底图未加载，请检查网络后重试。地点文字仍可查看。");
+          }
+        });
         tiles.addTo(map);
         const markerLayer = L.layerGroup().addTo(map);
         const routeLayer = L.layerGroup().addTo(map);
@@ -139,30 +170,51 @@ export function MapFrame() {
               keyboard: true,
               icon: L.divIcon({
                 className: `serendipity-map-pin${markerData.precision === "area_reference" ? " serendipity-map-pin-area" : ""}`,
-                html: markerData.precision === "area_reference" ? "◎" : markerLabel(markerData),
+                html: markerLabel(markerData),
                 iconSize: markerData.events.length > 1 ? [42, 30] : [30, 30],
                 iconAnchor: [markerData.events.length > 1 ? 21 : 15, 15],
               }),
-            }).bindPopup(createPopup(markerData, selectEvent)).addTo(markerLayer);
+            }).bindPopup(createPopup(markerData, selectEvent, hoverEvent)).addTo(markerLayer);
+            marker.on("mouseover", () => hoverEvent(markerData.events[0].id));
+            marker.on("mouseout", () => hoverEvent(null));
+            marker.getElement()?.addEventListener("focus", () => hoverEvent(markerData.events[0].id));
+            marker.getElement()?.addEventListener("blur", () => hoverEvent(null));
+            if (compact && markerData.events.length === 1) {
+              marker.on("click", () => selectEvent(markerData.events[0].id));
+            }
             createdMarkers.push(marker);
-            if (markerData.precision === "area_reference") marker.setOpacity(0.7);
+            if (markerData.precision === "area_reference") marker.setOpacity(markerData.illustrative ? 0.95 : 0.7);
           }
+          // Hover changes styling only. Recreating pins or fitting bounds here
+          // would interrupt pointer events, popup state and the user's viewport.
+          updateHighlight = () => createdMarkers.forEach((marker, index) => {
+            const pin = marker.getElement();
+            if (!pin) return;
+            const events = mapMarkers[index].events;
+            const selected = events.some((event) => event.id === focusEventId);
+            const highlighted = events.some((event) => event.id === highlightedEventId);
+            pin.dataset.selected = String(selected);
+            pin.dataset.highlighted = String(highlighted);
+            marker.setZIndexOffset(selected || highlighted ? 1000 : 0);
+          });
+          updateHighlight();
           if (coordinates.length) {
-            if (focusEventId) {
-              const focusIndex = mapMarkers.findIndex((item) => item.events.some((event) => event.id === focusEventId));
-              if (focusIndex >= 0) {
-                const focus = createdMarkers[focusIndex];
-                if (focus) {
-                  map.setView(coordinates[focusIndex], Math.max(map.getZoom(), 15), { animate: true });
-                  focus.openPopup();
-                }
-              }
-            } else {
+            if (compact || !focusEventId) {
               const bounds = L.latLngBounds(createdMarkers.map((marker) => marker.getLatLng()));
               if (createdMarkers.length === 1) {
                 map.setView(bounds.getCenter(), 15, { animate: false });
               } else {
                 map.fitBounds(bounds, { padding: [35, 35], maxZoom: 15, animate: false });
+              }
+            }
+            if (focusEventId) {
+              const focusIndex = mapMarkers.findIndex((item) => item.events.some((event) => event.id === focusEventId));
+              if (focusIndex >= 0) {
+                const focus = createdMarkers[focusIndex];
+                if (focus) {
+                  if (!compact) map.setView(coordinates[focusIndex], Math.max(map.getZoom(), 15), { animate: true });
+                  focus.openPopup();
+                }
               }
             }
           }
@@ -206,22 +258,46 @@ export function MapFrame() {
             pin.innerHTML = `<span style="transform: rotate(${routeArrowRotation(route.polyline)}deg)">➤</span>`;
             markers.push(new sdk.Marker({ position: [arrow.longitude, arrow.latitude], content: pin }));
           }
+          const pins: { element: HTMLElement; marker: MapMarker }[] = [];
           markers = [...markers, ...mapMarkers.map((markerData) => {
             const coordinate = toGcj02(markerData, markerData.coordinateSystem);
             const pin = document.createElement("div");
             pin.className = `serendipity-map-pin${markerData.precision === "area_reference" ? " serendipity-map-pin-area" : ""}`;
-            pin.textContent = markerData.precision === "area_reference" ? "◎" : markerLabel(markerData);
+            pin.textContent = markerLabel(markerData);
+            pins.push({ element: pin, marker: markerData });
+            pin.addEventListener("mouseenter", () => hoverEvent(markerData.events[0].id));
+            pin.addEventListener("mouseleave", () => hoverEvent(null));
+            pin.addEventListener("focus", () => hoverEvent(markerData.events[0].id));
+            pin.addEventListener("blur", () => hoverEvent(null));
+            if (compact && markerData.events.length === 1) {
+              pin.tabIndex = 0;
+              pin.setAttribute("role", "button");
+              pin.setAttribute("aria-label", `${markerLabel(markerData)} ${markerData.name}`);
+              pin.addEventListener("click", (event) => { if (event.target === pin) selectEvent(markerData.events[0].id); });
+              pin.addEventListener("keydown", (event) => {
+                if (event.target === pin && (event.key === "Enter" || event.key === " ")) {
+                  event.preventDefault(); selectEvent(markerData.events[0].id);
+                }
+              });
+            }
             for (const event of markerData.events) {
               const button = document.createElement("button");
               button.type = "button";
               button.className = "serendipity-map-popup-event serendipity-map-popup-event-inline";
               button.textContent = `${event.visitLabel ?? event.visitNumber}. ${event.title}`;
               button.addEventListener("click", () => selectEvent(event.id));
+              button.addEventListener("mouseenter", () => hoverEvent(event.id));
+              button.addEventListener("mouseleave", () => hoverEvent(null));
               pin.append(button);
             }
             return new sdk.Marker({ position: [coordinate.longitude, coordinate.latitude], title: markerData.name, content: pin });
           })];
           map.add(markers);
+          updateHighlight = () => pins.forEach(({ element, marker }) => {
+            element.dataset.selected = String(marker.events.some((event) => event.id === focusEventId));
+            element.dataset.highlighted = String(marker.events.some((event) => event.id === highlightedEventId));
+          });
+          updateHighlight();
           if (markers.length && !focusEventId) map.setFitView(markers, true, [35, 35, 35, 35], 15);
         };
         updateMarkers(pending.markers, pending.routes, pending.focusEventId);

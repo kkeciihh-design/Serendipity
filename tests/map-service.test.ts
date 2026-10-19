@@ -80,6 +80,19 @@ it("rejects tampering, cross-event, cross-trip, expired candidates and area prec
   expect(area.places[0].precision).toBe("area_reference");
 });
 
+it("one location confirmation updates a same-day incoming transfer in the saved snapshot", async () => {
+  const { trip, saved } = await seed();
+  const original = saved.events.find((event) => event.id === "d1-activity")!;
+  const events = saved.events.map((event) => event.id === original.id ? { ...event, locationName: "洛伽寺", title: "洛伽寺拍照" } : event);
+  events.push({ ...original, id: "incoming-luojia", type: "local_transport", title: "打车前往洛伽寺", locationName: "洛伽寺", startTime: "09:00", endTime: "10:00", latitude: 24.8519, longitude: 118.6466 });
+  await prisma.planVersion.update({ where: { id: saved.id }, data: { events: JSON.stringify(events) } });
+  const corrected = { ...candidate, poiId: "node:7548511028", name: "洛伽寺", city: "石狮市", latitude: 24.6762788, longitude: 118.7080767 };
+  const updated = await edit(trip.id, 1, original.id, corrected);
+  const activity = updated.events.find((event) => event.id === original.id)!;
+  expect(updated.events.find((event) => event.id === "incoming-luojia")).toMatchObject({ placeId: activity.placeId, latitude: corrected.latitude, longitude: corrected.longitude });
+  expect((await plans.getPlanVersion(trip.id, 1)).events.find((event) => event.id === "incoming-luojia")?.latitude).toBe(24.8519);
+});
+
 it("invalidates related evidence even when two POIs have the same display name", async () => {
   const { trip } = await seed();
   const v2 = await edit(trip.id, 1);
@@ -108,6 +121,7 @@ it("caches free user searches, sends identifying headers and rejects late result
   await maps.searchPlanPlaces(trip.id, 1, { eventId: "d1-activity", city: "深圳", keywords: "深圳站" });
   expect(mocked).toHaveBeenCalledTimes(1);
   expect(mocked.mock.calls[0][1]?.headers).toMatchObject({ "User-Agent": expect.stringContaining("Serendipity") });
+  expect(new URL(String(mocked.mock.calls[0][0])).searchParams.get("countrycodes")).toBe("cn");
   mocked.mockImplementation(async () => { await edit(trip.id, 1); return Response.json(result); });
   await expect(maps.searchPlanPlaces(trip.id, 1, { eventId: "d1-activity", city: "深圳", keywords: "深圳北站" })).rejects.toThrow("变化");
 });

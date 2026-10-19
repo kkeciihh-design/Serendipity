@@ -10,7 +10,8 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 45;
+// Two 120-second model attempts plus validation and persistence.
+export const maxDuration = 300;
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -24,7 +25,7 @@ function extractionErrorResponse(error: unknown) {
         : error.category === "invalid_output"
           ? 502
           : 502;
-    return NextResponse.json({ error: error.message }, { status });
+    return NextResponse.json({ error: error.message, category: error.category }, { status });
   }
   if (error instanceof TripRequestValidationError) {
     return NextResponse.json({ error: error.message }, { status: 400 });

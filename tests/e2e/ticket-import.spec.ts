@@ -86,6 +86,7 @@ test("real OCR crop, correction, retry, confirmation, cleanup and reopen persist
   await expect(editor.getByLabel("出发站点 / 机场", { exact: true })).toHaveValue("深圳北");
   await expect(editor.getByLabel("到达日期", { exact: true })).toHaveValue("2026-10-29");
   await expect(editor.getByLabel("座位 / 车厢", { exact: true })).toHaveValue("05车08A");
+  await editor.getByText("门到门接驳（可稍后补充）", { exact: true }).click();
   await editor.getByLabel("门到门起点", { exact: true }).fill("深圳公共地标（合成）");
   await editor.getByRole("combobox", { name: "前段接驳方式", exact: true }).selectOption("walking");
   await editor.getByLabel("前段接驳总耗时（分钟）", { exact: true }).fill("20");
@@ -145,7 +146,7 @@ test("same image skipped, companion kept and selected replacement/refund reuse s
   await importer.getByRole("button", { name: "前往退票事实确认" }).click();
   await refund.getByRole("checkbox", { name: "我已在官方平台办妥这张票的退票" }).check();
   await refund.getByRole("button", { name: "确认记录退票" }).click();
-  await expect(page.getByRole("heading", { name: /^计划版本 5｜/ })).toBeVisible();
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V5");
   row = await current(id); tickets = JSON.parse(row.tickets);
   expect(tickets.find((t) => t.id === replacement.id)?.status).toBe("cancelled"); expect(tickets.find((t) => t.id === companion.id)).toEqual(companion);
   const redlines = await (await request.get(`/api/trips/${id}/plans/5/redlines`)).json(); expect(redlines.redlines).toHaveLength(1);

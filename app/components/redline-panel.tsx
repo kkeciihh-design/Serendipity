@@ -6,7 +6,7 @@ import { useForegroundRefresh, useTravelClock } from "./use-travel-clock";
 import { useRouter } from "next/navigation";
 import { Clock3 } from "lucide-react";
 import { defaultRedlinePreferences, type RedlinePreferences } from "@/lib/redline-preferences";
-import { formatRedlineTime, liveRedlineCheck, redlineUrgency, reverseCandidate, type ForwardCheck, type RedlineResult } from "@/lib/redlines";
+import { formatRedlineTime, liveRedlineCheck, redlineNeedsAttention, redlineUrgency, reverseCandidate, type ForwardCheck, type RedlineResult } from "@/lib/redlines";
 import type { Ticket } from "@/lib/tickets";
 import type { PlanVersionClient } from "./plan-overview";
 
@@ -93,7 +93,7 @@ function Preferences({ ticket, result, tripId, plan, onSaved, onDirty }: {
   </form>;
 }
 
-export function RedlinePanel({ tripId, plan, onSaved }: { tripId: string; plan: PlanVersionClient; onSaved: (plan: PlanVersionClient) => void }) {
+export function RedlinePanel({ tripId, plan, onSaved, onlyRisks = false }: { tripId: string; plan: PlanVersionClient; onSaved: (plan: PlanVersionClient) => void; onlyRisks?: boolean }) {
   const router = useRouter();
   const [results, setResults] = useState<RedlineResult[] | null>(null);
   const [error, setError] = useState("");
@@ -121,6 +121,9 @@ export function RedlinePanel({ tripId, plan, onSaved }: { tripId: string; plan: 
   useEffect(() => {
     return () => { serial.current++; };
   }, [refresh]);
+  const visibleResults = results?.filter((result) => !onlyRisks || dirtyIds.includes(result.input.id) ||
+    redlineNeedsAttention(result, now ?? Date.parse(result.calculatedAt), reliable));
+  if (!error && (!visibleResults || visibleResults.length === 0)) return null;
   return <section id="time-redlines" aria-label="时间红线" className="mt-5 rounded-xl border-2 border-clay/40 bg-white p-4 sm:p-5">
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-lg font-semibold"><Clock3 className="size-5 text-clay" />出门与返程时间红线</h3><span className="text-xs text-graphite">{clockMessage}</span></div>
     <p className="mt-2 text-sm leading-6 text-graphite">固定票面、办理截止与建议行动时间分开显示。建议不是官方最晚出门时间，也不保证赶上。</p>
@@ -128,7 +131,7 @@ export function RedlinePanel({ tripId, plan, onSaved }: { tripId: string; plan: 
     {error ? <div role="alert" className="mt-3"><p>{error}</p><button className={`${buttonStyle} mt-2`} onClick={() => void refresh()}>重试计算</button></div> : null}
     {!results && !error ? <p className="mt-3">正在按当前票据与路线重算…</p> : null}
     {results?.length === 0 ? <p className="mt-3 text-sm">暂无有效票据红线。请在门到门交通中确认票面和起点；草稿、退票与已替换票不参与硬约束。</p> : null}
-    <div className="mt-3 grid gap-3">{results?.map((r) => {
+    <div className="mt-3 grid gap-3">{visibleResults?.map((r) => {
       const ticket = plan.tickets?.find((t) => t.id === r.input.id);
       if (!ticket) return null;
       const dirty = dirtyIds.includes(ticket.id);

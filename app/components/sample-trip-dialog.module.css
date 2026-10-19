@@ -26,6 +26,12 @@
 .headerLatin { color: #8a9181; font-family: var(--font-mono); font-size: 9px; }
 .close { display: grid; flex-shrink: 0; width: 44px; height: 44px; place-items: center; border-radius: 50%; cursor: pointer; color: #52604d; transition: background .2s; }
 .close:hover { background: #eeeee4; }
+.planningFooter { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 32px; border-top: 1px solid #e1e4d6; background: #f4f2e9; }
+.planningFooter > p { color: #52684a; font-family: var(--font-serif); font-size: 14px; line-height: 1.7; }
+.planningFooter > p > span { display: block; color: #8a927d; font-family: var(--font-sans); font-size: 10px; }
+.planButton { display: inline-flex; flex-shrink: 0; min-height: 46px; align-items: center; justify-content: center; gap: 13px; padding: 12px 20px; border-radius: 8px; color: #faf8ef; background: #3e5a45; font-size: 13px; cursor: pointer; transition: background .2s; }
+.planButton:hover { background: #304b39; }
+.planButton:focus-visible { outline-color: #e2cfaa; }
 .scrollArea { position: relative; min-height: 0; overflow: auto; overflow-anchor: none; overscroll-behavior: contain; contain: paint; scrollbar-width: thin; scrollbar-color: #c7cabb transparent; }
 .cover { position: relative; display: flex; min-height: 210px; align-items: flex-end; isolation: isolate; padding: 36px 44px 30px; color: #faf8ef; background: #304237; }
 .landscape { position: absolute; inset: 0; z-index: -2; overflow: hidden; }
@@ -132,6 +138,9 @@
   .windowHeader { padding: 5px 9px 5px 20px; }
   .windowHeader > p { gap: 9px; font-size: 10px; }
   .headerLatin { display: none; }
+  .planningFooter { display: block; padding: 12px 20px; }
+  .planningFooter > p { display: none; }
+  .planButton { width: 100%; }
   .cover { min-height: 202px; padding: 26px 22px; }
   .cover h2 { font-size: 26px; }
   .eyebrow { font-size: 10px; margin-bottom: 12px; }
@@ -172,4 +181,4 @@
   .sampleNote { font-size: 9px; }
 }
 
-@media (prefers-reduced-motion: reduce) { .close { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .close, .planButton { transition: none; } }

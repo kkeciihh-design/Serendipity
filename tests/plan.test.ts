@@ -188,6 +188,25 @@ describe("basic plan validation", () => {
     }
   });
 
+  it.each([2, 3, 4])("accepts a %i-day itinerary without preparation/rest quotas and with one return-day meal", (days) => {
+    const plan = completePlan(days);
+    plan.events = plan.events.filter((item) => item.type !== "preparation" && item.type !== "rest" &&
+      item.id !== `day-${days}-breakfast`);
+    expect(validatePlan(plan, snapshotFor(days))).toMatchObject({ status: "valid", errors: [], warnings: [] });
+  });
+
+  it("accepts a return day occupied only by transport instead of inventing a destination activity", () => {
+    const plan = completePlan(3);
+    plan.events = plan.events.filter((item) => item.dayNumber !== 3 || item.type === "return_transport");
+    expect(validatePlan(plan, snapshotFor(3)).errors).toEqual([]);
+  });
+
+  it("still rejects a day consisting only of preparation and rest", () => {
+    const plan = completePlan(3);
+    plan.events = plan.events.filter((item) => item.dayNumber !== 2 || ["preparation", "rest"].includes(item.type));
+    expect(validatePlan(plan, snapshotFor(3)).errors).toContain("第 2 天缺少实质行程，请安排交通、游览、餐饮或住宿。");
+  });
+
   it("marks low budgets and over-budget drafts for review", () => {
     const snapshot = {
       ...snapshotFor(2),
@@ -332,7 +351,7 @@ describe("basic plan validation", () => {
       /模型没有返回 JSON 对象/,
     );
     expect(() => parseAIPlanOutput("{ broken }")).toThrow(
-      /JSON 无法解析/,
+      /完整的 JSON 数据/,
     );
   });
 });

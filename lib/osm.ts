@@ -10,12 +10,36 @@ const USER_AGENT = "Serendipity/0.1 (personal local travel planner; https://gith
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 const state = globalThis as typeof globalThis & { serendipityOsmQueue?: Promise<unknown>; serendipityOsmLastRequest?: number };
 
+export function osmSearchQuery(city: string, keywords: string) {
+  const name = keywords.trim();
+  if (/泉州|石狮/.test(city) && /洛[伽迦]寺/.test(name)) return "福建省 石狮市 洛伽寺";
+  if (/泉州/.test(city) && /蟳埔/.test(name)) return "福建省 泉州市 蟳埔渔村";
+  return `${city.trim()} ${name}`;
+}
+
+export function rankOsmPlaces(places: PlaceCandidate[], city: string, keywords: string) {
+  const aliases = /洛[伽迦]寺/.test(keywords) ? ["洛伽寺", "洛迦寺"] : /蟳埔/.test(keywords) ? ["蟳埔村", "蟳埔渔村", "蟳埔"] : [keywords.trim()];
+  const cityParts = city.split(/省|市|县|区|\s+/).filter((part) => part.length >= 2);
+  const relevant = places.filter((place) => {
+    // Specific landmark queries must not silently substitute an unrelated
+    // college/restaurant merely because its address has similar characters.
+    if (/洛[伽迦]寺|蟳埔/.test(keywords)) return aliases.some((name) => place.name.includes(name)) && !/college|university|school|restaurant/.test(place.category);
+    return true;
+  });
+  const score = (place: PlaceCandidate) =>
+    (aliases.some((name) => place.name === name) ? 100 : aliases.some((name) => place.name.includes(name)) ? 60 : 0) +
+    cityParts.reduce((sum, part) => sum + (`${place.city} ${place.address}`.includes(part) ? 10 : 0), 0) -
+    (/college|university|school/.test(place.category) && !/学院|大学|学校/.test(keywords) ? 50 : 0);
+  return relevant.sort((a, b) => score(b) - score(a));
+}
+
 export function parseOsmPlaces(payload: unknown, now = new Date().toISOString()): PlaceCandidate[] {
   if (!Array.isArray(payload)) throw new MapServiceError("免费地点服务返回格式异常，请重试。");
   const places: PlaceCandidate[] = [];
   for (const raw of payload.slice(0, 10)) {
     if (!raw || typeof raw !== "object") continue;
     const address = raw.address ?? {};
+    if (typeof address.country_code === "string" && address.country_code.toLowerCase() !== "cn") continue;
     // Some Chinese OSM records expose the urban district as address.city.
     // Prefer an explicit municipality in the provider's full address.
     const municipality = typeof raw.display_name === "string" ? raw.display_name.split(",").map((part: string) => part.trim()).find((part: string) => /^[^,]+市$/.test(part)) : undefined;
@@ -31,14 +55,14 @@ export function parseOsmPlaces(payload: unknown, now = new Date().toISOString())
     });
     if (parsed.success && /^(node|way|relation):\d+$/.test(parsed.data.poiId)) places.push(parsed.data);
   }
-  if (payload.length && !places.length) throw new MapServiceError("地点结果缺少城市或有效坐标，请补充城市和名称后重试。");
+  if (payload.length && !places.length && payload.some((raw) => raw?.address?.country_code === undefined || raw?.address?.country_code === "cn")) throw new MapServiceError("地点结果缺少城市或有效坐标，请补充城市和名称后重试。");
   return places;
 }
 
 export async function searchOsmPlaces(city: string, keywords: string, signal?: AbortSignal) {
-  const query = `${city.trim()} ${keywords.trim()}`;
+  const query = osmSearchQuery(city, keywords);
   const directory = path.join(getDataDirectory(), "map-search-cache");
-  const cacheFile = path.join(directory, `${crypto.createHash("sha256").update(query).digest("hex")}.json`);
+  const cacheFile = path.join(directory, `${crypto.createHash("sha256").update(`cn-v2:${query}`).digest("hex")}.json`);
   const cached = async () => {
     try {
       const data = JSON.parse(await fs.readFile(cacheFile, "utf8"));
@@ -60,7 +84,8 @@ export async function searchOsmPlaces(city: string, keywords: string, signal?: A
     if (signal?.aborted) throw new MapServiceError("地点查询已取消。");
     state.serendipityOsmLastRequest = Date.now();
     const url = new URL("https://nominatim.openstreetmap.org/search");
-    url.search = new URLSearchParams({ q: query, format: "jsonv2", addressdetails: "1", limit: "8", "accept-language": "zh-CN,en" }).toString();
+    url.search = new URLSearchParams({ q: query, countrycodes: "cn", format: "jsonv2", addressdetails: "1", limit: "8", "accept-language": "zh-CN,en" }).toString();
+    if (/泉州|石狮|晋江/.test(city)) url.searchParams.set("viewbox", "117.35,26,119.1,24.35");
     let response: Response;
     try {
       response = await fetch(url, { headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
@@ -84,7 +109,7 @@ export async function searchOsmPlaces(city: string, keywords: string, signal?: A
     let payload;
     try { payload = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
     catch { throw new MapServiceError("免费地点服务返回格式异常。"); }
-    const places = parseOsmPlaces(payload);
+    const places = rankOsmPlaces(parseOsmPlaces(payload), city, keywords);
     try {
       await fs.mkdir(directory, { recursive: true });
       // Cap this application-owned cache; filenames are hashes, never input paths.

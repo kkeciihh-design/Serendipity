@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { forwardCheck, formatRedlineTime, isoAt, redlineUrgency, reverseCandidate, type RedlineInput, type TimingRoute } from "../lib/redlines";
+import { forwardCheck, formatRedlineTime, isoAt, redlineNeedsAttention, redlineUrgency, reverseCandidate, type RedlineInput, type TimingRoute } from "../lib/redlines";
 import { resolveRedline, type RedlineRouteLookup } from "../lib/redline-resolver";
 import { routeCacheKey, clearRouteCache, readCachedRoute } from "../lib/routes";
 import { verificationEvidenceDirectory } from "./helpers/evidence-directory";
@@ -17,6 +17,41 @@ function standard(): RedlineInput {
     buffers: [{ id: "extra", label: "机动", seconds: 600, reason: "演示" }], assumptions: ["不是官方规定"], blockers: [], earliestDepartureAt: null };
 }
 const fixedLookup: RedlineRouteLookup = async () => { throw new Error("Fixed routes do not query a service"); };
+
+describe("redline overview visibility", () => {
+  it("keeps a feasible distant departure out of the alert area, including an honest estimate", async () => {
+    const result = await resolveRedline(standard(), at("08:00"), "quiet", fixedLookup);
+    expect(result.precision).toBe("estimated");
+    expect(redlineNeedsAttention(result, Date.parse(at("08:00")))).toBe(false);
+    const verifiedInput = standard();
+    verifiedInput.route.status = "verified";
+    verifiedInput.deadlines[0].nature = "confirmed";
+    const verified = await resolveRedline(verifiedInput, at("08:00"), "verified", fixedLookup);
+    expect(verified.precision).toBe("verified");
+    expect(redlineNeedsAttention(verified, Date.parse(at("08:00")))).toBe(false);
+  });
+
+  it("starts drawing attention at fifteen minutes, then retains overdue departures", async () => {
+    const result = await resolveRedline(standard(), at("08:00"), "countdown", fixedLookup);
+    expect(redlineNeedsAttention(result, Date.parse(at("08:39")))).toBe(false);
+    for (const time of ["08:40", "08:55", "09:00", "09:06"]) {
+      expect(redlineNeedsAttention(result, Date.parse(at(time)))).toBe(true);
+    }
+  });
+
+  it("shows conflicting events, missing route data and an unreliable clock even well before departure", async () => {
+    const input = standard();
+    const clear = await resolveRedline(input, at("08:00"), "clear", fixedLookup);
+    expect(redlineNeedsAttention(clear, Date.parse(at("08:00")), false)).toBe(true);
+    input.earliestDepartureAt = at("09:00");
+    const conflict = await resolveRedline(input, at("08:00"), "conflict", fixedLookup);
+    expect(redlineNeedsAttention(conflict, Date.parse(at("08:00")))).toBe(true);
+    input.earliestDepartureAt = null;
+    input.route.durationSeconds = null;
+    const incomplete = await resolveRedline(input, at("08:00"), "incomplete", fixedLookup);
+    expect(redlineNeedsAttention(incomplete, Date.parse(at("08:00")))).toBe(true);
+  });
+});
 
 describe("T09–T12 deterministic redlines", () => {
   it("T09: 08:55, 85 necessary minutes, continuous stages, 10 minutes buffer once", async () => {

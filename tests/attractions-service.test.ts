@@ -39,6 +39,8 @@ async function fixture(options: { routes?: boolean; currentMuseum?: boolean; rel
   await requests.confirmRequest(trip.id, { expectedRequestRevision: draft.requestRevision });
   const capture = await plans.getPlanGenerationContext(trip.id, draft.requestRevision);
   const content = planFixture(capture.requestSnapshot);
+  // Begin within the test cap; the candidate must be what exceeds it.
+  if (options.constraints?.some((text) => /预算/.test(text))) content.events.forEach((event) => { event.costDraftCents = 0; });
   if (options.redline) {
     for (const [id, startTime, endTime] of [["d2-activity", "10:00", "11:00"], ["d2-lunch", "09:00", "09:30"], ["d2-rest", "09:30", "09:45"], ["return", "13:00", "14:30"]]) {
       const event = content.events.find((item) => item.id === id)!;

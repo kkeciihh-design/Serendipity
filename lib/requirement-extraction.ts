@@ -1,6 +1,9 @@
 import { businessOperation } from "./business-guard";
 import { completeText } from "./ai-adapter";
 import { storedAIConfiguration } from "./settings";
+import { PLANNING_COMPLETION_TIMEOUT_MS } from "./planning-timeouts";
+import { preserveExplicitTransportTimes } from "./trip-hard-constraints";
+import { preserveExplicitBudgetCap } from "./budget-limit";
 import {
   getTripRequestRecord,
   saveExtractionResult,
@@ -16,8 +19,6 @@ import {
   type DefaultAssumption,
   type RequestSnapshot,
 } from "./trip-request";
-
-const EXTRACTION_TIMEOUT_MS = 30_000;
 
 export class TripRequestExtractionError extends Error {
   category:
@@ -95,6 +96,7 @@ function extractionPrompt(input: {
     `今天是 ${input.today}（北京时间）。相对日期不要由你猜测；如果只有“周末”“明天”“后天”等表达，startDate 和 endDate 返回 null，程序会按固定时钟及明确天数解析；没有旅行天数时不要擅自填返回日期。`,
     "请只输出一个 JSON 对象，不要 Markdown，不要额外解释。",
     "业务规则：不要编造用户没有说明的精确地点、日期、人数或预算；预算金额用人民币分；“1500 元”若未说明口径，budgetAmountCents 填 150000，budgetScope 填 null；最多提出 3 个影响当前确认的关键问题。",
+    "人数规则：出现“和朋友”“和伴侣”“带家人”“我们”等多人同行语义时，人数至少为 2；有明确总人数则采用该人数。",
     `JSON Schema：${schema}`,
     input.repair
       ? [
@@ -115,19 +117,23 @@ function normalizeAndValidate(
   output: ReturnType<typeof parseAIRequirementOutput>,
   today: Date,
 ) {
+  const groupTravel = /(?:和|跟|与|带(?:着)?).{0,6}(?:朋友|伴侣|家人|父母|孩子|爸妈|妻子|丈夫|老公|老婆|同事|同学)|我们|咱们|一家人|全家|情侣|夫妻|两人|两个人/.test(originalRequest);
+  const groupCountCorrected = groupTravel && (output.request.travelerCount ?? 0) < 2;
   const normalized = normalizeRequestSnapshot({
     ...output.request,
+    travelerCount: groupCountCorrected ? 2 : output.request.travelerCount,
     fieldSources: Object.fromEntries(
       Object.entries(output.request.fieldSources).map(([field, source]) => [
         field,
-        source === "user_confirmed" ? "ai_extracted" : source,
+        field === "travelerCount" && groupCountCorrected ? "program_derived" : source === "user_confirmed" ? "ai_extracted" : source,
       ]),
     ) as RequestSnapshot["fieldSources"],
   });
-  const snapshot = resolveRelativeDates(originalRequest, normalized, today);
+  const snapshot = preserveExplicitBudgetCap(preserveExplicitTransportTimes(resolveRelativeDates(originalRequest, normalized, today), originalRequest), originalRequest);
   const assumptions: DefaultAssumption[] = output.defaultAssumptions.filter(
     (assumption) =>
       assumption.field in snapshot &&
+      !(groupCountCorrected && assumption.field === "travelerCount") &&
       snapshot.fieldSources[assumption.field] !== "user_confirmed",
   );
 
@@ -155,7 +161,7 @@ function normalizeAndValidate(
 
   const errors = validateRequestSnapshot(snapshot, today, "draft");
   const dateQuestions = requestDateQuestions(snapshot);
-  const questions = [...dateQuestions, ...output.openQuestions.filter((question) => !dateQuestions.some((dateQuestion) => dateQuestion.field === question.field))].slice(0, 3);
+  const questions = [...dateQuestions, ...output.openQuestions.filter((question) => !(groupCountCorrected && question.field === "travelerCount") && !dateQuestions.some((dateQuestion) => dateQuestion.field === question.field))].slice(0, 3);
   return { snapshot, questions, assumptions, errors };
 }
 
@@ -197,7 +203,7 @@ export const extractTripRequest = businessOperation(async function extractTripRe
         today: requestToday(today),
         repair,
       }),
-      timeoutMs: EXTRACTION_TIMEOUT_MS,
+      timeoutMs: PLANNING_COMPLETION_TIMEOUT_MS,
     });
 
     if (!completion.ok) {

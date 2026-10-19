@@ -127,7 +127,7 @@ export function HomeGallery() {
           </div>
           <div className="home-sample-grid">
             {sampleTrips.map((trip, index) => (
-              <SampleTripCard key={trip.destination} trip={trip} mode={mode} issue={String(index + 1).padStart(2, "0")} />
+              <SampleTripCard key={trip.destination} trip={trip} mode={mode} issue={String(index + 1).padStart(2, "0")} onStartPlanning={() => formRef.current?.fillInspiration(trip.planningRequest)} />
             ))}
           </div>
           <p className="home-sample-footnote">* 以下为内置精选样本，展示行程结构与核验维度</p>

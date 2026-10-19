@@ -24,7 +24,18 @@ data/
 test-data/
 test-results/
 playwright-report/
-output/pdf/
+output/
+
+# Private databases, sidecars, encryption keys and desktop control state.
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+security.key
+service.json
+/runtime/
 
 # environment
 .env

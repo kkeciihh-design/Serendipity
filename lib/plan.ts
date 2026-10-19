@@ -1,6 +1,11 @@
 import { z } from "zod";
 import type { RequestSnapshot } from "./trip-request";
-import { budgetWarnings, derivePlanCosts, type PlanCostItem } from "./budget";
+import { budgetWarnings, calculateBudgetSummary, derivePlanCosts, type PlanCostItem } from "./budget";
+import { asModelRecord, normalizeGeneratedChineseText, normalizeMoneyCents, normalizeNodeType, normalizeTime, parseModelJson } from "./ai-normalizer";
+import { validateTripHardTimes } from "./trip-hard-constraints";
+import { validateArrivalLunch, validateVisitHours } from "./planning-quality";
+import { deriveGeneratedPlanCosts } from "./generated-costs";
+import { confirmedRequestBudgetLimit } from "./budget-limit";
 
 export const planEventTypeSchema = z.enum([
   "departure_transport",
@@ -47,13 +52,17 @@ export const planEventSchema = z.object({
   startTime: planTime,
   endTime: planTime,
   type: planEventTypeSchema,
-  title: z.string().trim().min(1).max(120),
+  title: z.string().trim().min(1).max(240),
   locationName: z.string().trim().max(160).nullable(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+  coordinateSystem: z.enum(["WGS84", "GCJ-02"]).optional(),
   placeId: z.string().min(1).max(120).nullable().optional(),
   order: z.number().int().min(1).nullable().optional(),
   status: planEventStatusSchema.optional(),
   locked: z.boolean().optional(),
   ticketManaged: z.boolean().optional(),
+  ticketAccessForEventId: z.string().min(1).max(80).optional(),
   ticketTimingPending: z.boolean().optional(),
   accommodationSelection: z.object({
     stayId: z.string().min(1).max(80),
@@ -88,7 +97,7 @@ export const planEventSchema = z.object({
     .max(86_400),
   costDraftCents: z.number().int().min(0).nullable(),
   costStatus: planCostStatusSchema,
-  note: z.string().trim().max(240).nullable().optional(),
+  note: z.string().trim().max(6000).nullable().optional(),
 });
 
 export type PlanEvent = z.infer<typeof planEventSchema>;
@@ -114,20 +123,20 @@ export type PlanPendingItem = z.infer<typeof planPendingItemSchema>;
 
 export const planContentSchema = z.object({
   events: z.array(planEventSchema).min(1).max(64),
-  pendingItems: z.array(planPendingItemSchema).min(1).max(24),
+  pendingItems: z.array(planPendingItemSchema).max(24),
 });
 
 export type PlanContent = z.infer<typeof planContentSchema>;
 
 // The model DTO has no user confirmation, lock or payment authority. Unknown
 // fields (including event/root costs and payment fields) are stripped by Zod.
-const aiEventSchema = planEventSchema.omit({ status: true, locked: true, order: true, placeId: true, ticketManaged: true, ticketTimingPending: true, attractionSelection: true, restaurantSelection: true, accommodationSelection: true }).extend({
+const aiEventSchema = planEventSchema.omit({ status: true, locked: true, order: true, placeId: true, ticketManaged: true, ticketAccessForEventId: true, ticketTimingPending: true, attractionSelection: true, restaurantSelection: true, accommodationSelection: true }).extend({
   costStatus: planCostStatusSchema.transform((status) =>
     status === "user_confirmed" ? "pending_confirmation" as const : status),
 });
 export const aiPlanOutputSchema = z.object({
   events: z.array(aiEventSchema).min(1).max(64),
-  pendingItems: z.array(planPendingItemSchema).min(1).max(24),
+  pendingItems: z.array(planPendingItemSchema).max(24),
 });
 export type AIPlanOutput = z.infer<typeof aiPlanOutputSchema>;
 
@@ -208,6 +217,23 @@ export function sortPlanEvents(events: PlanEvent[]) {
 
 export function planEventDurationSeconds(event: PlanEvent) {
   return (planEventEnd(event).getTime() - planEventStart(event).getTime()) / 1000;
+}
+
+/** Read projection for old generated copy; confirmed or locked event facts stay intact. */
+export function normalizePlanChineseCopy(plan: PlanContent): PlanContent {
+  return {
+    events: plan.events.map((event) => event.locked || event.status === "confirmed" ? event : {
+      ...event,
+      title: normalizeGeneratedChineseText(event.title),
+      locationName: event.locationName === null ? null : normalizeGeneratedChineseText(event.locationName),
+      note: event.note == null ? event.note : normalizeGeneratedChineseText(event.note),
+    }),
+    pendingItems: plan.pendingItems.map((item) => ({
+      ...item,
+      title: normalizeGeneratedChineseText(item.title),
+      reason: normalizeGeneratedChineseText(item.reason),
+    })),
+  };
 }
 
 export function preparePlanForStorage(plan: PlanContent): PlanContent {
@@ -345,25 +371,11 @@ export function validatePlan(
       return;
     }
 
-    const meals = dayEvents.filter((event) => event.type === "meal");
-    if (meals.length < 2) {
-      (scope ? warnings : errors).push(`第 ${dayNumber} 天至少要保留两餐。`);
-    }
-    const activities = dayEvents.filter(
-      (event) => event.type === "activity",
-    );
-    if (activities.length === 0) {
-      (scope ? warnings : errors).push(`第 ${dayNumber} 天缺少活动。`);
-    }
-    const rest = dayEvents.filter((event) => event.type === "rest");
-    if (rest.length === 0) {
-      (scope ? warnings : errors).push(`第 ${dayNumber} 天缺少休息安排。`);
-    }
-    const preparation = dayEvents.filter(
-      (event) => event.type === "preparation",
-    );
-    if (preparation.length === 0) {
-      (scope ? warnings : errors).push(`第 ${dayNumber} 天缺少准备事项。`);
+    // A travel day can consist of transfers and one meal; preparation and rest
+    // may live in another event's notes. Validate useful content, not a template
+    // quota that forces the model to invent activities or meals around a train.
+    if (!dayEvents.some((event) => event.type !== "preparation" && event.type !== "rest")) {
+      (scope ? warnings : errors).push(`第 ${dayNumber} 天缺少实质行程，请安排交通、游览、餐饮或住宿。`);
     }
     if (!dayEvents.some((event) => event.date === date)) {
       errors.push(`第 ${dayNumber} 天的日期不是 ${date}。`);
@@ -415,11 +427,9 @@ export function validatePlan(
     }
   }
 
-  if (plan.pendingItems.length === 0) {
-    errors.push("基础计划必须列出至少一个待确认事项。");
-  }
-
   warnings.push(...budgetWarnings(costs ?? derivePlanCosts(plan.events), snapshot));
+  errors.push(...validateTripHardTimes(plan.events, snapshot));
+  errors.push(...validateVisitHours(plan.events, snapshot));
 
   return {
     ...(scope ? { scope } : {}),
@@ -429,34 +439,249 @@ export function validatePlan(
   };
 }
 
+export function planEveningReturnGaps(plan: PlanContent, snapshot: RequestSnapshot) {
+  const gaps: { dayNumber: number; stay: PlanEvent; after: PlanEvent }[] = [];
+  const dates = tripDates(snapshot);
+  for (let dayNumber = 1; dayNumber < dates.length; dayNumber += 1) {
+    const dayEvents = plan.events.filter((event) => event.dayNumber === dayNumber);
+    const stays = dayEvents.filter((event) => event.type === "accommodation");
+    if (stays.length !== 1) continue;
+    const hotelRest = (event: PlanEvent) => event.type === "accommodation" ||
+      ["rest", "activity"].includes(event.type) && /(?:返回|回到|回)(?:酒店|民宿|住处|住宿).*(?:休息|休整|就寝|睡觉)/.test(event.title);
+    const lastOutingEnd = Math.max(0, ...dayEvents.filter((event) =>
+      !hotelRest(event) && ["meal", "activity", "local_transport"].includes(event.type),
+    ).map((event) => planEventEnd(event).getTime()));
+    // Closing the day's outings matters, not a fixed clock time: returning at
+    // 17:30 after an early dinner is just as complete as a 22:00 hotel return.
+    const hasEveningStay = dayEvents.some((event) => hotelRest(event) &&
+      planEventStart(event).getTime() >= lastOutingEnd);
+    if (!hasEveningStay) {
+      const after = [...dayEvents].sort((left, right) => planEventEnd(right).getTime() - planEventEnd(left).getTime())[0];
+      gaps.push({ dayNumber, stay: stays[0], after });
+    }
+  }
+  return gaps;
+}
+
+/** Missing hotel-return detail is useful advice, not a reason to reject a usable itinerary. */
+export function validateGeneratedPlan(plan: PlanContent, snapshot: RequestSnapshot): PlanValidationResults {
+  const validation = validatePlan(plan, snapshot, deriveGeneratedPlanCosts(plan.events, snapshot));
+  validation.errors.push(...validateArrivalLunch(plan.events));
+  const hardBudget = confirmedRequestBudgetLimit(snapshot);
+  if (hardBudget !== null && calculateBudgetSummary(deriveGeneratedPlanCosts(plan.events, snapshot), snapshot).totalMaxCents > hardBudget) {
+    validation.errors.push(`预计费用区间上限超过已确认预算上限 ¥${hardBudget / 100}，请降低花费后重新安排。`);
+  }
+  const warnings = [...validation.warnings, ...planEveningReturnGaps(plan, snapshot).map(({ dayNumber }) =>
+    `第 ${dayNumber} 天可在游览或住宿说明中补充晚间返回酒店的交通与休息建议，无需单独增加节点。`,
+  )];
+  return { ...validation, warnings, status: validation.errors.length ? "invalid" : warnings.length ? "needs_review" : "valid" };
+}
+
 export function normalizePlanOutput(output: PlanContent): PlanContent {
-  const parsed = aiPlanOutputSchema.parse(output);
-  return preparePlanForStorage({
+  const parsed = aiPlanOutputSchema.parse(normalizeAIPlanDraft(output));
+  return preparePlanForStorage(normalizePlanChineseCopy({
     events: parsed.events.map((event) => ({
       ...event,
       status: "suggested",
       locked: false,
     })),
     pendingItems: parsed.pendingItems,
-  });
+  }));
 }
 
-export function parseAIPlanOutput(raw: string): AIPlanOutput {
-  const trimmed = raw.trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const candidate = fenced?.[1] ?? trimmed;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end <= start) {
-    throw new Error("模型没有返回 JSON 对象。");
-  }
+function modelField(record: Record<string, unknown>, ...keys: string[]) {
+  return keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== "");
+}
 
-  let payload: unknown;
-  try {
-    payload = JSON.parse(candidate.slice(start, end + 1));
-  } catch {
-    throw new Error("模型返回的 JSON 无法解析。");
+function modelText(value: unknown): string | null {
+  if (typeof value === "string") return value.trim() || null;
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map(modelText).filter(Boolean).join(" → ") || null;
+  if (value && typeof value === "object") {
+    return Object.entries(value).map(([key, item]) => {
+      const text = modelText(item);
+      return text ? `${key}：${text}` : null;
+    }).filter(Boolean).join("；") || null;
   }
+  return null;
+}
 
-  return aiPlanOutputSchema.parse(payload);
+function modelNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const match = value.match(/-?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+function modelDate(value: unknown) {
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})(?:日|T.*)?$/);
+  return match ? `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}` : value;
+}
+
+function modelCoordinates(event: Record<string, unknown>) {
+  const location = asModelRecord(event.location);
+  const source = event.coordinates ?? event.coordinate ?? event.coords ?? location.coordinates ?? location;
+  const coordinate = asModelRecord(source);
+  const longitude = modelNumber(modelField(event, "longitude", "lng", "lon") ?? modelField(coordinate, "longitude", "lng", "lon") ?? (Array.isArray(source) ? source[0] : null));
+  const latitude = modelNumber(modelField(event, "latitude", "lat") ?? modelField(coordinate, "latitude", "lat") ?? (Array.isArray(source) ? source[1] : null));
+  const system = String(event.coordinateSystem ?? coordinate.coordinateSystem ?? "").toUpperCase();
+  return {
+    latitude: latitude !== null && Math.abs(latitude) <= 90 ? latitude : null,
+    longitude: longitude !== null && Math.abs(longitude) <= 180 ? longitude : null,
+    coordinateSystem: /GCJ[-_]?02/.test(system) ? "GCJ-02" as const : /WGS[-_]?84/.test(system) ? "WGS84" as const : undefined,
+  };
+}
+
+function modelEventCost(event: Record<string, unknown>, type: PlanEventType, snapshot?: RequestSnapshot) {
+  const amountKeys = ["costDraftCents", "costCents", "estimatedCostCents", "costYuan", "priceYuan", "costPerPerson", "pricePerPerson", "costPerRoom", "cost", "price", "estimatedCost", "费用", "参考费用"];
+  const selectedKey = amountKeys.find((key) => event[key] !== undefined && event[key] !== null && event[key] !== "");
+  const money = selectedKey ? event[selectedKey] : undefined;
+  const costUnit = modelText(event.costUnit);
+  const currencyUnit = modelField(event, "currencyUnit", "amountUnit", "moneyUnit", "costCurrencyUnit") ??
+    (costUnit && /^(?:元|分|人民币|[¥￥]|cents?|cny|rmb|yuan)$/i.test(costUnit) ? costUnit : undefined);
+  let amount = normalizeMoneyCents(currencyUnit ? { amount: money, unit: currencyUnit } : money, selectedKey?.endsWith("Cents") ? "cents" : "yuan");
+  if (amount === null && (type === "rest" || type === "preparation")) amount = 0;
+  if (amount !== null && snapshot) {
+    const basis = String(modelField(event, "costBasis", "pricingUnit", "costUnit") ??
+      modelField(asModelRecord(money), "basis", "pricingUnit", "costBasis", "scope") ?? "");
+    const annotatedAmount = typeof money === "string" ? money : "";
+    const perPerson = /per_person|per_ticket|人均|每[人位]|\/\s*[人位]/i;
+    const perRoom = /per_room|每[间房]|\/\s*[间房]/i;
+    // Only the selected amount's own unit applies. A separate human-readable
+    // per-person reference must never multiply an already supplied total again.
+    if (selectedKey === "costPerPerson" || selectedKey === "pricePerPerson" || perPerson.test(basis) || perPerson.test(annotatedAmount)) amount *= snapshot.travelerCount ?? 1;
+    else if (selectedKey === "costPerRoom" || perRoom.test(basis) || perRoom.test(annotatedAmount)) amount *= Math.ceil((snapshot.travelerCount ?? 1) / 2);
+  }
+  return amount;
+}
+
+function modelDurationMinutes(event: Record<string, unknown>) {
+  const explicit = modelField(event, "durationMinutes", "时长分钟");
+  if (explicit !== undefined) return modelNumber(explicit);
+  const value = event.duration;
+  if (typeof value !== "string") return modelNumber(value);
+  const hours = value.match(/(\d+(?:\.\d+)?)\s*(?:小时|hours?|hrs?|h)(?![a-z])/i);
+  const minutes = value.match(/(\d+(?:\.\d+)?)\s*(?:分钟|分|minutes?|mins?|m)(?![a-z])/i);
+  if (hours || minutes) return Number(hours?.[1] ?? 0) * 60 + Number(minutes?.[1] ?? 0);
+  return modelNumber(value);
+}
+
+/** Model-only coercion preserves the supplied itinerary; it never creates local-catalog replacements. */
+export function normalizeAIPlanDraft(value: unknown, snapshot?: RequestSnapshot) {
+  let root = asModelRecord(value);
+  for (const key of ["plan", "data", "result", "itinerary"]) {
+    if (!root.events && !root.days && root[key] && !Array.isArray(root[key]) && typeof root[key] === "object") root = asModelRecord(root[key]);
+  }
+  const list = Array.isArray(value) ? value : modelField(root, "events", "days", "itinerary", "schedule", "plan", "data", "行程", "日程");
+  const rawEvents: Record<string, unknown>[] = [];
+  for (const [index, item] of (Array.isArray(list) ? list : []).entries()) {
+    const day = asModelRecord(item);
+    const nested = modelField(day, "events", "activities", "nodes", "items", "schedule", "行程", "安排");
+    if (Array.isArray(nested)) {
+      for (const entry of nested) {
+        const record = asModelRecord(entry);
+        rawEvents.push({
+          ...record,
+          dayNumber: modelField(record, "dayNumber", "day", "第几天") ?? modelField(day, "dayNumber", "day", "第几天") ?? index + 1,
+          date: modelField(record, "date", "日期") ?? modelField(day, "date", "日期"),
+        });
+      }
+    } else rawEvents.push(day);
+  }
+  const confirmedDates = snapshot ? tripDates(snapshot) : [];
+  const suppliedDates = [...new Set(rawEvents.map((event) => modelDate(modelField(event, "date", "日期"))).filter((date): date is string => Boolean(date)))].sort();
+  const events = rawEvents.map((event, index) => {
+    const date = modelDate(modelField(event, "date", "日期"));
+    const dayNumber = modelNumber(modelField(event, "dayNumber", "day", "dayIndex", "第几天")) ?? (date ? Math.max(0, (confirmedDates.length ? confirmedDates : suppliedDates).indexOf(date)) + 1 : 1);
+    const timeRange = modelText(modelField(event, "time", "timeRange", "时间"))?.split(/\s*(?:—|–|－|-|~|～|至|到|→)\s*/);
+    const startTime = normalizeTime(modelField(event, "startTime", "start", "beginTime", "开始时间") ?? timeRange?.[0]);
+    let endTime = normalizeTime(modelField(event, "endTime", "end", "finishTime", "结束时间") ?? timeRange?.[1]);
+    const explicitSeconds = modelNumber(event.suggestedDurationSeconds ?? event.durationSeconds);
+    const minutes = modelDurationMinutes(event);
+    if (!endTime && startTime && (explicitSeconds ?? minutes) !== null) {
+      const [hour, minute] = startTime.split(":").map(Number);
+      const endMinute = (hour * 60 + minute + Math.max(1, Math.round((explicitSeconds ?? (minutes ?? 60) * 60) / 60))) % 1440;
+      endTime = `${String(Math.floor(endMinute / 60)).padStart(2, "0")}:${String(endMinute % 60).padStart(2, "0")}`;
+    }
+    const location = asModelRecord(event.location);
+    let title = modelText(modelField(event, "title", "name", "activityName", "标题", "名称"));
+    const locationName = modelText(modelField(event, "locationName", "placeName", "place", "地点", "位置") ?? location.name ?? location.address ?? (typeof event.location === "string" ? event.location : null)) ?? title;
+    const titleType = normalizeNodeType(title);
+    const categoryType = normalizeNodeType(modelField(event, "type", "category", "eventType", "类别", "类型"));
+    const type = categoryType === "local_transport" && (titleType === "departure_transport" || titleType === "return_transport")
+      ? titleType : categoryType ?? titleType ?? "activity";
+    const details = ["note", "notes", "description", "details", "说明", "攻略"].map((key) => modelText(event[key]));
+    const detailFields: [string, string[]][] = [
+      ["交通", ["transportDetails", "transport", "交通说明", "交通"]],
+      ["游览动线", ["route", "visitRoute", "游览路线", "路线"]],
+      ["预约与门票", ["booking", "reservation", "ticketInfo", "预约", "门票"]],
+      ["餐饮", ["food", "dishes", "cuisine", "mealDetails", "特色菜", "餐饮"]],
+      ["住宿", ["accommodationDetails", "lodging", "hotelAdvice", "住宿建议"]],
+      ["随身与提醒", ["tips", "packing", "reminders", "注意事项", "必备物品"]],
+    ];
+    for (const [label, fields] of detailFields) {
+      const text = [...new Set(fields.map((key) => modelText(event[key])).filter(Boolean))].join("；");
+      if (text) details.push(`${label}：${text}`);
+    }
+    if (!title) title = locationName;
+    if (type === "meal" && title && /^(?:到达后)?(?:早饭|午饭|晚饭|早餐|午餐|晚餐|用餐|餐饮)$/.test(title)) {
+      const dish = modelText(modelField(event, "food", "dishes", "cuisine", "特色菜"));
+      const detail = [dish, locationName && locationName !== title ? locationName : null].filter(Boolean).join(" · ");
+      if (detail) title = `${title} · ${detail}`;
+    }
+    let duration = explicitSeconds;
+    if (duration === null && startTime && endTime) {
+      const [startHour, startMinute] = startTime.split(":").map(Number);
+      const [endHour, endMinute] = endTime.split(":").map(Number);
+      duration = ((endHour * 60 + endMinute - startHour * 60 - startMinute + 1440) % 1440) * 60;
+    }
+    const costDraftCents = modelEventCost(event, type, snapshot);
+    const costStatus = event.costStatus === "user_confirmed" ? "pending_confirmation" : event.costStatus === "pending_confirmation" ? "pending_confirmation" : costDraftCents === null ? "pending_confirmation" : "estimated";
+    return {
+      ...event,
+      id: modelText(event.id) ?? `ai-event-${index + 1}`,
+      dayNumber,
+      date: date ?? confirmedDates[dayNumber - 1] ?? modelDate(modelField(root, "startDate", "date")),
+      endDate: modelDate(event.endDate),
+      startTime, endTime, type,
+      title: title === null ? null : normalizeGeneratedChineseText(title),
+      locationName: locationName === null ? null : normalizeGeneratedChineseText(locationName),
+      suggestedDurationSeconds: duration ?? (minutes !== null ? Math.round(minutes * 60) : 3600),
+      costDraftCents, costStatus,
+      note: normalizeGeneratedChineseText([...new Set(details.filter((text): text is string => Boolean(text)))].join("\n")) || null,
+      ...modelCoordinates(event),
+    };
+  });
+  const pending = modelField(root, "pendingItems", "pending", "reminders", "待办事项", "待确认事项");
+  const pendingItems = (Array.isArray(pending) ? pending : []).map((item, index) => {
+    const record = asModelRecord(item);
+    const category = planPendingItemSchema.shape.category.safeParse(record.category);
+    const title = modelText(record.title ?? record.name ?? (typeof item === "string" ? item : null));
+    const deadline = planDate.safeParse(modelDate(record.requiredBefore));
+    return {
+      id: modelText(record.id)?.slice(0, 80) ?? `ai-pending-${index + 1}`,
+      category: category.success ? category.data : "other",
+      title: normalizeGeneratedChineseText(title ?? "出发前核对当地安排").slice(0, 160),
+      reason: normalizeGeneratedChineseText(modelText(record.reason ?? record.note ?? record.description) ?? title ?? "出发前查看官方最新公告。").slice(0, 240),
+      requiredBefore: deadline.success ? deadline.data : null,
+    };
+  });
+  return { events, pendingItems };
+}
+
+function isModelPlanShape(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.length > 0 && value.some((item) => {
+      const record = asModelRecord(item);
+      return modelField(record, "events", "activities", "nodes", "startTime", "time", "date", "title", "name", "day", "dayNumber", "标题", "名称", "行程") !== undefined;
+    });
+  }
+  const record = asModelRecord(value);
+  if (["events", "days", "itinerary", "schedule", "行程", "日程"].some((key) => Array.isArray(record[key]))) return true;
+  return ["plan", "data", "result", "itinerary"].some((key) => record[key] && typeof record[key] === "object" && isModelPlanShape(record[key]));
+}
+
+export function parseAIPlanOutput(raw: string, snapshot?: RequestSnapshot): AIPlanOutput {
+  return aiPlanOutputSchema.parse(normalizeAIPlanDraft(parseModelJson(raw, isModelPlanShape), snapshot));
 }

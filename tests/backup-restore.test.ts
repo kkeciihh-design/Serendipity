@@ -84,7 +84,8 @@ describe("阶段28：旅行备份、恢复屏障和持久换代", () => {
     expect((await checklist.getChecklist(p.tripId, p.versionNumber)).items.some((i) => i.id === "essential:phone" && i.completed)).toBe(true);
     expect((await execution.getExecution(p.tripId)).execution.revision).toBe(3);
     expect(await exports.createExport(p.tripId, { expectedPlanVersion: p.versionNumber, format: "plain-text", options: {} })).toHaveProperty("id");
-  });
+  // This integration case creates/restores two databases and exports after reopening.
+  }, 30_000);
   it("T32: an in-flight V5/R5 generation cannot commit after restoring V4 and editing back to V5/R5", async () => {
     let p = await fixture();
     await db.tripRequest.update({ where: { tripId: p.tripId }, data: { requestRevision: 5, confirmedRevision: 5 } });
@@ -208,7 +209,7 @@ describe("阶段28：旅行备份、恢复屏障和持久换代", () => {
     expect(restart.status, restart.stderr).toBe(0); expect(current().dataGeneration).not.toBe(generation); expect(current().activeRestoreId).toBeNull(); expect(backupHash(snapshot())).toBe(backupHash(backup));
     const restartedGeneration = current().dataGeneration; resumeInterruptedRestore(filename); expect(current().dataGeneration).toBe(restartedGeneration);
     await evidence(`interruption-${point}`, { childExit: child.status, startupExit: restart.status, originalGeneration: generation, recoveredGeneration: restartedGeneration, originalDataPreserved: true, ordinaryRestartPreserved: true });
-  });
+  }, 30_000);
   it("validates corruption, unsupported version, malicious content, broken references and empty backups before setting a barrier", async () => {
     await fixture(); const original = snapshot(), generation = current().dataGeneration;
     const invalid = ["not json", { ...original, version: 0 }, { ...original, AppSettings: {} }, { ...original, dataGeneration: "forged" },

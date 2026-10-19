@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { normalizePlanOutput, nextPlanDate } from "../lib/plan";
 import {
   activateTicket, applyTicketsToEvents, cancelTicket, createDraftTicket, replaceTicket,
-  ticketActionSchema, ticketChain, ticketWarnings, validateTickets,
+  isTicketAccessEvent, ticketActionSchema, ticketChain, ticketWarnings, updateTicketDetails, validateTickets,
 } from "../lib/tickets";
 import { planFixture, requestFixture } from "./helpers/plan-fixtures";
 import { ticketFixture } from "./helpers/ticket-fixtures";
@@ -80,5 +80,38 @@ describe("manual ticket facts and chain timing", () => {
     content.events[0].ticketManaged = true;
     content.events[0].ticketTimingPending = true;
     expect(normalizePlanOutput(content).events.every((event) => !event.ticketManaged && !event.ticketTimingPending)).toBe(true);
+  });
+
+  it("rejects contradictory new ticket times before save and permits correcting a legacy invalid time in place", () => {
+    const invalid = ticketFixture(date, { departureTime: "16:00", arrivalTime: "15:00" });
+    for (const action of ["create_draft", "activate"] as const) {
+      const parsed = ticketActionSchema.safeParse({ action, acknowledged: true, ticket: invalid });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) expect(parsed.error.issues[0].message).toContain("到达时间必须晚于出发时间");
+    }
+    expect(ticketActionSchema.safeParse({ action: "activate", acknowledged: true,
+      ticket: { ...invalid, arrivalDate: nextPlanDate(date) } }).success).toBe(true);
+    const legacy = activateTicket(invalid);
+    expect(updateTicketDetails(legacy, { ...invalid, arrivalTime: "20:30" })).toMatchObject({
+      id: legacy.id, confirmedAt: legacy.confirmedAt, arrivalTime: "20:30", status: "active",
+    });
+  });
+
+  it("merges the existing station wait into the ticket chain without excluding independent travel", () => {
+    const returning = events.find((event) => event.id === "return")!;
+    const ticket = activateTicket(ticketFixture(returning.date, { eventId: returning.id, direction: "return",
+      fromName: "泉州站", toName: "深圳北站", departureTime: "16:00", arrivalTime: "20:30", accessDurationMinutes: 30 }));
+    const access = { ...returning, id: "quanzhou-station-access", type: "local_transport" as const,
+      title: "打车至泉州站并候车", locationName: "泉州站", startTime: "13:00", endTime: "16:00", locked: false, status: "suggested" as const };
+    expect(isTicketAccessEvent(access, ticket)).toBe(true);
+    expect(isTicketAccessEvent({ ...access, title: "从泉州站打车至酒店", locationName: "西街酒店" }, ticket)).toBe(false);
+    expect(isTicketAccessEvent({ ...access, title: "打车去开元寺", locationName: "开元寺" }, ticket)).toBe(false);
+    expect(isTicketAccessEvent({ ...access, locked: true }, ticket)).toBe(false);
+    const before = [access, returning];
+    const after = applyTicketsToEvents(before, [ticket]);
+    expect(after[0]).toMatchObject({ id: access.id, ticketAccessForEventId: returning.id, ticketManaged: true });
+    expect(ticketWarnings(ticket, after).join()).not.toContain("上一项");
+    expect(applyTicketsToEvents(after, [cancelTicket(ticket)])[0].ticketAccessForEventId).toBeUndefined();
+    expect(applyTicketsToEvents(after, [cancelTicket(ticket)])[0].ticketManaged).toBe(false);
   });
 });

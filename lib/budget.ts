@@ -462,6 +462,7 @@ export function validatePlanCosts(
   const eventIds = new Set(events.map((event) => event.id));
   const linkedEventIds = new Set<string>();
   const routeLinkedEventIds = new Set<string>();
+  const narrativeTransferEventIds = new Set<string>();
   const costIds = new Set<string>();
 
   for (const cost of costs) {
@@ -483,6 +484,9 @@ export function validatePlanCosts(
         }
         routeLinkedEventIds.add(cost.linkedEventId);
       }
+    } else if (cost.id === `cost-transfer-${cost.linkedEventId}` && cost.category === "local_transport") {
+      if (narrativeTransferEventIds.has(cost.linkedEventId)) errors.push(`费用 ${cost.id} 与事件 ${cost.linkedEventId} 的正文接驳重复关联。`);
+      narrativeTransferEventIds.add(cost.linkedEventId);
     } else if (ticketCost) {
       // Several travelers can hold separate tickets for the same main transport
       // event. Each stable ticket keeps its own fare/payment history.

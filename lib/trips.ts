@@ -47,6 +47,14 @@ export const updateTripSchema = z
   });
 
 export type Trip = Prisma.TripGetPayload<{ include: { request: true } }>;
+export type TripListEntry = Trip & {
+  currentPlanVersion: {
+    requestSnapshot: string;
+    versionNumber: number;
+    requestRevision: number;
+    requirementUpToDate: boolean;
+  } | null;
+};
 
 type PrismaStore = {
   trip: {
@@ -114,9 +122,14 @@ function parseOrThrow<T>(
   return result.data;
 }
 
-export const listTrips = businessOperation(async function listTrips(): Promise<Trip[]> {
+export const listTrips = businessOperation(async function listTrips(): Promise<TripListEntry[]> {
   return store.trip.findMany({
-    include: { request: true },
+    include: {
+      request: true,
+      currentPlanVersion: {
+        select: { requestSnapshot: true, versionNumber: true, requestRevision: true, requirementUpToDate: true },
+      },
+    },
     orderBy: {
       updatedAt: "desc",
     },

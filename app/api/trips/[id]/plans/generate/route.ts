@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { appWriteAccessError } from "@/lib/access";
 import {
   PlanGenerationError,
+  PlanGenerationInProgressError,
   generatePlanVersion,
 } from "@/lib/plan-generation";
 import {
@@ -13,13 +14,17 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Two 120-second model attempts plus validation and persistence.
+export const maxDuration = 300;
 
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
 function generationErrorResponse(error: unknown) {
+  if (error instanceof PlanGenerationInProgressError) {
+    return NextResponse.json({ error: error.message, category: "generation_in_progress" }, { status: 409 });
+  }
   if (error instanceof PlanGenerationError) {
     const status =
       error.category === "configuration"
@@ -27,7 +32,7 @@ function generationErrorResponse(error: unknown) {
         : error.category === "invalid_output"
           ? 502
           : 502;
-    return NextResponse.json({ error: error.message }, { status });
+    return NextResponse.json({ error: error.message, category: error.category }, { status });
   }
   if (error instanceof PlanValidationError) {
     return NextResponse.json({ error: error.message }, { status: 400 });

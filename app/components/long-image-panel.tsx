@@ -48,7 +48,7 @@ export function LongImagePanel({ tripId }: { tripId: string }) {
         <fieldset disabled={busy || !data?.plan} className="mt-4 space-y-4 disabled:opacity-60">
           <label className="block font-semibold">导出日期<select value={date} onChange={(e) => setDate(e.target.value)} className="mt-2 min-h-12 w-full rounded-lg border border-sand bg-cream px-3"><option value="all">全部日期</option>{data?.plan?.dates.map((d, i) => <option key={d} value={d}>第 {i + 1} 天 · {d}</option>)}</select></label>
           <label className="flex min-h-11 items-center gap-3"><input type="checkbox" className="size-5 accent-sage" checked={includeMap} onChange={(e) => setMap(e.target.checked)} />包含位置示意图</label>
-          <p className="text-sm leading-6 text-graphite">显示已确认公开地点和行程编号，无道路底图。私人标点不带出；无已确认地点时会注明。</p>
+          <p className="text-sm leading-6 text-graphite">显示公开地点、每日动线和行程编号，AI 建议标点会注明待核实。私人标点不带出；地图为离线示意，无道路底图。</p>
           <label className="flex min-h-11 items-center gap-3"><input type="checkbox" className="size-5 accent-sage" checked={includePhotos} onChange={(e) => setPhotos(e.target.checked)} />包含许可照片</label>
           <label className="flex min-h-11 items-center gap-3"><input type="checkbox" className="size-5 accent-sage" checked={includePrivateAddress} onChange={(e) => setPrivate(e.target.checked)} />包含私人起终点地址</label>
           {!includePrivateAddress && <label className="block text-sm">附近公共地标（选填）<input value={publicLandmark} maxLength={100} onChange={(e) => setLandmark(e.target.value)} placeholder="例如：市民中心南门" className="mt-2 min-h-12 w-full rounded-lg border border-sand px-3 text-base" /><span className="mt-2 block leading-6 text-graphite">仅供辨认，红线沿用原起点计算。</span></label>}

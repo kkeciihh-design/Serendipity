@@ -80,7 +80,7 @@ test("real local photographs and trip reasons remain usable at three widths; a r
   await expect(dialog.getByRole("button", { name: "应用这项替换", exact: true })).toBeEnabled();
   await page.screenshot({ path: path.join(evidence, "replacement-preview.png"), fullPage: false });
   await dialog.getByRole("button", { name: "应用这项替换", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
   const saved = await db.planVersion.findUniqueOrThrow({ where: { tripId_versionNumber: { tripId: trip.id, versionNumber: 2 } } });
   const events = JSON.parse(saved.events);
   const changed = events.find((event: { id: string }) => event.id === "d1-activity");
@@ -104,7 +104,8 @@ test("failed images degrade honestly and another city never borrows the Changsha
   await timeline(page, trip.id);
   await page.getByRole("button", { name: /景点详情.*湖南博物院/ }).click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog.getByText("暂无可用图片", { exact: false }).first()).toBeVisible();
+  await expect(dialog.getByRole("img")).toHaveCount(0);
+  await expect(dialog.getByText("暂无可用图片", { exact: false })).toHaveCount(0);
   await expect(dialog.getByRole("heading", { name: "湖南博物院", exact: true })).toBeVisible();
   await fs.mkdir(evidence, { recursive: true });
   await page.screenshot({ path: path.join(evidence, "missing-photo.png"), fullPage: false });
@@ -171,7 +172,7 @@ test("read and save failures expose retry without losing the current choice", as
   await expect(dialog.getByRole("alert")).toContainText("保存暂不可用");
   expect(await db.planVersion.count({ where: { tripId: trip.id } })).toBe(1);
   await keep.click();
-  await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
   expect(await db.planVersion.count({ where: { tripId: trip.id } })).toBe(2);
 });
 

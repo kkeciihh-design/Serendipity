@@ -35,6 +35,25 @@ function moveEvent(plan: PlanVersionRecord, eventId: string, startTime: string, 
 }
 
 describe("redline input occupancy", () => {
+  it("does not count Quanzhou station access and waiting as a second activity before the same 16:00 train", async () => {
+    const plan = redlinePlan();
+    const returning = plan.events.find((event) => event.id === "return")!;
+    const ticket = activateTicket(ticketFixture(returning.date, { eventId: returning.id, direction: "return", fromName: "泉州站",
+      toName: "深圳北站", departureTime: "16:00", arrivalTime: "20:30", accessMode: "walking", accessDurationMinutes: 30,
+      bufferMinutes: 30, boardingCutoffMinutes: 5, chainOriginName: "西街酒店" }));
+    const activity = { ...returning, id: "quanzhou-lunch", type: "meal" as const, title: "午餐后取行李", startTime: "11:30", endTime: "13:00" };
+    const access = { ...returning, id: "quanzhou-access", type: "local_transport" as const, title: "打车至泉州站并候车",
+      locationName: "泉州站", startTime: "13:00", endTime: "16:00", locked: false, status: "suggested" as const };
+    plan.events = applyTicketsToEvents([activity, access, returning], [ticket]); plan.tickets = [ticket];
+    const result = (await buildPlanRedlines(plan, `${returning.date}T00:00:00.000Z`))[0];
+    expect(result.suggestedAt).toBe(`${returning.date}T06:25:00.000Z`);
+    expect(result.input.earliestDepartureAt).toBe(`${returning.date}T05:00:00.000Z`);
+    expect(result.conflicts).toEqual([]);
+    const independent = { ...access, id: "independent-visit", type: "activity" as const, title: "参观开元寺", endTime: "15:00" };
+    plan.events.push(independent);
+    expect((await buildPlanRedlines(plan, `${returning.date}T00:00:00.000Z`))[0].conflicts.join()).toContain("晚于建议出发");
+  });
+
   it.each(["preparation", "local_transport"] as const)("keeps independent %s occupancy in a complete edited plan", async (type) => {
     let plan = redlinePlan();
     if (type === "local_transport") {

@@ -54,7 +54,7 @@ test("download, preview, explicit confirmation, restore, stale tab rejection and
   const downloadEvent = page.waitForEvent("download"); await page.getByRole("button", { name: "下载旅行备份" }).click();
   const download = await downloadEvent, file = path.join(output, "travel-backup.json"); await download.saveAs(file);
   const backupText = await fs.readFile(file, "utf8"); expect(backupText).not.toMatch(/passwordHash|apiKeyCiphertext|dataGeneration|activeRestoreId/);
-  const stale = await browser.newPage(); await stale.goto(`/trips/${id}`); await stale.locator("#trip-title").fill("恢复前未提交标题");
+  const stale = await browser.newPage(); await stale.goto(`/trips/${id}`); await stale.getByRole("button", { name: /^修改旅行标题/ }).click(); await stale.locator("#trip-title").fill("恢复前未提交标题");
   await request.patch(`/api/trips/${id}`, { data: { title: "恢复前的新标题" } });
   await page.getByLabel("选择旅行备份").setInputFiles(file);
   await expect(page.getByRole("heading", { name: "恢复摘要与影响范围" })).toBeVisible();
@@ -72,6 +72,7 @@ test("download, preview, explicit confirmation, restore, stale tab rejection and
   await stale.getByRole("button", { name: "保存标题" }).click(); expect((await rejected).status()).toBe(409);
   await expect(stale.locator("#trip-title")).toHaveValue("恢复前未提交标题");
   await stale.getByRole("button", { name: "重新载入页面", exact: true }).click();
+  await stale.getByRole("button", { name: /^修改旅行标题/ }).click();
   await expect(stale.locator("#trip-title")).not.toHaveValue("恢复前未提交标题");
   await page.reload(); await expect(page.locator("#data-management")).toContainText("旅行恢复完成");
   expect(await db.appSettings.findUniqueOrThrow({ where: { id: "singleton" } })).toEqual(settingsBefore);

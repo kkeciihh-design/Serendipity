@@ -1,5 +1,6 @@
 import { type Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { openAdjustments, openRequirements, openSnapshot } from "./workspace-helpers";
 import { PrismaClient } from "@prisma/client";
 import path from "node:path";
 
@@ -324,27 +325,29 @@ test("shows a generated basic plan and keeps costs visibly unverified", async ({
 
   await page.goto(`/trips/${tripId}`);
   await expect(
-    page.getByRole("heading", { name: /尚无基础计划/ }),
+    page.getByRole("heading", { name: "你的旅行想法，已妥善收藏" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "生成基础行程" }).click();
+  await page.getByRole("button", { name: /^(生成基础行程|一键重试生成行程)$/ }).click();
 
   await expect(
-    page.getByRole("heading", { name: /计划版本 1/ }),
+    page.getByTestId("plan-version-select").filter({ hasText: "版本 V1" }),
   ).toBeVisible();
-  await expect(page.getByText("依据需求修订 2 的确认快照生成")).toBeVisible();
+  await openSnapshot(page);
   await expect(page.getByText(/预计 120 元/)).toBeVisible();
-  await expect(page.getByText("前往长沙")).toBeVisible();
-  await expect(page.getByText("湘江边散步")).toBeVisible();
-  await expect(page.getByText("120 元｜估算")).toBeVisible();
-  await expect(page.getByText("待确认｜待确认").first()).toBeVisible();
+  await expect(page.getByRole("list", { name: "当日行程时间轴" }).getByText("前往长沙", { exact: true })).toBeVisible();
+  await expect(page.getByRole("list", { name: "当日行程时间轴" }).getByText("湘江边散步", { exact: true })).toBeVisible();
+  await expect(page.getByText("120 元").first()).toBeVisible();
+  await expect(page.locator("[data-timeline-level=experience]").first()).toBeVisible();
   await expect(page.getByText("确认去返程车票")).toBeVisible();
   await expect(page.getByText(/计划版本 1 已保存/)).toBeVisible();
 
+  await openRequirements(page);
+  await openAdjustments(page);
   await page.locator("#request-destination").fill("株洲");
   await expect(page.getByText("保存后将重新确认")).toBeVisible();
   await expect(page.getByText("需求修改未保存")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "生成基础行程" }),
+    page.getByRole("button", { name: /^(生成基础行程|一键重试生成行程)$/ }),
   ).toBeDisabled();
 });
 
@@ -474,10 +477,11 @@ test("overview switches days and plan versions without mixing request snapshots"
   });
 
   await page.goto(`/trips/${tripId}`);
-  await page.getByRole("button", { name: "生成基础行程" }).click();
+  await page.getByRole("button", { name: /^(生成基础行程|一键重试生成行程)$/ }).click();
   await expect(
-    page.getByRole("heading", { name: /计划版本 1/ }),
+    page.getByTestId("plan-version-select").filter({ hasText: "版本 V1" }),
   ).toBeVisible();
+  await openSnapshot(page);
   await expect(
     page.getByText(
       `${fourDayDates.startDate} 至 ${fourDayDates.endDate}`,
@@ -494,10 +498,12 @@ test("overview switches days and plan versions without mixing request snapshots"
 
   await page.getByRole("button", { name: /第 4 天/ }).click();
   await expect(
-    page.getByRole("heading", { name: /第 4 天/ }),
+    page.getByRole("button", { name: /第 4 天/ }),
   ).toBeVisible();
-  await expect(page.getByText("第4天返程")).toBeVisible();
+  await expect(page.getByRole("list", { name: "当日行程时间轴" }).getByText("第4天返程", { exact: true })).toBeVisible();
 
+  await openRequirements(page);
+  await openAdjustments(page);
   await page.locator("#request-destination").fill("株洲");
   await page.getByRole("button", { name: "保存需求修订" }).click();
   await expect(page.getByText(/需求修订 3 已保存/)).toBeVisible();
@@ -510,12 +516,12 @@ test("overview switches days and plan versions without mixing request snapshots"
   await expect(page.getByText(longDestination).first()).toBeVisible();
   await expect(page.getByText("当前计划待更新")).toBeVisible();
 
-  await page.getByRole("button", { name: "生成基础行程" }).click();
+  await page.getByRole("button", { name: /^(生成基础行程|一键重试生成行程)$/ }).click();
   await expect(
-    page.getByRole("heading", { name: /计划版本 2/ }),
+    page.getByTestId("plan-version-select").filter({ hasText: "版本 V2" }),
   ).toBeVisible();
   await expect(page.getByText("株洲").first()).toBeVisible();
-  await expect(page.getByText("需求依据当前有效")).toBeVisible();
+  await expect(page.getByText("当前计划待更新")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /第 1 天/ })).toBeVisible();
 });
 
@@ -543,7 +549,7 @@ test("generation failures keep the old preview and retry after cancel", async ({
   });
 
   await page.goto(`/trips/${tripId}`);
-  const generateButton = page.getByRole("button", { name: "生成基础行程" });
+  const generateButton = page.getByRole("button", { name: /^(生成基础行程|一键重试生成行程)$/ });
   await generateButton.click();
   const cancelButton = page.getByRole("button", { name: "取消生成" });
   await expect(cancelButton).toBeVisible();
@@ -552,13 +558,13 @@ test("generation failures keep the old preview and retry after cancel", async ({
   releaseFirstRoute?.();
   await expect(page.getByText("已取消等待生成结果。未收到响应不能确认是否已保存，请重新读取当前计划核对。")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: /尚无基础计划/ }),
+    page.getByRole("heading", { name: "你的旅行想法，已妥善收藏" }),
   ).toBeVisible();
 
   await generateButton.click();
   await expect(page.getByText("AI 服务超时，请稍后重试。")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: /尚无基础计划/ }),
+    page.getByRole("heading", { name: "你的旅行想法，已妥善收藏" }),
   ).toBeVisible();
   await expect(generateButton).toBeEnabled();
 });
@@ -600,11 +606,11 @@ test("timeline edits, locks, cancellation, and cross-midnight times persist", as
     await expect(page.getByText("计划版本 2 已保存。")).toBeVisible();
     await expect(page.getByText("23:00–次日 01:00")).toBeVisible();
     await expect(page.getByText("已锁定").first()).toBeVisible();
-    await expect(page.getByText("路线未核验").first()).toBeVisible();
+    await expect(page.locator("[data-timeline-level=briefing]").first()).toBeVisible();
 
     await page.reload();
     await expect(page.getByText("23:00–次日 01:00")).toBeVisible();
-    await expect(page.getByText("夜间抵达后活动")).toBeVisible();
+    await expect(page.getByRole("list", { name: "当日行程时间轴" }).getByText("夜间抵达后活动", { exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: /^第 \d+ 项：城市公园散步$/ }).click();
     await expect(page.locator('input[type="time"]')).toBeDisabled();
@@ -612,7 +618,7 @@ test("timeline edits, locks, cancellation, and cross-midnight times persist", as
 
     await page.getByLabel("锁定这项安排").uncheck();
     await page.getByRole("button", { name: "保存修改" }).click();
-    await expect(page.getByRole("heading", { name: /^计划版本 3｜/ })).toBeVisible();
+    await expect(page.getByTestId("plan-version-select").filter({ hasText: "版本 V3" })).toBeVisible();
     await expect(page.getByLabel("锁定这项安排")).not.toBeChecked();
     await expect(page.locator('input[type="time"]')).toBeEnabled();
     await expect(page.locator('input[type="time"]')).toHaveValue("23:00");
@@ -627,7 +633,7 @@ test("timeline edits, locks, cancellation, and cross-midnight times persist", as
     await page.getByRole("button", { name: "移除安排" }).click();
     await page.getByRole("button", { name: "保存修改" }).click();
     await expect(
-      page.getByRole("heading", { name: /计划版本 4/ }),
+      page.getByTestId("plan-version-select").filter({ hasText: "版本 V4" }),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: /可选城市展览/ })).toHaveCount(0);
 
@@ -662,6 +668,7 @@ test("legacy duration cannot move times on note or lock edits, and protected reg
     await page.getByLabel("锁定这项安排").check();
     await page.getByRole("button", { name: "保存修改" }).click();
     await expect(page.getByText("计划版本 3 已保存。")).toBeVisible();
+    await openAdjustments(page);
     await page.getByRole("button", { name: "生成新计划版本 V4" }).click();
     await expect(page.getByText(/重新生成可能覆盖这些事实，已保留当前计划/)).toBeVisible();
     expect(await prisma.planVersion.count({ where: { tripId } })).toBe(3);
@@ -863,6 +870,7 @@ test("budget tab shows totals from the plan snapshot and persists confirmed amou
     expect(draftResponse.status()).toBe(200);
 
     await page.goto(`/trips/${tripId}`);
+    await openSnapshot(page);
     await expect(page.getByText("当前计划待更新")).toBeVisible();
     await expect(
       page.getByText(/预算目标 1500 元（全程总预算）｜预计 1286 元/),
@@ -888,6 +896,7 @@ test("budget tab shows totals from the plan snapshot and persists confirmed amou
     await expect(page.getByText("1356 元").first()).toBeVisible();
 
     await page.reload();
+    await openSnapshot(page);
     await page.getByRole("tab", { name: "预算" }).click();
     await expect(page.getByText("1356 元").first()).toBeVisible();
     await expect(page.getByText("已支付 70 元").first()).toBeVisible();
@@ -895,9 +904,10 @@ test("budget tab shows totals from the plan snapshot and persists confirmed amou
       page.getByText(/预算目标 1500 元（全程总预算）/),
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "V1" }).click();
+    await page.getByTestId("plan-version-select").click();
+    await page.getByRole("link", { name: /^V1\s*历史版本$/ }).click();
     await expect(
-      page.getByRole("heading", { name: /计划版本 1/ }),
+      page.getByTestId("plan-version-select").filter({ hasText: "版本 V1" }),
     ).toBeVisible();
     await page.getByRole("tab", { name: "预算" }).click();
     await expect(page.getByText("历史版本费用只读")).toBeVisible();

@@ -290,9 +290,7 @@ export function PlanBudget({
             : ""}
         </p>
         <p className="mt-2 text-sm leading-6 text-graphite">
-          人数与预算目标读取本计划版本的需求修订{" "}
-          {plan.requestRevision} 快照；修改需求请先在需求确认区保存并确认，再生成新计划版本后重算。
-          住宿明确填写的房数与每笔晚数优先，未填写时使用默认推算。
+          点击任意费用可修改金额与支付状态。住宿按实际房数和晚数计费。
         </p>
       </section>
 
@@ -375,6 +373,7 @@ export function PlanBudget({
                               {cost.eventRemoved ? "（安排已移除，费用保留）" : ""}
                             </span>
                             <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-graphite">
+                              {cost.unit === "one_time" ? <span className="font-medium text-charcoal">{formatMoneyRange(line.minCents, line.maxCents)}</span> : <>
                               <span>
                                 {cost.unitAmountCents === null
                                   ? "金额未知"
@@ -390,6 +389,7 @@ export function PlanBudget({
                                 ={" "}
                                 {formatMoneyRange(line.minCents, line.maxCents)}
                               </span>
+                              </>}
                             </span>
                             {cost.note ? <span className="mt-2 block whitespace-pre-wrap text-sm leading-6 text-clay">{cost.note}</span> : null}
                           </span>
@@ -477,7 +477,7 @@ export function PlanBudget({
                 ))}
               </select>
             </label>
-            <label className="block text-sm font-medium text-charcoal">
+            {draft.unit === "per_ticket" ? <label className="block text-sm font-medium text-charcoal">
               票数（按票计价时填写）
               <input
                 type="number"
@@ -490,7 +490,7 @@ export function PlanBudget({
                 }
                 className="mt-2 min-h-12 w-full rounded-md border border-sand bg-white px-4 py-3 text-base text-charcoal focus:border-sage focus:outline-none disabled:bg-graphite/10"
               />
-            </label>
+            </label> : null}
 
             {draft.unit === "per_room_per_night" || draft.unit === "per_night" ? (
               <label className="block text-sm font-medium text-charcoal">
@@ -585,7 +585,7 @@ export function PlanBudget({
           >
             {feedback?.message ??
               (canEdit
-                ? "费用确认会生成新的计划版本，并继承当前版本的需求修订和确认快照。"
+                ? "保存后将更新旅行预算。"
                 : "历史版本只读。")}
           </p>
         </section>

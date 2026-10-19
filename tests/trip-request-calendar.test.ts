@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { isolatedDatabase } from "./helpers/test-database";
 import { requestFixture } from "./helpers/plan-fixtures";
 import { requestDateQuestions } from "../lib/trip-request";
+import { completeAutoPlanningRequest } from "../lib/trip-auto-planning";
 
 let database: ReturnType<typeof isolatedDatabase>;
 let prisma: PrismaClient;
@@ -21,6 +22,42 @@ afterAll(async () => {
 });
 
 describe("audit calendar write boundaries and history", () => {
+  it("persists one-click date assumptions through save and confirmation without weakening revision checks", async () => {
+    const original = "去杭州玩三天";
+    const trip = await trips.createTrip({ originalRequest: original });
+    const snapshot = completeAutoPlanningRequest(original, { ...requestFixture(3), startDate: null, endDate: null });
+    const saved = await requests.saveRequestDraft(trip.id, { expectedRequestRevision: 1, request: snapshot });
+    expect(saved.defaultAssumptions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "startDate", value: snapshot.startDate }),
+      expect.objectContaining({ field: "endDate", value: snapshot.endDate }),
+    ]));
+    await expect(requests.confirmRequest(trip.id, { expectedRequestRevision: 1 })).rejects.toThrow("需求已经修改");
+    const confirmed = await requests.confirmRequest(trip.id, { expectedRequestRevision: saved.requestRevision });
+    expect(confirmed.confirmedRequest).toMatchObject({ startDate: snapshot.startDate, endDate: snapshot.endDate });
+    expect(confirmed.confirmedRequest?.fieldSources.startDate).toBe("default_assumption");
+  });
+
+  it("replaces an AI placeholder assumption with the actual automatic date and keeps it readable", async () => {
+    const original = "去杭州玩三天，哪天出发还没定";
+    const trip = await trips.createTrip({ originalRequest: original });
+    const partial = { ...requestFixture(3), startDate: null, endDate: null };
+    const draft = await requests.saveExtractionResult({
+      tripId: trip.id, expectedRequestRevision: 1, expectedOriginalRequest: original,
+      snapshot: partial, questions: requestDateQuestions(partial),
+      assumptions: [{ field: "startDate", value: "待定", reason: "还没确定出发日期。" }],
+    });
+    const snapshot = completeAutoPlanningRequest(original, draft.extractedRequest!);
+    const saved = await requests.saveRequestDraft(trip.id, { expectedRequestRevision: draft.requestRevision, request: snapshot });
+    expect(saved.defaultAssumptions?.filter((assumption) => assumption.field === "startDate")).toEqual([
+      expect.objectContaining({ field: "startDate", value: snapshot.startDate }),
+    ]);
+    await requests.confirmRequest(trip.id, { expectedRequestRevision: saved.requestRevision });
+    const reloaded = await requests.getTripRequestRecord(trip.id);
+    expect(reloaded.confirmedRequest?.fieldSources.startDate).toBe("default_assumption");
+    expect(reloaded.defaultAssumptions).toContainEqual(expect.objectContaining({ field: "startDate", value: snapshot.startDate }));
+    expect(reloaded.pendingQuestions).toEqual([]);
+  });
+
   it("rejects invalid dates through draft, extraction save and confirmation without changing the stored revision", async () => {
     const original = "日期边界隔离测试";
     const trip = await trips.createTrip({ originalRequest: original });

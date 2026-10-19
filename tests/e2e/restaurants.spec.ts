@@ -63,12 +63,12 @@ test("real meal photograph, sources and one-person/multi-person budgets render a
   await expect(dialog.getByRole("button", { name: "应用用餐调整", exact: true })).toBeEnabled();
   await page.screenshot({ path: path.join(evidence, "meal-pricing-preview.png") });
   expect(await db.planVersion.count({ where: { tripId: trip.id } })).toBe(1);
-  await dialog.getByRole("button", { name: "应用用餐调整", exact: true }).click(); await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
+  await dialog.getByRole("button", { name: "应用用餐调整", exact: true }).click(); await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
   const saved = await db.planVersion.findUniqueOrThrow({ where: { tripId_versionNumber: { tripId: trip.id, versionNumber: 2 } } });
   const cost = JSON.parse(saved.costs).find((item: { id: string }) => item.id === "cost-d1-lunch"); expect(cost).toMatchObject({ dinerCount: 3, unitAmountCents: 1850, unitAmountMaxCents: 2500 });
   await page.reload(); await page.getByRole("tab", { name: "每日时间轴", exact: true }).click();
-  await expect(page.getByText(/3人用餐 · 本餐合计/)).toContainText("55.50");
-  await page.getByRole("tab", { name: "预算", exact: true }).click(); await expect(page.getByText(/3 人/).first()).toBeVisible();
+  await expect(page.getByText(/3\s*人用餐 · 本餐合计/)).toContainText("55.50");
+  await page.getByRole("tab", { name: "预算", exact: true }).click(); await expect(page.getByRole("tabpanel", { name: "预算", exact: true }).getByText(/3 人/).first()).toBeVisible();
   await page.goto(`/trips/${trip.id}?planVersion=1`); await page.getByRole("tab", { name: "每日时间轴", exact: true }).click(); await page.getByRole("button", { name: `查看餐厅详情：${restaurantCatalog[0].name}`, exact: true }).click();
   await expect(page.getByRole("dialog").getByText(/历史版本只读/).first()).toBeVisible();
   await fs.writeFile(path.join(evidence, "pricing-result.json"), JSON.stringify({ tripId: trip.id, version: saved.versionNumber, cost, requestSnapshot: JSON.parse(saved.requestSnapshot) }, null, 2));
@@ -77,11 +77,12 @@ test("real meal photograph, sources and one-person/multi-person budgets render a
 test("replacement changes the map point and time in one version, with unavailable details clearly identified", async ({ page, request }) => {
   const trip = await seed(request); await openMeal(page, trip.id); const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: /查看餐厅候选/ }).click(); await dialog.getByRole("button", { name: /^新玉楼东/ }).click();
-  await expect(dialog.getByText("暂无可用图片", { exact: true }).first()).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: /^新玉楼东/ })).toBeVisible();
+  await expect(dialog.getByText("暂无可用图片", { exact: true })).toHaveCount(0);
   await dialog.getByLabel("本餐人数", { exact: true }).fill("2"); await dialog.getByLabel("人均下限（元）", { exact: true }).fill("40");
   await dialog.getByRole("button", { name: "预览替换餐厅", exact: true }).click(); await expect(dialog.getByRole("button", { name: "应用用餐调整", exact: true })).toBeEnabled();
   await page.screenshot({ path: path.join(evidence, "restaurant-replacement.png") });
-  await dialog.getByRole("button", { name: "应用用餐调整", exact: true }).click(); await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
+  await dialog.getByRole("button", { name: "应用用餐调整", exact: true }).click(); await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
   const row = await db.planVersion.findUniqueOrThrow({ where: { tripId_versionNumber: { tripId: trip.id, versionNumber: 2 } } });
   const meal = JSON.parse(row.events).find((event: { id: string }) => event.id === "d1-lunch"); expect(meal.placeId).toBe("osm:way:273730025:poi"); expect(JSON.parse(row.places)[0].name).toBe("新玉楼东");
   await page.getByRole("tab", { name: "地图", exact: true }).click(); await expect(page.getByRole("tabpanel", { name: "地图", exact: true }).getByText(/新玉楼东/).first()).toBeVisible();
@@ -90,7 +91,7 @@ test("replacement changes the map point and time in one version, with unavailabl
 
 test("missing images, wrong branches and empty cities never borrow another venue's photograph", async ({ page, request }) => {
   const trip = await seed(request); await page.route("**/restaurants/*.webp", (route) => route.abort()); await openMeal(page, trip.id);
-  const dialog = page.getByRole("dialog"); await expect(dialog.getByText("暂无可用图片", { exact: true }).first()).toBeVisible();
+  const dialog = page.getByRole("dialog"); await expect(dialog.getByRole("img")).toHaveCount(0); await expect(dialog.getByText("暂无可用图片", { exact: true })).toHaveCount(0);
   await page.screenshot({ path: path.join(evidence, "restaurant-missing-photo.png") }); await page.keyboard.press("Escape"); await expect(dialog).not.toBeVisible();
   const wrongBranch = await seed(request, { branch: "火宫殿东塘店" }); await openMeal(page, wrongBranch.id, "火宫殿东塘店"); await expect(page.getByRole("dialog").getByText(/不会借用同品牌其他门店/)).toBeVisible();
   const other = await seed(request, { city: "杭州" }); const result = await request.get(`${endpoint(other.id)}?eventId=d1-lunch`); expect((await result.json()).recommendations).toMatchObject({ current: null, candidates: [] });
@@ -122,7 +123,7 @@ test("read and save failures allow retry without losing draft pricing; untrusted
   expect(await db.planVersion.count({ where: { tripId: trip.id } })).toBe(1);
   const bad = await request.post(endpoint(trip.id), { headers: { Origin: "https://foreign.example" }, data: { action: "preview", eventId: "d1-lunch", candidateId: null, pricing } }); expect(bad.status()).toBe(403);
   const forged = await request.post(endpoint(trip.id), { data: { action: "apply", eventId: "d1-lunch", previewToken: "forged" } }); expect(forged.status()).toBe(409);
-  await dialog.getByRole("button", { name: "应用用餐调整", exact: true }).click(); await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
+  await dialog.getByRole("button", { name: "应用用餐调整", exact: true }).click(); await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
 });
 
 test("closing a pending preview and an explicit preview timeout leave the current meal untouched", async ({ page, request }) => {

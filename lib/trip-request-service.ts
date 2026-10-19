@@ -171,6 +171,15 @@ function serializeSnapshot(snapshot: RequestSnapshot | null) {
 
 function generatedDefaultAssumptions(snapshot: RequestSnapshot) {
   const assumptions: DefaultAssumption[] = [];
+  for (const field of ["startDate", "endDate"] as const) {
+    if (snapshot[field] && snapshot.fieldSources[field] === "default_assumption") {
+      assumptions.push({
+        field,
+        value: snapshot[field],
+        reason: "原话未确定具体日期，先按近期日期与旅行天数安排，可在修改需求中调整后重新生成。",
+      });
+    }
+  }
   if (snapshot.fieldSources.travelerCount === "default_assumption") {
     assumptions.push({
       field: "travelerCount",
@@ -305,7 +314,10 @@ export const saveRequestDraft = businessOperation(async function saveRequestDraf
   const retainedAssumptions = nextSnapshot
     ? currentAssumptions.filter(
         (assumption) =>
-          nextSnapshot.fieldSources[assumption.field] !== "user_confirmed",
+          nextSnapshot.fieldSources[assumption.field] !== "user_confirmed" &&
+          // An AI date placeholder must not hide the concrete automatic date.
+          (!(assumption.field === "startDate" || assumption.field === "endDate") ||
+            assumption.value === nextSnapshot[assumption.field]),
       )
     : null;
   const generatedAssumptions = nextSnapshot

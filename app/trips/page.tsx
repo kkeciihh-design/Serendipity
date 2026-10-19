@@ -1,126 +1,52 @@
 import Link from "next/link";
-import { ArrowRight, FilePlus2, MapPinned, Settings } from "lucide-react";
+import { FilePlus2, Settings } from "lucide-react";
 import { requirePageAppAccess } from "@/lib/page-access";
 import { listTrips } from "@/lib/trips";
-import { formatTripDateTime, summarizeRequest } from "@/lib/trip-format";
+import { readTripSummarySnapshot, tripSummaryDates, tripSummaryDays, tripSummaryTravelers } from "@/lib/trip-summary";
+import { tripDisplayTitle } from "@/lib/trip-title";
+import { TripCollection } from "./trip-collection";
+import styles from "./trips.module.css";
 
 export const dynamic = "force-dynamic";
 
 export default async function TripsPage() {
   await requirePageAppAccess();
-
   const trips = await listTrips();
+  const cards = trips.map((trip) => {
+    const confirmed = trip.request?.confirmedRevision === trip.request?.requestRevision && Boolean(trip.request?.confirmedRequest);
+    const plan = trip.currentPlanVersion;
+    const snapshot = (confirmed ? readTripSummarySnapshot(trip.request?.confirmedRequest) : null)
+      ?? readTripSummarySnapshot(plan?.requestSnapshot)
+      ?? readTripSummarySnapshot(trip.request?.extractedRequest);
+    const originalRequest = trip.request?.originalRequest ?? trip.originalRequest;
+    const needsUpdate = Boolean(plan && (!plan.requirementUpToDate || plan.requestRevision !== trip.request?.requestRevision));
+    return {
+      id: trip.id,
+      title: tripDisplayTitle({ title: trip.title, originalRequest, snapshot }),
+      originalQuote: originalRequest.replace(/\s+/g, " ").trim(),
+      destination: snapshot?.destination ?? "目的地待补充",
+      days: tripSummaryDays(snapshot),
+      dates: tripSummaryDates(snapshot),
+      travelers: tripSummaryTravelers(snapshot, confirmed || !plan ? originalRequest : undefined),
+      status: plan ? needsUpdate ? "行程待更新" : "行程已就绪" : confirmed ? "需求已确认" : trip.request?.extractedRequest ? "待完善需求" : "旅行灵感",
+      isReady: Boolean(plan && !needsUpdate),
+      versionNumber: plan?.versionNumber ?? null,
+    };
+  });
 
   return (
-    <main className="min-h-dvh bg-cream">
-      <header className="border-b border-sand/80 bg-shell px-5 py-5 sm:px-10 lg:px-16">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-sage">Serendipity</p>
-            <h1 className="text-2xl font-bold text-charcoal">我的旅行</h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Link
-              href="/"
-              className="inline-flex min-h-11 items-center rounded-md border border-sand px-4 py-2 text-sm font-medium text-graphite transition-colors hover:border-sage hover:text-sage"
-            >
-              返回首页
-            </Link>
-            <Link
-              href="/#trip-input"
-              className="inline-flex min-h-11 items-center gap-2 rounded-md bg-sage px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-focus"
-            >
-              <FilePlus2 aria-hidden="true" className="size-4" />
-              新建旅行
-            </Link>
-            <Link
-              href="/settings"
-              title="个人设置"
-              aria-label="个人设置"
-              className="inline-flex min-h-11 w-11 items-center justify-center rounded-md border border-sand text-graphite transition-colors hover:border-sage hover:text-sage"
-            >
-              <Settings aria-hidden="true" className="size-5" />
-            </Link>
-          </div>
-        </div>
+    <main className={styles.page}>
+      <header className={styles.navigation}>
+        <Link href="/" className={styles.brand}><span className={styles.wordmark}>Serendipity</span><span>个人旅行规划工作室</span></Link>
+        <nav className={styles.navigationActions} aria-label="主导航">
+          <Link href="/" className={styles.navigationLink}>返回首页</Link>
+          <Link href="/#trip-input" className={styles.newTrip}><FilePlus2 aria-hidden="true" size={14} />新建旅行</Link>
+          <Link href="/settings" title="个人设置" aria-label="个人设置" className={styles.settingsLink}><Settings aria-hidden="true" size={17} /></Link>
+        </nav>
       </header>
 
-      <section className="px-5 py-8 sm:px-10 sm:py-12 lg:px-16">
-        <div className="mx-auto max-w-6xl">
-          <p className="text-sm leading-6 text-graphite">
-            旅行和需求修订保存在本机数据库中，重启应用后仍会保留。点开旅行后可以让 AI 理解原话、核对摘要并确认当前修订。
-          </p>
-
-          {trips.length === 0 ? (
-            <div className="mt-8 border border-dashed border-sand bg-white/70 px-5 py-10 text-center">
-              <MapPinned
-                aria-hidden="true"
-                className="mx-auto size-8 text-sage"
-              />
-              <h2 className="mt-4 text-xl font-semibold text-charcoal">
-                还没有保存的旅行
-              </h2>
-              <p className="mx-auto mt-2 max-w-md text-base leading-7 text-graphite">
-                从一句话开始。保存后这里会显示每趟旅行，点开就能继续修改。
-              </p>
-              <Link
-                href="/#trip-input"
-                className="mt-6 inline-flex min-h-12 items-center gap-2 rounded-md bg-sage px-5 py-3 text-base font-semibold text-white transition-colors hover:bg-focus"
-              >
-                开始创建旅行
-                <ArrowRight aria-hidden="true" className="size-4" />
-              </Link>
-            </div>
-          ) : (
-            <ul className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              {trips.map((trip) => (
-                <li key={trip.id} className="h-full">
-                  <article className="flex h-full flex-col rounded-lg border border-sand/80 bg-white p-5 shadow-[0_1px_2px_rgba(35,42,38,0.06)] sm:p-6">
-                    <div className="flex items-center justify-between gap-3">
-                      <span
-                        className={`rounded-md px-3 py-2 text-sm font-medium ${
-                          trip.request?.confirmedRevision ===
-                          trip.request?.requestRevision
-                            ? "bg-sage-soft text-sage"
-                            : "bg-shell text-graphite"
-                        }`}
-                      >
-                        {trip.request?.confirmedRevision ===
-                        trip.request?.requestRevision
-                          ? `需求修订 ${trip.request?.requestRevision} 已确认`
-                          : trip.request?.extractedRequest
-                            ? `需求修订 ${trip.request?.requestRevision} 待确认`
-                            : "原话草稿"}
-                      </span>
-                      <span className="text-sm text-graphite">
-                        修改于 {formatTripDateTime(trip.updatedAt)}
-                      </span>
-                    </div>
-                    <h2 className="mt-4 text-xl font-semibold text-charcoal">
-                      {trip.title}
-                    </h2>
-                    <p className="mt-3 flex-1 text-base leading-7 text-graphite">
-                      {summarizeRequest(trip.originalRequest)}
-                    </p>
-                    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-sand/80 pt-4">
-                      <p className="text-sm leading-6 text-graphite">
-                        创建于 {formatTripDateTime(trip.createdAt)}
-                      </p>
-                      <Link
-                        href={`/trips/${trip.id}`}
-                        className="inline-flex min-h-11 items-center gap-2 rounded-md border border-sage px-4 py-2 text-sm font-semibold text-sage transition-colors hover:bg-sage-soft"
-                      >
-                        打开继续
-                        <ArrowRight aria-hidden="true" className="size-4" />
-                      </Link>
-                    </div>
-                  </article>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </section>
+      <TripCollection trips={cards} />
+      <footer className={styles.footer}><span>Serendipity</span><span>山水之间，自有方向。</span></footer>
     </main>
   );
 }

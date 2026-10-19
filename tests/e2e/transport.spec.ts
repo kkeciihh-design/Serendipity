@@ -97,6 +97,8 @@ async function openTransport(page: Page, tripId: string, version?: number) {
 
 async function fillTicket(panel: Locator, core: TicketCore) {
   await panel.getByRole("combobox", { name: "交通方式", exact: true }).selectOption(core.mode);
+  await panel.getByText("进出站口 / 航站楼详情", { exact: true }).click();
+  await panel.getByText("门到门接驳（可稍后补充）", { exact: true }).click();
   await panel.getByText("行李、办理截止与安全余量", { exact: true }).click();
   const fields: Array<[string, string | number | null]> = [
     ["车次 / 航班号", core.serviceNumber], ["出发日期", core.date], ["出发时刻", core.departureTime],
@@ -134,7 +136,7 @@ async function saveTicketPanel(page: Page, panel: Locator, version: number, draf
   await panel.getByRole("button", { name: draft ? "保存草稿" : "确认票面并保存", exact: true }).click();
   const response = await responsePromise;
   expect(response.status(), await response.text()).toBe(200);
-  await expect(page.getByRole("heading", { name: new RegExp(`^计划版本 ${version}｜`) })).toBeVisible();
+  await expect(page.getByTestId("plan-version-select")).toHaveText(`版本 V${version}`);
 }
 
 async function saveAction(page: Page, button: Locator, version: number) {
@@ -142,7 +144,7 @@ async function saveAction(page: Page, button: Locator, version: number) {
   await button.click();
   const response = await responsePromise;
   expect(response.status(), await response.text()).toBe(200);
-  await expect(page.getByRole("heading", { name: new RegExp(`^计划版本 ${version}｜`) })).toBeVisible();
+  await expect(page.getByTestId("plan-version-select")).toHaveText(`版本 V${version}`);
 }
 
 async function exportDemo(tripId: string, name: "train" | "flight") {
@@ -176,6 +178,24 @@ async function capture(page: Page, name: string, width: number) {
   await fs.mkdir(evidenceDirectory, { recursive: true });
   await page.screenshot({ path: path.join(evidenceDirectory, name), fullPage: true });
 }
+
+test("ticket form starts compact and rejects an arrival before departure without saving", async ({ page, request }) => {
+  const trip = await seed(request);
+  await openTransport(page, trip.id);
+  const panel = await newTicketPanel(page, "departure");
+  await expect(panel.getByLabel("门到门起点", { exact: true })).not.toBeVisible();
+  await panel.getByLabel("出发日期", { exact: true }).fill(trip.snapshot.startDate!);
+  await panel.getByLabel("到达日期", { exact: true }).fill(trip.snapshot.startDate!);
+  await panel.getByLabel("出发时刻", { exact: true }).fill("16:00");
+  await panel.getByLabel("到达时刻", { exact: true }).fill("15:00");
+  await expect(panel.getByRole("alert")).toContainText("到达时间必须晚于出发时间");
+  await panel.getByRole("button", { name: "保存草稿", exact: true }).click();
+  expect((await savedVersion(trip.id)).row.versionNumber).toBe(1);
+  await panel.getByLabel("到达时刻", { exact: true }).fill("20:30");
+  await expect(panel.getByRole("alert")).toHaveCount(0);
+  await saveTicketPanel(page, panel, 2, true);
+  expect((await savedVersion(trip.id)).tickets[0].arrivalTime).toBe("20:30");
+});
 
 test("high-speed rail drafts become stable active tickets and preserve both complete chains after refresh", async ({ page, request }) => {
   const trip = await seed(request);
@@ -332,7 +352,7 @@ test("specified replacement and cancellation preserve a companion ticket and sep
   await page.getByRole("button", { name: /去程：G6012/ }).first().click();
   await page.getByLabel("已支付", { exact: true }).check();
   await page.getByRole("button", { name: "确认金额", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /^计划版本 4｜/ })).toBeVisible();
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V4");
   const paid = await savedVersion(trip.id);
   const paidCost = paid.costs.find((cost) => cost.id === `ticket-${originalTicket.id}`)!;
   expect(paidCost).toMatchObject({ unitAmountCents: 24300, paymentStatus: "paid" });
@@ -393,7 +413,7 @@ test("specified replacement and cancellation preserve a companion ticket and sep
   await page.getByRole("button", { name: /去程：G6012/ }).first().click();
   await page.getByLabel("单价（元，留空表示未知）", { exact: true }).fill("23");
   await page.getByRole("button", { name: "确认金额", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /^计划版本 7｜/ })).toBeVisible();
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V7");
   const refundConfirmed = await savedVersion(trip.id);
   expect(refundConfirmed.costs.find((cost) => cost.id === paidCost.id)).toMatchObject({ unitAmountCents: 2300, paymentStatus: "paid" });
   await page.getByRole("tab", { name: "门到门交通", exact: true }).click();
@@ -508,6 +528,8 @@ test("editing a draft and filling missing active details keep the ticket ID whil
   await expect(panel.getByLabel("到达时刻", { exact: true })).toBeEnabled();
   await panel.getByLabel("到达日期", { exact: true }).fill(trip.snapshot.startDate!);
   await panel.getByLabel("到达时刻", { exact: true }).fill("07:40");
+  await panel.getByText("进出站口 / 航站楼详情", { exact: true }).click();
+  await panel.getByText("门到门接驳（可稍后补充）", { exact: true }).click();
   await panel.getByLabel("到达站 / 航站楼详情", { exact: true }).fill("西出站口");
   await panel.getByLabel("门到门起点", { exact: true }).fill("深圳市民中心（补齐合成起点）");
   await acknowledged.check();

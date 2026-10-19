@@ -1,0 +1,95 @@
+.page, .detailPage { min-height: 100dvh; color: #24382c; background: #f2ede2; background-image: radial-gradient(rgb(111 102 77 / 4%) .5px, transparent .5px); background-size: 4px 4px; -webkit-font-smoothing: antialiased; }
+.page { display: flex; flex-direction: column; padding: 0 48px; }
+.navigation, .collection, .footer { width: min(100%, 1200px); margin-inline: auto; }
+.navigation { display: flex; min-height: 105px; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid #d8d0c1; }
+.brand { display: flex; flex-direction: column; gap: 5px; }
+.wordmark { font-family: Georgia, var(--font-serif); color: #344f3d; font-size: 29px; line-height: 1.15; letter-spacing: -.8px; }
+.brand > span + span { color: #7c8472; font-size: 9px; letter-spacing: .19em; }
+.navigationActions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.navigationLink, .newTrip, .settingsLink { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; gap: 8px; padding: 8px 17px; border: 1px solid #d3ccbd; border-radius: 999px; color: #53654e; font-size: 12px; transition: background .2s, border-color .2s; }
+.navigationLink { border-color: transparent; }
+.navigationLink:hover, .settingsLink:hover { background: #e6e8db; border-color: #bbc7b1; }
+.newTrip { border-color: #314f39; background: #314f39; color: #fffaf0; }
+.newTrip:hover { border-color: #1e3d28; background: #1e3d28; }
+.settingsLink { width: 42px; padding: 8px; }
+.collection { flex: 1; padding-block: 55px 65px; }
+.sectionHeading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.eyebrow { display: flex; gap: 13px; color: #92764e; font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; }
+.eyebrow span { padding-left: 13px; border-left: 1px solid #c7b99e; font-family: var(--font-sans); }
+.title { margin-top: 14px; font-family: var(--font-serif); font-size: clamp(32px, 3.5vw, 45px); font-weight: 500; line-height: 1.4; letter-spacing: .035em; }
+.description { margin-top: 14px; color: #7a816e; font-size: 13px; line-height: 1.8; }
+.collectionCount { display: flex; flex-direction: column; gap: 7px; color: #8a8a79; font-size: 10px; text-align: right; }
+.collectionCount > span { color: #8f7650; font-family: Georgia, var(--font-serif); font-size: 33px; letter-spacing: .02em; }
+.tripGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 37px; list-style: none; }
+.tripCard { display: flex; height: 100%; flex-direction: column; border: 1px solid #ded5c3; border-radius: 15px; background: #fffdf780; transition: border-color .2s, background .2s, transform .2s; overflow: hidden; }
+.tripCard:hover { border-color: #abb89b; background: #fffdf7; transform: translateY(-3px); }
+.cardLink { display: flex; flex: 1; flex-direction: column; padding: 24px 24px 0; }
+.cardTopline { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.folio { color: #9a8666; font-family: var(--font-mono); font-size: 9px; letter-spacing: .13em; }
+.status { padding: 5px 9px; border: 1px solid #dfd2bc; border-radius: 999px; color: #987347; font-size: 10px; white-space: nowrap; }
+.statusReady { border-color: #d1ddc4; background: #e8efdf; color: #607850; }
+.destinationLine { display: flex; align-items: center; gap: 6px; margin-top: 32px; color: #607253; font-size: 12px; }
+.dayCount { margin-left: auto; font-family: var(--font-serif); color: #8b7650; font-size: 16px; }
+.tripCard h2 { margin-top: 11px; font-family: var(--font-serif); font-size: 25px; font-weight: 500; line-height: 1.6; overflow-wrap: anywhere; }
+.cardDescription { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; margin-top: 13px; overflow: hidden; color: #858674; font-size: 12px; line-height: 1.9; }
+.tripFacts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: auto; padding-top: 30px; color: #76806b; font-size: 11px; line-height: 1.8; }
+.tripFacts > span { display: inline-flex; align-items: center; gap: 6px; }
+.versionNote { margin-top: 8px; color: #96917d; font-size: 10px; }
+.cardBottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 17px 24px 16px; padding-top: 10px; border-top: 1px solid #e2dbc9; }
+.openLink { display: inline-flex; min-height: 30px; align-items: center; gap: 10px; color: #536c4d; font-size: 12px; }
+.deleteButton { display: inline-flex; min-height: 38px; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #8e8374; font-size: 11px; cursor: pointer; transition: color .2s, background .2s; }
+.deleteButton:hover { background: #f3e6df; color: #995c4c; }
+.deleteButton:focus-visible, .openLink:focus-visible, .cardLink:focus-visible { outline: 2px solid #658059; outline-offset: 2px; }
+.deleteDialog { width: min(440px, calc(100vw - 36px)); max-height: calc(100dvh - 48px); margin: auto; padding: 26px; border: 1px solid #d7ccba; border-radius: 17px; background: #fffdf7; color: #354334; box-shadow: 0 22px 90px #24382c33; }
+.deleteDialog::backdrop { background: #26352970; backdrop-filter: blur(3px); }
+.dialogHeading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.dialogHeading h2 { font-family: var(--font-serif); font-size: 24px; font-weight: 500; line-height: 1.4; }
+.dialogClose { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: transparent; color: #828574; cursor: pointer; }
+.dialogClose:hover { background: #ede9de; }
+.deleteDialog > p { margin-top: 18px; color: #7b7f6c; font-size: 13px; line-height: 1.9; overflow-wrap: anywhere; }
+.dialogActions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 26px; }
+.cancelButton, .confirmDeleteButton { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; padding: 8px 16px; border: 1px solid #d7cfbe; border-radius: 9px; background: transparent; color: #627255; font-size: 12px; cursor: pointer; }
+.cancelButton:hover { background: #f1eee5; }
+.confirmDeleteButton { border-color: #986552; background: #986552; color: #fffaf1; }
+.confirmDeleteButton:hover { background: #82523f; }
+.dialogActions button:disabled, .dialogClose:disabled { cursor: wait; opacity: .6; }
+.deleteDialog > .deleteError { padding: 10px 12px; border-radius: 8px; background: #f7e7df; color: #945946; }
+.emptyState { display: flex; align-items: center; flex-direction: column; margin-top: 38px; padding: 75px 24px; border: 1px solid #dbd1bf; border-radius: 16px; background: #fffdf74d; text-align: center; }
+.emptyState > svg { color: #7b8c6c; }
+.emptyState h2 { margin-top: 21px; font-family: var(--font-serif); font-size: 24px; }
+.emptyState p { margin-top: 10px; color: #7a826f; font-size: 13px; }
+.emptyState a { margin-top: 27px; }
+.footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 25px; border-top: 1px solid #d8d0c1; color: #6c7e64; }
+.footer > span:first-child { font-family: Georgia, var(--font-serif); font-size: 23px; }
+.footer > span + span { font-family: var(--font-serif); font-size: 12px; letter-spacing: .12em; }
+.detailPage { padding: 24px 40px 110px; }
+.detailContent { width: min(100%, 1260px); margin-inline: auto; }
+.detailNavigation { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.detailNavigation .wordmark { font-size: 23px; }
+@media (max-width: 1000px) { .tripGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 680px) {
+  .page { padding-inline: 21px; }
+  .navigation { min-height: 95px; flex-wrap: wrap; gap: 12px; padding-block: 18px; }
+  .wordmark { font-size: 24px; }
+  .brand > span + span { font-size: 8px; }
+  .navigationActions { gap: 3px; margin-left: auto; }
+  .navigationLink { padding-inline: 7px; font-size: 11px; }
+  .newTrip { padding-inline: 12px; font-size: 11px; }
+  .navigation .settingsLink { width: 36px; min-height: 36px; padding: 6px; }
+  .collection { padding-block: 38px 45px; }
+  .sectionHeading { gap: 10px; }
+  .eyebrow { gap: 9px; font-size: 8px; letter-spacing: .06em; }
+  .eyebrow span { padding-left: 9px; }
+  .description { max-width: 250px; font-size: 12px; }
+  .collectionCount { max-width: 60px; font-size: 9px; }
+  .collectionCount > span { font-size: 28px; }
+  .tripGrid { grid-template-columns: 1fr; gap: 18px; margin-top: 28px; }
+  .cardLink { padding: 23px 23px 0; }
+  .cardBottom { margin-inline: 23px; }
+  .destinationLine { margin-top: 26px; }
+  .tripCard h2 { font-size: 24px; }
+  .footer > span + span { font-size: 10px; letter-spacing: .06em; }
+  .detailPage { padding: 15px 19px 110px; }
+  .detailNavigation { gap: 12px; }
+  .detailNavigation .wordmark { font-size: 21px; }
+}

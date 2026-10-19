@@ -1,30 +1,29 @@
 .studio {
   width: 100%;
-  margin-top: 28px;
+  margin-top: 26px;
   scroll-margin-top: 24px;
 }
 .card {
-  width: min(100%, 768px);
+  --composer-ink: #faf8f0;
+  --composer-muted: #e0e4d9;
+  --composer-rule: rgb(244 240 228 / 19%);
+  width: min(100%, 720px);
   margin-inline: auto;
-  padding: 4px;
-  border: 1px solid rgb(255 255 255 / 35%);
-  border-radius: 24px;
-  background: rgb(255 255 255 / 12%);
-  box-shadow: 0 28px 70px -12px rgb(5 12 9 / 65%);
-  backdrop-filter: blur(20px);
+  border: 1px solid rgb(255 255 255 / 28%);
+  border-radius: 18px;
+  background: rgb(14 30 24 / 48%);
+  box-shadow: 0 12px 36px -20px rgb(5 12 9 / 32%);
+  backdrop-filter: blur(6px);
   transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 .card:focus-within {
-  border-color: rgb(255 255 255 / 65%);
-  box-shadow: 0 28px 70px -12px rgb(5 12 9 / 65%), 0 0 0 2px rgb(221 231 216 / 18%);
+  border-color: rgb(255 255 255 / 68%);
+  box-shadow: 0 12px 36px -20px rgb(5 12 9 / 32%), 0 0 0 2px rgb(221 231 216 / 16%);
 }
 .inner {
   min-width: 0;
-  padding: 18px 24px;
-  border-radius: 18px;
-  background: rgb(250 248 243 / 95%);
-  box-shadow: inset 0 1px 4px rgb(47 56 40 / 6%);
-  color: #18201c;
+  padding: 14px 22px 16px;
+  color: var(--composer-ink);
   text-align: left;
 }
 .header {
@@ -32,42 +31,40 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgb(24 32 28 / 8%);
+  margin-bottom: 10px;
 }
 .label {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  color: #3e5848;
+  color: var(--composer-muted);
   font-size: 12px;
   font-weight: 500;
   letter-spacing: .05em;
 }
-.label > span { font-size: 15px; color: #8b764f; }
+.label > span { font-size: 15px; color: #dec695; }
 .exampleButton {
   display: inline-flex;
   min-height: 32px;
   align-items: center;
   padding: 5px 12px;
-  border: 1px solid rgb(47 69 51 / 12%);
+  border: 1px solid var(--composer-rule);
   border-radius: 999px;
-  color: #56634f;
-  background: rgb(232 234 221 / 45%);
+  color: var(--composer-muted);
+  background: rgb(250 248 237 / 6%);
   font-size: 11px;
   white-space: nowrap;
   cursor: pointer;
   transition: background 180ms ease;
 }
-.exampleButton:hover:not(:disabled) { background: #e6e9de; }
+.exampleButton:hover:not(:disabled) { background: rgb(250 248 237 / 16%); }
 .textarea {
   display: block;
   width: 100%;
-  height: 76px;
-  min-height: 76px;
+  height: 60px;
+  min-height: 60px;
   min-width: 0;
-  margin: 0 0 12px;
+  margin: 0 0 10px;
   padding: 0;
   resize: none;
   border: 0;
@@ -75,35 +72,36 @@
   outline: none;
   background: transparent;
   box-shadow: none;
-  color: #18201c;
+  color: var(--composer-ink);
+  caret-color: var(--composer-ink);
   font-family: var(--font-sans);
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1.75;
 }
-.textarea::placeholder { color: #5a655e; opacity: 1; }
+.textarea::placeholder { color: var(--composer-muted); opacity: 1; }
 .textarea:focus-visible { outline: none; }
 .actions {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding-top: 14px;
-  border-top: 1px solid rgb(24 32 28 / 8%);
+  padding-top: 12px;
+  border-top: 1px solid var(--composer-rule);
 }
 .keyboardHint {
   flex: 1;
-  color: #768071;
+  color: var(--composer-muted);
   font-size: 9px;
   line-height: 1.7;
 }
 .keyboardHint > span { white-space: nowrap; }
 .counter {
-  color: #768071;
+  color: var(--composer-muted);
   font-family: var(--font-mono);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.overLength { color: #9b482d; }
+.overLength { color: #ffc7a7; }
 .saveButton {
   display: inline-flex;
   flex-shrink: 0;
@@ -112,27 +110,34 @@
   justify-content: center;
   gap: 12px;
   padding: 10px 20px;
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 12px;
-  background: linear-gradient(160deg, #365743 0%, #213e30 42%, #182e24 100%);
-  color: #faf8f3;
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: 10px;
+  background: #eee8d9;
+  color: #263e31;
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 17%), 0 5px 14px rgb(27 50 40 / 22%);
+  box-shadow: 0 3px 10px rgb(9 24 17 / 12%);
   cursor: pointer;
   transition: background 180ms ease, transform 180ms ease;
 }
-.saveButton:hover:not(:disabled) { background: linear-gradient(160deg, #3b624b 0%, #284a38 42%, #1b3528 100%); transform: translateY(-1px); }
-.exampleButton:focus-visible, .saveButton:focus-visible { outline: 2px solid #57765a; outline-offset: 3px; }
+.saveButton:hover:not(:disabled) { background: #faf6eb; transform: translateY(-1px); }
+.exampleButton:focus-visible, .saveButton:focus-visible { outline: 2px solid var(--composer-ink); outline-offset: 3px; }
 .saveButton:disabled, .exampleButton:disabled, .prompt:disabled { cursor: wait; opacity: .65; }
+.planningProgress { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--composer-rule); color: var(--composer-ink); font-size: 12px; line-height: 1.7; }
+.planningProgress > div:first-child { display: flex; justify-content: space-between; gap: 12px; }
+.planningProgress > div:first-child > span:last-child { color: var(--composer-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.progressTrack { display: flex; gap: 5px; margin-block: 10px; }
+.progressTrack > span { height: 3px; flex: 1; border-radius: 999px; background: var(--composer-rule); }
+.progressTrack > span[data-active="true"] { background: var(--composer-ink); }
+.planningProgress > p { color: var(--composer-muted); font-size: 10px; }
 .quickPrompts {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   max-width: 100%;
-  margin: 18px auto 0;
+  margin: 12px auto 0;
   padding: 3px;
 }
 .prompt {
@@ -141,12 +146,12 @@
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  border: 1px solid rgb(255 255 255 / 20%);
+  border: 1px solid rgb(255 255 255 / 16%);
   border-radius: 999px;
-  background: rgb(14 25 20 / 65%);
-  backdrop-filter: blur(12px);
+  background: rgb(14 25 20 / 38%);
+  backdrop-filter: blur(4px);
   color: rgb(244 240 232 / 90%);
-  box-shadow: 0 1px 3px rgb(5 12 9 / 14%);
+  box-shadow: none;
   font-size: 10px;
   line-height: 1.5;
   white-space: nowrap;
@@ -156,10 +161,22 @@
 .prompt > span { color: #d6ba81; font-size: 10px; }
 .prompt:nth-child(2) > span { color: #83c5a2; }
 .prompt:hover:not(:disabled) { border-color: rgb(255 255 255 / 40%); background: rgb(14 25 20 / 85%); }
-:global([data-aesthetic="sketch"]) .card { border-color: rgb(113 126 91 / 30%); background: rgb(247 244 226 / 55%); box-shadow: 0 22px 48px -15px rgb(78 79 45 / 24%); }
-:global([data-aesthetic="sketch"]) .card:focus-within { border-color: #8d9f79; box-shadow: 0 22px 48px -15px rgb(78 79 45 / 24%), 0 0 0 2px rgb(102 124 77 / 12%); }
-:global([data-aesthetic="sketch"]) .inner { background: rgb(252 249 237 / 95%); }
-:global([data-aesthetic="sketch"]) .prompt { border-color: rgb(92 114 73 / 25%); background: rgb(248 246 230 / 80%); color: #526747; box-shadow: none; }
+:global([data-aesthetic="sketch"]) .card {
+  --composer-ink: #284438;
+  --composer-muted: #52634e;
+  --composer-rule: rgb(77 99 66 / 18%);
+  border-color: rgb(113 126 91 / 26%);
+  background: rgb(250 247 232 / 48%);
+  box-shadow: 0 12px 36px -20px rgb(78 79 45 / 14%);
+  backdrop-filter: blur(4px);
+}
+:global([data-aesthetic="sketch"]) .card:focus-within { border-color: #8d9f79; box-shadow: 0 12px 36px -20px rgb(78 79 45 / 14%), 0 0 0 2px rgb(102 124 77 / 12%); }
+:global([data-aesthetic="sketch"]) .label > span { color: #8b764f; }
+:global([data-aesthetic="sketch"]) .exampleButton:hover:not(:disabled) { background: rgb(220 228 205 / 45%); }
+:global([data-aesthetic="sketch"]) .overLength { color: #9b482d; }
+:global([data-aesthetic="sketch"]) .saveButton { color: #faf8f0; background: #304f3b; }
+:global([data-aesthetic="sketch"]) .saveButton:hover:not(:disabled) { background: #3d6048; }
+:global([data-aesthetic="sketch"]) .prompt { border-color: rgb(92 114 73 / 18%); background: rgb(248 246 230 / 48%); color: #526747; }
 :global([data-aesthetic="sketch"]) .prompt > span { color: #9b704a; }
 :global([data-aesthetic="sketch"]) .prompt:nth-child(2) > span { color: #638259; }
 :global([data-aesthetic="sketch"]) .prompt:hover:not(:disabled) { background: #fcfaee; border-color: #91a17f; }
@@ -186,28 +203,26 @@
 }
 .feedback > svg { flex-shrink: 0; }
 .feedback > p { min-width: 0; overflow-wrap: anywhere; }
+.feedback a { text-decoration: underline; text-underline-offset: 3px; }
 .feedback > button { display: grid; flex-shrink: 0; width: 32px; height: 32px; place-items: center; border-radius: 50%; cursor: pointer; }
 .feedback > button:hover { background: #f3e8de; }
 .feedback > button:focus-visible { outline-color: #8c452e; }
 .spinner { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-@media (min-width: 768px) {
-  .textarea { height: 84px; min-height: 84px; }
-}
 @media (max-width: 900px) {
-  .quickPrompts { justify-content: flex-start; width: 768px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
+  .quickPrompts { justify-content: flex-start; width: 720px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
   .quickPrompts::-webkit-scrollbar { display: none; }
   .prompt { flex-shrink: 0; scroll-snap-align: start; }
 }
 @media (max-width: 600px) {
   .studio { margin-top: 20px; }
-  .card { border-radius: 23px; }
-  .inner { padding: 14px 16px 16px; border-radius: 17px; }
+  .card { border-radius: 16px; }
+  .inner { padding: 12px 16px 14px; }
   .header { gap: 8px; }
   .label { font-size: 11px; letter-spacing: .015em; }
   .exampleButton { min-height: 34px; padding-inline: 10px; font-size: 10px; }
-  .textarea { font-size: 16px; line-height: 1.7; }
+  .textarea { height: 82px; min-height: 82px; font-size: 16px; line-height: 1.7; }
   .actions { flex-wrap: wrap; gap: 9px 12px; padding-top: 11px; }
   .keyboardHint { flex-basis: 100%; font-size: 8px; line-height: 1.6; }
   .counter { margin-right: auto; font-size: 10px; }

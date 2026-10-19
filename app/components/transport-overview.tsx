@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { PlanEvent } from "@/lib/plan";
 import type { Ticket, TicketAction, TicketCore, TicketCostAllocation, TicketDirection, TicketMode } from "@/lib/tickets";
-import { ticketChain, ticketWarnings } from "@/lib/tickets";
+import { ticketChain, ticketTimingError, ticketWarnings } from "@/lib/tickets";
 import { budgetFactorsFromSnapshot, costItemLineTotals, costPaymentLabels, hasProtectedCostFact } from "@/lib/budget";
 import { ticketDuplicateHints } from "@/lib/ticket-import";
 import type { PlanVersionClient } from "./plan-overview";
@@ -147,11 +147,14 @@ function JourneyChain({ ticket, events }: { ticket: Ticket; events: PlanEvent[] 
 
 function TicketFields({ draft, setDraft, disabled, activeTicket }: { draft: TicketDraft; setDraft: (draft: TicketDraft) => void; disabled: boolean; activeTicket?: Ticket }) {
   const protectedFields = new Set<keyof TicketCore>(["mode", "serviceNumber", "date", "departureTime", "arrivalDate", "arrivalTime", "fromName", "fromDetail", "toName", "toDetail", "passengerCount", "fareCents", "seat"]);
+  if (activeTicket && ticketTimingError(activeTicket)) {
+    for (const key of ["date", "departureTime", "arrivalDate", "arrivalTime"] as const) protectedFields.delete(key);
+  }
   const fieldDisabled = (key: keyof TicketCore) => disabled || Boolean(activeTicket && protectedFields.has(key) && activeTicket[key] != null && activeTicket[key] !== "");
   const field = (key: keyof TicketDraft, label: string, type = "text", options: { min?: number; max?: number; maxLength?: number; step?: number; placeholder?: string } = {}) => <label className="block min-w-0 text-sm font-medium text-charcoal">{label}<input type={type} value={draft[key]} onChange={(event) => setDraft({ ...draft, [key]: event.target.value })} disabled={fieldDisabled(key)} className={inputStyle} maxLength={120} {...options} /></label>;
   const accessFields = (prefix: "access" | "egress", label: string) => <fieldset className="min-w-0 rounded-md border border-sand p-3">
     <legend className="px-1 text-sm font-semibold">{label}</legend>
-    <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+    <div className="grid min-w-0 grid-cols-2 gap-3">
       <label className="min-w-0 text-sm font-medium">{label}方式<select value={draft[`${prefix}Mode`]} disabled={disabled} onChange={(event) => setDraft({ ...draft, [`${prefix}Mode`]: event.target.value })} className={inputStyle}><option value="">待确认</option>{Object.entries(accessLabels).map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>
       {field(`${prefix}DurationMinutes`, `${label}总耗时（分钟）`, "number", { min: 1, max: 1440, step: 1 })}
       {field(`${prefix}FareCents`, `${label}全段费用（元）`, "number", { min: 0, max: 10000, step: 0.01 })}
@@ -159,19 +162,23 @@ function TicketFields({ draft, setDraft, disabled, activeTicket }: { draft: Tick
     </div>
   </fieldset>;
   return <>
-    <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+    <div className="grid min-w-0 grid-cols-2 gap-3">
       <label className="min-w-0 text-sm font-medium text-charcoal">交通方式<select value={draft.mode} disabled={fieldDisabled("mode")} onChange={(event) => setDraft({ ...draft, mode: event.target.value })} className={inputStyle}>{Object.entries(modeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       {field("serviceNumber", "车次 / 航班号", "text", { maxLength: 40 })}
-      {field("seat", "座位 / 车厢", "text", { maxLength: 80 })}
       {field("date", "出发日期", "date")}{field("departureTime", "出发时刻", "time")}
       {field("arrivalDate", "到达日期", "date")}{field("arrivalTime", "到达时刻", "time")}
       {field("fromName", "出发站点 / 机场")}{field("toName", "到达站点 / 机场")}
-      {field("fromDetail", "出发站 / 航站楼详情")}{field("toDetail", "到达站 / 航站楼详情")}
       {field("passengerCount", "票面人数", "number", { min: 1, max: 20, step: 1 })}
       {field("fareCents", "每人票价（元）", "number", { min: 0, max: 20000000, step: 0.01 })}
+      {field("seat", "座位 / 车厢", "text", { maxLength: 80 })}
     </div>
-    <p className="mt-2 text-xs leading-5 text-graphite">所有日期与时刻均为北京时间。只填写票面已知内容，缺少到达时间等资料可留空；同城不同站、跨日到达请逐项核对。票价按每人单价 × 人数计算，付款和退款请在预算中单独记录。</p>
-    <details className="mt-4 rounded-md border border-sand bg-cream p-3" open>
+    {ticketTimingError(draftCore(draft)) ? <p role="alert" className="mt-3 rounded-md bg-clay-soft p-3 text-sm leading-6 text-clay">{ticketTimingError(draftCore(draft))}</p> : null}
+    <p className="mt-2 text-xs leading-5 text-graphite">北京时间 · 跨日到达请选正确日期 · 未知资料可留空</p>
+    <details className="mt-3 rounded-md border border-sand bg-cream p-3">
+      <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold text-charcoal">进出站口 / 航站楼详情</summary>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2">{field("fromDetail", "出发站 / 航站楼详情")}{field("toDetail", "到达站 / 航站楼详情")}</div>
+    </details>
+    <details className="mt-3 rounded-md border border-sand bg-cream p-3">
       <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold text-charcoal">门到门接驳（可稍后补充）</summary>
       <div className="mt-2 grid gap-3 sm:grid-cols-2">{field("chainOriginName", "门到门起点", "text", { placeholder: "家门口 / 公共地标 / 住宿" })}{field("chainDestinationName", "门到门终点", "text", { placeholder: "住宿 / 活动地点 / 最终返回点" })}</div>
       <div className="mt-3 grid gap-3">{accessFields("access", "前段接驳")}{accessFields("egress", "后段接驳")}</div>
@@ -286,6 +293,8 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
     if (!draft || !event || !replacementValid || !editValid) return;
     const button = (formEvent.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const core = { ...draftCore(draft), eventId: event.id, direction };
+    const timingError = ticketTimingError(core);
+    if (timingError) { setFeedback({ error: true, message: timingError }); return; }
     const isDraft = button?.value === "draft";
     if (!isDraft && !acknowledged) return;
     const imported = importReview ? { importSource: importReview.source, importResolution: importReview.resolution } : {};
@@ -353,7 +362,7 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
       </section> : null}
       {editorOpen && draft ? <section ref={editor} aria-label="手工票面" className="mt-4 min-w-0 rounded-md border border-sage bg-white p-4">
         <h4 className="text-base font-semibold">{importReview ? `核对识别的${directionLabels[direction]}票面` : editTicketId ? edited?.status === "draft" ? "编辑草稿资料" : "补充有效票资料" : replacementId ? "替换指定票面" : `手工录入${directionLabels[direction]}票面`}</h4>
-        <p className="mt-2 text-sm leading-6 text-graphite">{editTicketId && edited?.status === "active" ? "可补充空白票面字段、接驳与办理资料。已确认的非空票面字段已锁定；如已办理改签，请使用替换指定票入口。" : "已知票面如实记录，未知字段留空。确认有效票会固定已知班次与时刻，接驳资料可稍后补齐。"}</p>
+        <p className="mt-2 text-sm leading-6 text-graphite">{editTicketId && edited?.status === "active" ? ticketTimingError(edited) ? "这张票的到达早于出发，请直接更正日期或时刻。其他已确认票面仍保留。" : "可补充空白票面与接驳资料；已办理改签请使用替换指定票入口。" : "先填写车次、时间与价格，接驳和行李细节可稍后补齐。"}</p>
         {editTicketId ? <p className="mt-2 break-all text-xs text-graphite">保留票据编号：{editTicketId}{edited?.status === "draft" ? " · 修改后仍为草稿，需另行确认生效。" : ""}</p> : null}
         {replacementId ? <div className="mt-4 rounded-md border border-sand bg-shell p-3" aria-label="指定原票预览"><h5 className="mb-2 text-sm font-semibold">指定原票 · 将记为已替换</h5>{replaced ? <TicketDetails ticket={replaced} /> : <p>原票已不存在。</p>}<p className="mt-2 break-all text-xs text-graphite">指定票据：{replacementId}</p></div> : null}
         <form onSubmit={submit} className="mt-4">

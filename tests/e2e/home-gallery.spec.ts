@@ -1,5 +1,8 @@
 import type { Locator, Page, Request } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { useUnavailableAI } from "./workspace-helpers";
+
+test.beforeEach(async ({ page }) => useUnavailableAI(page));
 
 const storageKey = "serendipity:home-gallery:v1";
 const destinations = [
@@ -177,6 +180,56 @@ test("五处风物志循环轮换，各自的旅行想法清错、聚焦且不�
   expect(posts).toHaveLength(0);
 });
 
+for (const scenario of [
+  { width: 1440, height: 900, mode: "photo" },
+  { width: 390, height: 844, mode: "sketch" },
+] as const) {
+  test(`${scenario.width}px 样本快捷规划关闭弹窗，并将对应需求带回首屏输入舱`, async ({ page }) => {
+    const posts = collectDraftPosts(page);
+    const errors = collectBrowserErrors(page);
+    await page.setViewportSize({ width: scenario.width, height: scenario.height });
+    await page.goto("/");
+    if (scenario.mode === "sketch") await page.getByRole("button", { name: "素描手账模式", exact: true }).click();
+    const input = page.getByTestId("trip-request-input");
+    const prompts = new Set<string>();
+
+    for (const sample of [
+      { title: "杭州两日轻松漫步", content: /杭州.*2 天 1 晚.*西湖.*法喜寺.*龙井/ },
+      { title: "成都五日美食与周边", content: /成都.*5 天 4 晚.*人民公园.*都江堰.*三圣乡/ },
+      { title: "青岛三日海岸线", content: /青岛.*3 天 2 晚.*信号山.*八大关.*栈桥/ },
+    ]) {
+      await input.fill("   ");
+      await page.getByTestId("create-trip-submit").click();
+      await expect(page.getByTestId("trip-request-feedback")).toBeVisible();
+      await page.getByRole("button", { name: `查看完整规划：${sample.title}`, exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: sample.title, exact: true });
+      const startPlanning = dialog.getByRole("button", { name: "以此样本开启规划", exact: true });
+      await expect(dialog.getByTestId("sample-trip-cover")).toHaveAttribute("data-aesthetic", scenario.mode);
+      await expect(startPlanning).toBeInViewport({ ratio: 1 });
+      await dialog.getByRole("tab", { name: "预算与准备", exact: true }).click();
+      await dialog.getByText("天气与备选", { exact: true }).scrollIntoViewIfNeeded();
+      await expect(startPlanning).toBeInViewport({ ratio: 1 });
+      await startPlanning.click();
+
+      await expect(dialog).toHaveCount(0);
+      await expect(input).toHaveValue(sample.content);
+      await expect(input).toBeFocused();
+      await expect(input).toBeInViewport({ ratio: 1 });
+      await expect(input).toHaveAttribute("aria-invalid", "false");
+      await expect(page.getByTestId("trip-request-feedback")).toHaveCount(0);
+      await expect(page.getByTestId("home-gallery")).toHaveAttribute("data-aesthetic", scenario.mode);
+      expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+      const prompt = await input.inputValue();
+      prompts.add(prompt);
+      await expect(page.getByTestId("trip-character-count")).toHaveText(`${Array.from(prompt).length} / 3000`);
+    }
+    expect(prompts.size).toBe(3);
+    expect(posts).toHaveLength(0);
+    expect(errors).toEqual([]);
+    await expect(page).toHaveURL(/\/$/);
+  });
+}
+
 test("手动选择保存到本机，刷新后恢复最后的模式与目的地", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "素描手账模式", exact: true }).click();
@@ -213,6 +266,10 @@ test("保存期间的画境与目的地操作不会替换正在保存的原话�
     await page.getByRole("button", { name: "素描手账模式", exact: true }).click();
     await page.getByRole("button", { name: "偶遇下一处风景", exact: true }).click();
     await page.getByRole("button", { name: "以此地开启规划", exact: true }).click();
+    await page.getByRole("button", { name: "查看完整规划：杭州两日轻松漫步", exact: true }).click();
+    const sampleDialog = page.getByRole("dialog", { name: "杭州两日轻松漫步", exact: true });
+    await sampleDialog.getByRole("button", { name: "以此样本开启规划", exact: true }).click();
+    await expect(sampleDialog).toHaveCount(0);
     await expect(input).toHaveValue(original);
     await expect(page.getByTestId("create-trip-submit")).toBeDisabled();
     expect(posts).toHaveLength(1);
@@ -223,7 +280,7 @@ test("保存期间的画境与目的地操作不会替换正在保存的原话�
   const response = await saved;
   expect(response.status()).toBe(201);
   expect((await response.json()).trip.originalRequest).toBe(original);
-  await expect(page).toHaveURL(/\/trips$/);
+  await expect(page).toHaveURL(/\/trips\/[^/?]+(?:\?|$)/);
   expect(posts).toHaveLength(1);
 });
 

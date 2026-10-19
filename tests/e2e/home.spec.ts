@@ -1,9 +1,12 @@
 import type { Page, Request } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { useUnavailableAI } from "./workspace-helpers";
+
+test.beforeEach(async ({ page }) => useUnavailableAI(page));
 
 const headline = "从一句向往出发，把心之所向写成笃定的旅程";
 const headlineLines = ["从一句向往出发", "把心之所向写成笃定的旅程"];
-const placeholder = "想去哪里走走？比如：12月初和伴侣去成都待三天，预算 3000 元，偏爱地道小馆与不赶路的市区漫步……";
+const placeholder = "想去哪里走走？比如：和伴侣去成都三天，预算 3000 元，吃地道小馆，慢慢逛。";
 const sampleDisclaimer = "* 以下为内置精选样本，展示行程结构与核验维度";
 const quickPrompts = [
   "12月初去成都玩三天，两个人，预算3000元",
@@ -330,8 +333,8 @@ test("Shift+Enter 与输入法候选确认不保存，普通 Enter 原样保存�
   expect(trip.originalRequest).toBe(originalRequest);
   expect(posts).toHaveLength(1);
   expect(posts[0].postDataJSON()).toEqual({ originalRequest });
-  await expect(page).toHaveURL(/\/trips$/);
-  await expect(page.locator('a[href="/trips/' + trip.id + '"]')).toBeVisible();
+  await expect(page).toHaveURL(new RegExp("/trips/" + trip.id + "\\?"));
+  await expect(page.locator("#trip-request-original")).toHaveValue(originalRequest);
   const persisted = await request.get("/api/trips/" + trip.id);
   expect(persisted.status()).toBe(200);
   expect((await persisted.json()).trip.originalRequest).toBe(originalRequest);
@@ -400,7 +403,7 @@ test("网络失败保留输入并允许重新提交", async ({ page }) => {
   const saved = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/trips");
   await page.getByTestId("create-trip-submit").click();
   expect((await saved).status()).toBe(201);
-  await expect(page).toHaveURL(/\/trips$/);
+  await expect(page).toHaveURL(/\/trips\/[^/?]+\?/);
 });
 
 test("保存期间重复提交只写入一份旅行草稿", async ({ page }) => {
@@ -431,7 +434,7 @@ test("保存期间重复提交只写入一份旅行草稿", async ({ page }) => 
     release();
   }
   expect((await saved).status()).toBe(201);
-  await expect(page).toHaveURL(/\/trips$/);
+  await expect(page).toHaveURL(/\/trips\/[^/?]+\?/);
   expect(posts).toHaveLength(1);
 });
 

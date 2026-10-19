@@ -73,7 +73,7 @@ test("chooses a specific station, persists a new version and keeps history read 
   const saved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().endsWith("/places"));
   await page.getByRole("button", { name: "确认地点并保存新版本" }).click();
   expect((await saved).status()).toBe(200);
-  await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
   await expect(page.getByText("用户已确认地点", { exact: true })).toBeVisible();
   await page.reload(); await page.getByRole("tab", { name: "地图", exact: true }).click();
   await expect(page.getByText("深圳市龙华区深圳北站", { exact: false })).toBeVisible();
@@ -129,9 +129,12 @@ test("map loading timeout keeps the itinerary readable", async ({ page, request 
   }));
   await page.goto(`/trips/${trip.id}`);
   await page.getByRole("tab", { name: "地图", exact: true }).click();
-  await expect(page.getByText("地图加载超时，文字地点仍可查看。请重试。")).toBeVisible({ timeout: 25_000 });
-  await expect(page.getByRole("button", { name: "重试地图" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "定位：Example Museum", exact: true })).toBeVisible();
+  // The timeline's companion also times out while its tab is hidden. Check the
+  // active full-map panel, so its message cannot match the hidden companion.
+  const mapPanel = page.getByRole("region", { name: "地图定位", exact: true });
+  await expect(mapPanel.getByText("地图加载超时，文字地点仍可查看。请重试。", { exact: true })).toBeVisible({ timeout: 25_000 });
+  await expect(mapPanel.getByRole("button", { name: "重试地图", exact: true })).toBeVisible();
+  await expect(mapPanel.getByRole("button", { name: "定位：Example Museum", exact: true })).toBeVisible();
   expect(await prisma.planVersion.count({ where: { tripId: trip.id } })).toBe(1);
 });
 
@@ -149,7 +152,8 @@ test("map numbers and timeline selections stay linked across edits and days", as
   await expect(breakfastPopupButton).toBeVisible();
   await breakfastPopupButton.focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: /第 1 天/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^第 1 天｜/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#timeline-event-d1-breakfast > div")).toHaveAttribute("data-selected", "true");
   await expect(page.getByRole("heading", { name: /编辑：早餐/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "第 3 项：早餐" })).toBeVisible();
 
@@ -161,7 +165,7 @@ test("map numbers and timeline selections stay linked across edits and days", as
   await page.getByLabel("开始时间").fill("14:30");
   await page.getByLabel("时长（分钟）").fill("120");
   await page.getByRole("button", { name: "保存修改" }).click();
-  await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
   await page.getByRole("tab", { name: "地图", exact: true }).click();
   await expect(page.getByRole("button", { name: "查看日程：⑥Example Museum" })).toBeVisible();
 
@@ -173,13 +177,14 @@ test("map numbers and timeline selections stay linked across edits and days", as
   const optionalPopupButton = mapFrame.getByRole("button", { name: /6\. 15:00–15:45｜可选加项/ });
   await expect(optionalPopupButton).toBeVisible();
   await optionalPopupButton.click();
-  await expect(page.getByRole("heading", { name: /第 2 天/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^第 2 天｜/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#timeline-event-d2-extra > div")).toHaveAttribute("data-selected", "true");
   await expect(page.getByRole("heading", { name: /编辑：可选加项/ })).toBeVisible();
   await page.getByRole("button", { name: "移除安排" }).click();
   await page.getByRole("button", { name: "保存修改" }).click();
-  await expect(page.getByRole("heading", { name: /计划版本 3/ })).toBeVisible();
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V3");
   await expect(page.getByRole("heading", { name: /编辑：可选加项/ })).toHaveCount(0);
-  await expect(page.getByText("尚未选择日程。", { exact: true })).toBeVisible();
+  await expect(page.locator("#plan-event-edit-title")).toHaveCount(0);
 
   await page.getByRole("tab", { name: "地图", exact: true }).click();
   await page.getByLabel("地图日期", { exact: true }).selectOption("1");
@@ -198,12 +203,13 @@ test("mobile map summary jumps to the matching day and event", async ({ page, re
   await page.goto(`/trips/${trip.id}`);
   await page.getByRole("tab", { name: "地图", exact: true }).click();
   await page.getByRole("button", { name: "查看日程：③早餐" }).click();
-  await expect(page.getByRole("heading", { name: /第 1 天/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^第 1 天｜/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#timeline-event-d1-breakfast > div")).toHaveAttribute("data-selected", "true");
   await expect(page.getByRole("heading", { name: /编辑：早餐/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test("legacy public-transit API without a provider does not draw a fake road", async ({ page, request }) => {
+test("unavailable public transit retains ordered illustrative links without claiming a verified road", async ({ page, request }) => {
   const trip = await seed(request, true);
   await controlledMap(page, trip.id);
   const response = await request.post(`/api/trips/${trip.id}/plans/1/routes`, { data: {
@@ -215,10 +221,12 @@ test("legacy public-transit API without a provider does not draw a fake road", a
   const routeCard = page.locator("article").filter({ hasText: "③早餐 → ④Example Museum" });
   await expect(routeCard.getByText("暂无可用路线", { exact: false })).toBeVisible();
   await expect(routeCard.getByText("当前免费地图方案没有公共交通路线服务", { exact: false })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
   const mapFrame = page.frameLocator('iframe[title="行程地点地图"]');
-  await expect(mapFrame.locator(".serendipity-map-route-arrow")).toHaveCount(0);
-  await expect(mapFrame.locator("path.leaflet-interactive")).toHaveCount(0);
+  await expect.poll(() => mapFrame.locator(".serendipity-map-route-arrow").count()).toBeGreaterThan(0);
+  expect(await mapFrame.locator("path.leaflet-interactive[stroke-dasharray]").count()).toBeGreaterThan(0);
+  await expect(mapFrame.locator("path.leaflet-interactive:not([stroke-dasharray])")).toHaveCount(0);
+  await expect(page.getByText("虚线为动线示意", { exact: false })).toBeVisible();
   await page.reload();
   await page.getByRole("tab", { name: "地图", exact: true }).click();
   await expect(page.locator("article").filter({ hasText: "③早餐 → ④Example Museum" }).getByText("暂无可用路线", { exact: false })).toBeVisible();

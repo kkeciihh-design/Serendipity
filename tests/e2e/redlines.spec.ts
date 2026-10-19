@@ -38,11 +38,23 @@ async function seed(request: APIRequestContext, mode: "walking" | "public_transi
   return { id: trip.id as string, date: snapshot.startDate!, plan: (await saved.json()).plan };
 }
 const panel = (page: Page) => page.getByRole("region", { name: "时间红线", exact: true });
-async function open(page: Page, id: string) {
-  await page.goto(`/trips/${id}`);
+async function open(page: Page, id: string, view: "transport" | "timeline" = "transport") {
+  await page.goto(`/trips/${id}?view=${view}`);
   await expect(panel(page).getByText(/建议最晚 .*08:55/)).toBeVisible();
   await panel(page).getByText("红线详情与计算依据", { exact: true }).click();
 }
+
+test("a distant feasible departure stays quiet in the timeline and remains available in transport", async ({ page, request }) => {
+  const trip = await seed(request);
+  const calculated = page.waitForResponse((response) => response.url().endsWith("/redlines"));
+  await page.goto(`/trips/${trip.id}`);
+  expect((await calculated).status()).toBe(200);
+  await expect(panel(page)).toHaveCount(0);
+  await page.getByRole("tab", { name: "门到门交通", exact: true }).click();
+  await expect(panel(page).getByText(/建议最晚 .*08:55/)).toBeVisible();
+  await page.getByRole("tab", { name: "每日时间轴", exact: true }).click();
+  await expect(panel(page)).toHaveCount(0);
+});
 
 test("saves changed conditions, replaces calculation version, refreshes and retains historical read-only state", async ({ page, request }) => {
   const trip = await seed(request);
@@ -67,7 +79,7 @@ test("saves changed conditions, replaces calculation version, refreshes and reta
   const result: RedlineResult = (await after.json()).redlines[0];
   expect(result.calculationVersion).not.toBe(before.calculationVersion);
   expect(result.bufferSeconds).toBe(1200);
-  await page.goto(`/trips/${trip.id}?planVersion=2`);
+  await page.goto(`/trips/${trip.id}?planVersion=2&view=transport`);
   await expect(panel(page).getByText(/建议最晚 .*08:55/)).toBeVisible();
   await panel(page).getByText("红线详情与计算依据", { exact: true }).click();
   await expect(panel(page).getByLabel("额外机动缓冲（分钟）", { exact: true })).toBeDisabled();
@@ -86,7 +98,7 @@ test("a failed save preserves edited values, retries, and a cancelled ticket rem
   await expect(panel(page).getByText(/建议最晚 .*08:50/)).toBeVisible();
   expect((await request.post(`/api/trips/${trip.id}/plans/3/tickets`, { data: { action: "cancel", ticketId: trip.plan.tickets[0].id, acknowledged: true } })).status()).toBe(200);
   await page.reload();
-  await expect(panel(page).getByText(/暂无有效票据红线/)).toBeVisible();
+  await expect(panel(page)).toHaveCount(0);
 });
 
 test("clock resumes at foreground, exact zero is red, and 09:00/09:06 show distinct states", async ({ page, request }) => {
@@ -99,7 +111,7 @@ test("clock resumes at foreground, exact zero is red, and 09:00/09:06 show disti
     body.serverNow = new Date(await page.evaluate(() => Date.now())).toISOString();
     await route.fulfill({ response, json: body });
   });
-  await open(page, trip.id);
+  await open(page, trip.id, "timeline");
   await expect(panel(page).locator("article")).toHaveAttribute("data-urgency", "orange");
   await page.clock.setSystemTime(new Date(`${trip.date}T08:55:00+08:00`));
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));

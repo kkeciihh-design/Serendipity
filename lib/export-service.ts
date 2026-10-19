@@ -48,6 +48,7 @@ export async function captureExportSnapshot(tx: Prisma.TransactionClient, tripId
     return { eventId: f.targetId, field, status, value: f.extractedValue, source: `${f.sourceTitle} · ${f.sourcePublisher}`, retrievedAt: f.retrievedAt.toISOString(), applicableFrom, applicableUntil };
   });
   return { schemaVersion: 1, id: randomUUID(), generatedAt, plan,
+    weather: advisory ? parseAdvisoryWeatherState(advisory.weather).records : [],
     advisories: { revision: advisory?.revision ?? 0, items: advisoryItems },
     latestRequestRevision: trip.request?.requestRevision ?? null,
     requirementUpToDate: plan.requirementUpToDate && trip.request?.requestRevision === plan.requestRevision && trip.request?.confirmedRevision === plan.requestRevision,

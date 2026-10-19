@@ -51,6 +51,7 @@ test("preparation edits reveal redline conflicts after save and refresh while th
   const trip = await seed(request, true);
   await page.goto(`/trips/${trip.id}`);
   const redline = page.getByRole("region", { name: "时间红线", exact: true });
+  await page.getByRole("tab", { name: "门到门交通", exact: true }).click();
   await expect(redline.getByText(/建议最晚 .*08:55/)).toBeVisible();
   await page.getByRole("tab", { name: "每日时间轴", exact: true }).click();
   await page.getByRole("button", { name: /^第 \d+ 项：出行准备$/ }).click();
@@ -60,7 +61,7 @@ test("preparation edits reveal redline conflicts after save and refresh while th
   await page.reload();
   await expect(redline.getByText(/上一项结束于 .*09:10.*晚于建议出发/)).toBeVisible();
   await expect(redline.getByText("待确认建议", { exact: true })).toBeVisible();
-  await page.goto(`/trips/${trip.id}?planVersion=2`);
+  await page.goto(`/trips/${trip.id}?planVersion=2&view=transport`);
   await expect(redline.getByText(/建议最晚 .*08:55/)).toBeVisible();
   await expect(redline.getByText(/上一项结束于 .*09:10/)).toHaveCount(0);
 });
@@ -83,8 +84,9 @@ test("wrong-station outgoing routes are unavailable in the UI and API, and old g
   await expect(cityRoutes.getByRole("button", { name: "查询并保存" })).toHaveCount(0);
   await expect(cityRoutes.getByRole("link", { name: "在高德查看公交路线" })).toHaveCount(0);
   const frame = page.frameLocator('iframe[title="行程地点地图"]');
-  await expect(frame.locator(".leaflet-marker-icon")).toHaveCount(2);
-  await expect(frame.locator("path.leaflet-interactive")).toHaveCount(0);
+  await expect.poll(() => frame.locator(".serendipity-map-pin").count()).toBeGreaterThan(2);
+  await expect.poll(() => frame.locator("path.leaflet-interactive[stroke-dasharray]").count()).toBeGreaterThan(0);
+  await expect(frame.locator("path.leaflet-interactive:not([stroke-dasharray])")).toHaveCount(0);
   for (const method of ["post", "patch"] as const) {
     const response = await request[method](`/api/trips/${trip.id}/plans/2/routes`, { data: method === "post" ? { ...manual, mode: "walking" } : manual });
     expect(response.status()).toBe(400);

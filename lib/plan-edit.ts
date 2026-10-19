@@ -112,8 +112,8 @@ export function applyPlanEventEdit(
     throw new Error("没有找到要编辑的日程事件。");
   }
 
-  if ((input.note ?? "").trim().length > 240) {
-    throw new Error("备注最多 240 个字符。");
+  if ((input.note ?? "").trim().length > 6000) {
+    throw new Error("备注最多 6000 个字符。");
   }
 
   if (target.locked && input.remove) {

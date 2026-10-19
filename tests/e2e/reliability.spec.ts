@@ -1,6 +1,7 @@
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { test, expect } from "./fixtures";
+import { openAdjustments, openRequirements } from "./workspace-helpers";
 import { requestFixture, planFixture } from "../helpers/plan-fixtures";
 import { derivePlanCosts, calculateBudgetSummary } from "../../lib/budget";
 import { validatePlan } from "../../lib/plan";
@@ -48,12 +49,13 @@ test("saving from the explicit current-version URL follows the new version and p
   await timeline.getByRole("button", { name: /第 \d+ 项：审查景点/ }).click();
   await timeline.getByRole("textbox", { name: "备注" }).fill("新版本中的备注");
   await timeline.getByRole("button", { name: "保存修改", exact: true }).click();
-  await expect(page.locator("#plan-overview-title")).toContainText("计划版本 2");
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
   await expect(page).toHaveURL(new RegExp(`/trips/${trip.id}$`));
   await expect(timeline.getByRole("textbox", { name: "备注" })).toHaveValue("新版本中的备注");
   await page.reload();
-  await expect(page.locator("#plan-overview-title")).toContainText("计划版本 2");
-  await page.getByRole("link", { name: "V1", exact: true }).click();
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
+  await page.getByTestId("plan-version-select").click();
+  await page.getByRole("link", { name: /^V1\s*历史版本$/, exact: true }).click();
   await timeline.getByRole("button", { name: /第 \d+ 项：审查景点/ }).click();
   await expect(timeline.getByRole("textbox", { name: "备注" })).toHaveValue("");
   await expect(timeline.getByRole("button", { name: "保存修改", exact: true })).toBeDisabled();
@@ -88,6 +90,8 @@ test("unsaved timeline and cost drafts survive tab, event and day changes", asyn
 test("edits typed while saving or confirming a request stay as a new unsaved draft", async ({ page }) => {
   const { trip } = await seed();
   await page.goto(`/trips/${trip.id}`);
+  await openRequirements(page);
+  await openAdjustments(page);
   let releaseSave!: () => void;
   const saveGate = new Promise<void>((resolve) => { releaseSave = resolve; });
   await page.route(`**/api/trips/${trip.id}/request`, async (route) => {
@@ -128,21 +132,21 @@ test("saving the other tab carries unchanged local drafts into the new plan vers
   await budget.getByRole("button", { name: /审查景点/ }).click();
   await budget.getByLabel("单价（元，留空表示未知）").fill("26");
   await budget.getByRole("button", { name: "确认金额", exact: true }).click();
-  await expect(page.locator("#plan-overview-title")).toContainText("计划版本 2");
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
   await page.getByRole("tab", { name: "每日时间轴", exact: true }).click();
   await expect(timeline.getByRole("textbox", { name: "备注" })).toHaveValue("预算保存后仍需保留");
   await timeline.getByRole("button", { name: "保存修改", exact: true }).click();
-  await expect(page.locator("#plan-overview-title")).toContainText("计划版本 3");
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V3");
   await page.getByRole("tab", { name: "预算", exact: true }).click();
   await budget.getByLabel("单价（元，留空表示未知）").fill("27");
   await page.getByRole("tab", { name: "每日时间轴", exact: true }).click();
   await timeline.getByRole("textbox", { name: "备注" }).fill("新的已保存备注");
   await timeline.getByRole("button", { name: "保存修改", exact: true }).click();
-  await expect(page.locator("#plan-overview-title")).toContainText("计划版本 4");
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V4");
   await page.getByRole("tab", { name: "预算", exact: true }).click();
   await expect(budget.getByLabel("单价（元，留空表示未知）")).toHaveValue("27");
   await budget.getByRole("button", { name: "确认金额", exact: true }).click();
-  await expect(page.locator("#plan-overview-title")).toContainText("计划版本 5");
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V5");
   const stored = await prisma.planVersion.findFirstOrThrow({ where: { tripId: trip.id }, orderBy: { versionNumber: "desc" } });
   expect(JSON.parse(stored.costs).find((cost: { linkedEventId: string }) => cost.linkedEventId === "d1-activity").unitAmountCents).toBe(2700);
   expect(JSON.parse(stored.events).find((event: { id: string }) => event.id === "d1-activity").note).toBe("新的已保存备注");
@@ -155,11 +159,11 @@ test("confirmed costs and per-stay nights agree across budget and timeline witho
   const budget = page.getByRole("tabpanel", { name: "预算", exact: true });
   await budget.getByRole("button", { name: /审查景点/ }).click();
   await budget.getByRole("button", { name: "确认金额", exact: true }).click();
-  await expect(page.locator("#plan-overview-title")).toContainText("计划版本 2");
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
   await expect(budget.getByRole("button", { name: /审查景点/ })).toContainText("已确认");
   await budget.getByLabel("单价（元，留空表示未知）").fill("10");
   await budget.getByRole("button", { name: "确认金额", exact: true }).click();
-  await expect(page.locator("#plan-overview-title")).toContainText("计划版本 3");
+  await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V3");
   await page.getByRole("tab", { name: "每日时间轴", exact: true }).click();
   await expect(page.getByRole("tabpanel", { name: "每日时间轴", exact: true }).getByRole("button", { name: /第 \d+ 项：审查景点/ })).toContainText("10 元｜已确认");
   await page.getByRole("tab", { name: "预算", exact: true }).click();
@@ -170,7 +174,7 @@ test("confirmed costs and per-stay nights agree across budget and timeline witho
     await expect(budget.getByLabel("这笔住宿的计费晚数", { exact: false })).toHaveValue("1");
     await budget.getByLabel("已支付", { exact: true }).check();
     await budget.getByRole("button", { name: "确认金额", exact: true }).click();
-    await expect(page.locator("#plan-overview-title")).toContainText(`计划版本 ${night + 4}`);
+    await expect(page.getByTestId("plan-version-select")).toHaveText(`版本 V${night + 4}`);
   }
   await expect(budget.getByText(/已支付 900 元｜/)).toBeVisible();
   const latest = await prisma.planVersion.findFirstOrThrow({ where: { tripId: trip.id }, orderBy: { versionNumber: "desc" } });

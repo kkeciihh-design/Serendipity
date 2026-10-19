@@ -70,6 +70,46 @@ function save(capture: PlanCapture, plan = planFixture(capture.requestSnapshot))
 }
 
 describe("confirmed generation inputs and protected user facts", () => {
+  it("repairs legacy generated Chinese when reading without changing stored snapshots or confirmed copy", async () => {
+    const { trip, capture, originalRequest } = await createConfirmed();
+    const saved = await save(capture);
+    const storedEvents = saved.events.map((event) => event.id === "d1-preparation"
+      ? { ...event, note: "出发前带好身fen证和充电宝" }
+      : event.id === "d1-activity" ? { ...event, note: "用户已确认：身fen证原文", status: "confirmed", locked: true } : event);
+    const rawEvents = JSON.stringify(storedEvents);
+    await prisma.planVersion.update({ where: { id: saved.id }, data: { events: rawEvents } });
+    const read = await plans.getPlanVersion(trip.id, saved.versionNumber);
+    expect(read.events.find((event) => event.id === "d1-preparation")?.note).toBe("出发前带好身份证和充电宝");
+    expect(read.events.find((event) => event.id === "d1-activity")).toMatchObject({ note: "用户已确认：身fen证原文", status: "confirmed", locked: true });
+    expect((await prisma.planVersion.findUniqueOrThrow({ where: { id: saved.id } })).events).toBe(rawEvents);
+    expect((await requests.getTripRequestRecord(trip.id)).originalRequest).toBe(originalRequest);
+  });
+
+  it("saves useful AI itineraries on the first attempt without preparation, rest or meal quotas", async () => {
+    const { trip, capture } = await createConfirmed(requestFixture(3));
+    const draft = planFixture(capture.requestSnapshot);
+    draft.events = draft.events.filter((event) => event.type !== "preparation" && event.type !== "rest" && event.id !== "d3-breakfast");
+    const hotel = draft.events.find((event) => event.id === "d1-hotel")!;
+    Object.assign(hotel, { startTime: "15:00", endTime: "15:30" });
+    draft.events.push({ ...hotel, id: "d1-dinner", type: "meal", title: "晚餐", startTime: "18:00", endTime: "19:00" });
+    const prompts: string[] = [];
+    const saved = await generation.generatePlanVersion({
+      tripId: trip.id, expectedRequestRevision: capture.expectedRequestRevision, expectedPlanVersion: null,
+      completion: async (input) => {
+        prompts.push(input.userPrompt);
+        return { ok: true, content: JSON.stringify(draft) };
+      },
+    });
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).not.toContain("每天至少两餐");
+    expect(prompts[0]).toContain("返程日无需凑足两餐");
+    expect(saved.events.some((event) => event.type === "rest" || event.type === "preparation")).toBe(false);
+    expect(saved.validationResults.errors).toEqual([]);
+    expect(saved.validationResults.warnings.join()).toContain("无需单独增加节点");
+    expect(saved.costs.filter((cost) => cost.category === "accommodation")).toHaveLength(2);
+    expect(saved.costs.find((cost) => cost.linkedEventId === hotel.id)).toMatchObject({ unitAmountCents: hotel.costDraftCents, nightCount: 1 });
+  });
+
   it.each([2, 4])("sends the full latest confirmed snapshot through the real model adapter for %i days", async (days) => {
     const initial = requestFixture(days, { pace: "packed", interests: ["旧偏好"], accommodation: "老城区", budgetAmountCents: 100000 });
     const { trip, confirmed, originalRequest } = await createConfirmed(initial);
@@ -114,6 +154,33 @@ describe("confirmed generation inputs and protected user facts", () => {
       edit: { eventId: "d1-activity", note: "用户亲自确认", status: "confirmed", locked: true, remove: false } });
     expect(edited.events.find((event) => event.id === "d1-activity")).toMatchObject({ status: "confirmed", locked: true });
     expect((await plans.getPlanVersion(trip.id, 1)).events.every((event) => !event.locked)).toBe(true);
+  });
+
+  it.each(["九寨沟", "霞浦", "杭州", "成都", "青岛"])("persists specific AI guide content, costs and coordinates for %s without a catalog match", async (destination) => {
+    const { trip, capture } = await createConfirmed(requestFixture(2, { destination }));
+    const fixture = planFixture(capture.requestSnapshot);
+    const detailedNote = "从景区游客中心检票，乘观光车至第一站后沿木栈道步行，按入口 → 观景台 → 临水步道 → 出口顺序游览。提前在景区官方公众号实名预约门票与接驳车；步行约 90 分钟，准备防滑鞋、防雨外套与饮水。".repeat(4);
+    reply = {
+      ...fixture,
+      pendingItems: [],
+      events: fixture.events.map((event) => event.id === "d1-activity" ? {
+        ...event, title: `${destination} · 观景台与木栈道游览`, locationName: `${destination}游客中心`,
+        note: detailedNote, costDraftCents: "190元", latitude: 33.1618, longitude: 103.8782,
+      } : event),
+    };
+    const saved = await generation.generatePlanVersion({ tripId: trip.id,
+      expectedRequestRevision: capture.expectedRequestRevision, expectedPlanVersion: null });
+    const activity = saved.events.find((event) => event.id === "d1-activity");
+    expect(activity).toMatchObject({ title: `${destination} · 观景台与木栈道游览`, locationName: `${destination}游客中心`,
+      note: detailedNote, costDraftCents: 19000, latitude: 33.1618, longitude: 103.8782 });
+    expect(saved.costs.find((cost) => cost.linkedEventId === "d1-activity")).toMatchObject({ unitAmountCents: 19000, certainty: "estimated" });
+    expect(saved.pendingItems).toEqual([]);
+    const prompt = capturedPrompts.at(-1)!;
+    expect(prompt).toContain("目的地不受任何内置城市");
+    expect(prompt).toContain("黄龙九寨站");
+    expect(prompt).toContain("参考价格区间");
+    expect(prompt).toContain("latitude/longitude");
+    expect((await plans.getPlanVersion(trip.id, 1)).events.find((event) => event.id === "d1-activity")).toEqual(activity);
   });
 
   for (const kind of ["locked", "confirmed_event", "confirmed_cost", "paid", "refund_pending"] as const) {

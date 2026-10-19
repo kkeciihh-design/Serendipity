@@ -1,5 +1,6 @@
 import { businessOperation, businessTransaction, capturedGeneration, assertCapturedGeneration } from "./business-guard";
 import crypto from "node:crypto";
+import { deriveGeneratedPlanCosts } from "./generated-costs";
 import { syncPlanChecklist } from "./checklist-store";
 import { executionEventChangeConflict, parseExecution } from "./execution";
 import { Prisma, PrismaClient } from "@prisma/client";
@@ -26,7 +27,12 @@ import {
   planValidationResultsSchema,
   preparePlanForStorage,
   planEventEnd,
+  formatPlanDate,
+  sortPlanEvents,
+  planEveningReturnGaps,
   normalizePlanOutput,
+  normalizePlanChineseCopy,
+  validateGeneratedPlan,
   validatePlan,
   type PlanContent,
   type PlanCapture,
@@ -44,6 +50,7 @@ import {
 } from "./plan-edit";
 import { requestSnapshotSchema, type RequestSnapshot } from "./trip-request";
 import { placeSchema, placeIdentity, validatePlaceReferences, type Place, type PlaceCandidate } from "./places";
+import { synchronizeConfirmedPlace } from "./place-reference";
 import { invalidateRouteReference, routeConflict, routeCostPricingUnit, routeLegSchema, routeModeLabels, type RouteLeg } from "./routes";
 import { cityRouteOriginIssue } from "./route-origin";
 import { isRoutePair, routeDayEvents } from "./route-day";
@@ -191,7 +198,10 @@ function validationWithTickets(
 
 export function serializePlan(record: PlanVersionRow): PlanVersionRecord {
   try {
-    const events = z.array(planEventSchema).parse(JSON.parse(record.events));
+    const { events, pendingItems } = normalizePlanChineseCopy({
+      events: z.array(planEventSchema).parse(JSON.parse(record.events)),
+      pendingItems: z.array(planPendingItemSchema).parse(JSON.parse(record.pendingItems)),
+    });
     const places = z.array(placeSchema).parse(JSON.parse(record.places));
     const storedRoutes = z.array(routeLegSchema).parse(JSON.parse(record.routeLegs ?? "[]"));
     const tickets = parseStoredTickets(record.tickets);
@@ -201,7 +211,6 @@ export function serializePlan(record: PlanVersionRow): PlanVersionRecord {
     );
     const { routeLegs, costs, routeWarnings } = safeCityRouteOrigins(storedRoutes, events, storedCosts, isCurrent);
     const requestSnapshot = parseSnapshot(record.requestSnapshot);
-    const pendingItems = z.array(planPendingItemSchema).parse(JSON.parse(record.pendingItems));
     const storedValidation = planValidationResultsSchema.parse(JSON.parse(record.validationResults));
     // Re-evaluate old plans under current rules using their own snapshot. A
     // previously saved success must not hide a newly detected timing conflict.
@@ -354,10 +363,13 @@ export const savePlanVersion = businessOperation(async function savePlanVersion(
   const { capture } = input;
   assertCapturedGeneration(capture.dataGeneration);
   // Generations cross the model boundary; human edits use separate entry points.
+  // Keep model titles, detailed notes, estimates and illustration coordinates for
+  // every destination. Catalog matches and manual place confirmation are separate
+  // enhancements, never prerequisites for saving a useful generated itinerary.
   const plan = normalizePlanOutput(input.plan);
-  const validation = validatePlan(plan, capture.requestSnapshot);
+  const validation = validateGeneratedPlan(plan, capture.requestSnapshot);
   if (validation.errors.length) throw new PlanValidationError(validation.errors[0]);
-  const costs = derivePlanCosts(plan.events);
+  const costs = deriveGeneratedPlanCosts(plan.events, capture.requestSnapshot);
   const costErrors = validatePlanCosts(costs, plan.events);
   if (costErrors.length > 0) {
     throw new PlanValidationError(costErrors[0]);
@@ -498,6 +510,93 @@ export async function copyEvidenceFacts(
     await transaction.evidenceFact.createMany({ data: copies });
   }
 }
+
+/** Explicit maintenance operation: append suggested hotel returns without regenerating any facts. */
+export const repairPlanEveningReturns = businessOperation(async function repairPlanEveningReturns(input: {
+  tripId: string;
+  expectedPlanVersion: number;
+  expectedExecutionRevision: number;
+  dryRun?: boolean;
+}) {
+  if (!Number.isInteger(input.expectedPlanVersion) || input.expectedPlanVersion < 1 ||
+    !Number.isInteger(input.expectedExecutionRevision) || input.expectedExecutionRevision < 0) {
+    throw new PlanValidationError("请提供当前计划版本与执行进度版本。");
+  }
+  try {
+    return await businessTransaction(prisma, async (transaction) => {
+      const trip = await transaction.trip.findUnique({
+        where: { id: input.tripId }, include: { currentPlanVersion: true, execution: true },
+      });
+      const row = trip?.currentPlanVersion;
+      if (!row) throw new PlanNotFoundError();
+      if (row.versionNumber !== input.expectedPlanVersion) throw new PlanConflictError("当前计划版本已变化，请重新读取后补全酒店休息安排。");
+      if ((trip.execution?.revision ?? 0) !== input.expectedExecutionRevision) throw new PlanConflictError("旅行执行进度已变化，请重新读取后补全酒店休息安排。");
+      if (parseExecution(trip.execution?.payload).startedAt) throw new PlanConflictError("旅行已经开始，请使用重新规划调整剩余安排，保留实际进度。");
+      const current = serializePlan({ ...row, trip: { currentPlanVersionId: trip.currentPlanVersionId } });
+      // Validate the original JSON, then keep it verbatim in the new snapshot.
+      // In particular, do not normalize old titles, times, locks or order values.
+      const originalEvents: PlanEvent[] = JSON.parse(row.events);
+      z.array(planEventSchema).parse(originalEvents);
+      const pendingItems = z.array(planPendingItemSchema).parse(JSON.parse(row.pendingItems));
+      const costs = parseStoredCosts(row.costs, originalEvents);
+      const gaps = planEveningReturnGaps({ events: originalEvents, pendingItems }, current.requestSnapshot);
+      if (!gaps.length) return { outcome: "unchanged" as const, plan: current, addedEvents: [] as PlanEvent[] };
+      if (originalEvents.length + gaps.length > 64) throw new PlanValidationError("日程节点已达上限，请整理后再补全酒店休息安排。");
+      const highestOrder = Math.max(0, ...originalEvents.map((event) => event.order ?? 0));
+      const addedEvents = gaps.map(({ dayNumber, stay, after }, index) => {
+        const start = planEventEnd(after);
+        if (formatPlanDate(start) !== stay.date) throw new PlanValidationError(`第 ${dayNumber} 天的游览已跨午夜，请手动安排回酒店时间。`);
+        const end = new Date(start.getTime() + 30 * 60_000);
+        const localTime = (date: Date) => new Date(date.getTime() + 8 * 3600_000).toISOString().slice(11, 16);
+        const locationName = (stay.locationName ?? stay.title).slice(0, 160);
+        const id = `hotel-return-${crypto.createHash("sha256").update(`${trip.id}:${stay.id}`).digest("hex").slice(0, 24)}`;
+        if (originalEvents.some((event) => event.id === id)) throw new PlanConflictError("酒店休息节点已被编辑，请手动核对现有安排。");
+        return planEventSchema.parse({
+          id, dayNumber, date: stay.date, endDate: formatPlanDate(end),
+          startTime: localTime(start), endTime: localTime(end), type: "rest",
+          title: `返回酒店休息 · ${locationName}`, locationName,
+          latitude: stay.latitude, longitude: stay.longitude, coordinateSystem: stay.coordinateSystem,
+          placeId: stay.placeId, order: highestOrder + index + 1,
+          status: "suggested", locked: false, suggestedDurationSeconds: 1800,
+          costDraftCents: 0, costStatus: "estimated",
+          note: "当天游览结束后，返回已安排的住宿休息。回店时段为建议，可按酒店位置调整；住宿费用沿用当晚已有预算，此节点不重复计费。",
+        });
+      });
+      const events = sortPlanEvents([...originalEvents, ...addedEvents]);
+      await assertExecutionPreserved(transaction, trip.id, originalEvents, events, input.expectedExecutionRevision);
+      const validation = validationWithTickets(validatePlan({ events, pendingItems }, current.requestSnapshot, costs, current.validationResults.scope), current.tickets, events);
+      const errors = [...validation.errors, ...validatePlanCosts(costs, events)];
+      if (errors.length) throw new PlanValidationError(errors[0]);
+      validatePlaceReferences(events, current.places);
+      const validationResults: PlanValidationResults = {
+        ...validation,
+        warnings: [...new Set([...current.validationResults.warnings, ...validation.warnings])],
+      };
+      validationResults.status = validationResults.warnings.length ? "needs_review" : "valid";
+      if (input.dryRun) return { outcome: "preview" as const, plan: current, addedEvents };
+      const created = await transaction.planVersion.create({ data: {
+        tripId: trip.id, versionNumber: row.versionNumber + 1,
+        requestRevision: row.requestRevision, requestSnapshot: row.requestSnapshot,
+        events: JSON.stringify(events), costs: row.costs, places: row.places,
+        routeLegs: row.routeLegs, tickets: row.tickets, pendingItems: row.pendingItems,
+        validationResults: JSON.stringify(validationResults), requirementUpToDate: row.requirementUpToDate,
+      } });
+      await copyEvidenceFacts(transaction, row.id, created.id, { events: originalEvents, costs }, { events, costs });
+      await transaction.trip.update({ where: { id: trip.id }, data: {
+        currentPlanVersionId: created.id,
+        status: !row.requirementUpToDate ? "plan_needs_update" : validationResults.status === "valid" ? "planned" : "plan_needs_review",
+      } });
+      const saved = serializePlan({ ...created, trip: { currentPlanVersionId: created.id } });
+      await syncPlanChecklist(transaction, saved);
+      return { outcome: "repaired" as const, plan: saved, addedEvents };
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      throw new PlanConflictError("当前计划已变化，酒店休息补全未提交；请重新读取。");
+    }
+    throw error;
+  }
+});
 
 export const savePlanEventEdit = businessOperation(async function savePlanEventEdit(input: {
   tripId: string;
@@ -773,15 +872,15 @@ export const savePlanPlaceEdit = businessOperation(async function savePlanPlaceE
         confirmedAt: new Date().toISOString(), source: candidate.provider === "amap" ? "高德地图地点搜索" : "OpenStreetMap / Nominatim",
       }) : null;
       if ((event.placeId ?? null) === (place?.id ?? null)) throw new PlanValidationError("这项安排的地点没有变化。");
-      const events = current.events.map((item) => item.id === event.id ? {
-        ...item, placeId: place?.id ?? null,
-        locationName: place ? `${place.name.slice(0, 150)}${place.precision === "area_reference" ? "（区域参考点）" : ""}` : item.locationName,
-      } : item);
+      const events = synchronizeConfirmedPlace(current.events, event, place);
       await assertExecutionPreserved(transaction, row.tripId, current.events, events);
       const places = current.places.filter((item) => events.some((event) => event.placeId === item.id));
       if (place && !places.some((item) => item.id === place.id)) places.push(place);
       validatePlaceReferences(events, places);
-      const { routeLegs, costs } = updateRoutesAfterEventChange(current.routeLegs, events, current.costs, event.id, current.events);
+      let routeLegs = current.routeLegs, costs = current.costs;
+      for (const changed of events.filter((item, index) => item !== current.events[index])) {
+        ({ routeLegs, costs } = updateRoutesAfterEventChange(routeLegs, events, costs, changed.id, current.events));
+      }
       const costErrors = validatePlanCosts(costs, events);
       if (costErrors.length > 0) throw new PlanValidationError(costErrors[0]);
       const validationResults = validationWithTickets(
@@ -1298,7 +1397,7 @@ function applyTicketCosts(tickets: Ticket[], events: PlanEvent[], costs: PlanCos
   );
 }
 
-function applyTicketTransferCosts(tickets: Ticket[], routes: RouteLeg[], costs: PlanCostItem[], snapshot: RequestSnapshot) {
+function applyTicketTransferCosts(tickets: Ticket[], routes: RouteLeg[], costs: PlanCostItem[], snapshot: RequestSnapshot, events: PlanEvent[]) {
   const applicable = new Set<string>();
   let result = [...costs];
   for (const ticket of tickets.filter(isActiveTicket)) {
@@ -1311,8 +1410,13 @@ function applyTicketTransferCosts(tickets: Ticket[], routes: RouteLeg[], costs: 
       // paid facts; replace only disposable route estimates with this record.
       const routeCostIds = new Set(routes.filter((route) => side === "access" ? route.toEventId === ticket.eventId : route.fromEventId === ticket.eventId)
         .map((route) => routeCostId(route.fromEventId, route.toEventId)));
-      if (result.some((cost) => routeCostIds.has(cost.id) && hasProtectedCostFact(cost))) {
-        result = result.map((cost) => routeCostIds.has(cost.id) && hasProtectedCostFact(cost)
+      if (side === "access") {
+        for (const event of events.filter((event) => event.ticketAccessForEventId === ticket.eventId)) {
+          for (const cost of result.filter((cost) => cost.linkedEventId === event.id && cost.category === "local_transport")) routeCostIds.add(cost.id);
+        }
+      }
+      if (result.some((cost) => routeCostIds.has(cost.id) && (hasProtectedCostFact(cost) || fare === null))) {
+        result = result.map((cost) => routeCostIds.has(cost.id) && (hasProtectedCostFact(cost) || fare === null)
           ? preserveTicketCostReference(cost, fare, referenceLabel, snapshot) : cost);
         continue;
       }
@@ -1480,7 +1584,7 @@ export const savePlanTicketEdit = businessOperation(async function savePlanTicke
         changedEventIds,
       });
       const ticketCosts = draftOnly ? current.costs : applyTicketTransferCosts(
-        tickets, current.routeLegs, applyTicketCosts(tickets, planAfterTickets.events, costs, current.requestSnapshot), current.requestSnapshot,
+        tickets, current.routeLegs, applyTicketCosts(tickets, planAfterTickets.events, costs, current.requestSnapshot), current.requestSnapshot, planAfterTickets.events,
       );
 
       const costErrors = validatePlanCosts(ticketCosts, planAfterTickets.events);

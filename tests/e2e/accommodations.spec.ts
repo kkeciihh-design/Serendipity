@@ -38,7 +38,7 @@ test("area comparison, two-night pricing and responsive layouts persist across r
   }
   await propose(page); await expect(page.getByLabel("住宿调整预览")).toContainText("共2晚、3房");
   expect(await db.planVersion.count({ where: { tripId: trip.id } })).toBe(1);
-  await page.getByRole("button", { name: "应用住宿选择", exact: true }).click(); await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
+  await page.getByRole("button", { name: "应用住宿选择", exact: true }).click(); await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
   const saved = await db.planVersion.findUniqueOrThrow({ where: { tripId_versionNumber: { tripId: trip.id, versionNumber: 2 } } });
   expect(JSON.parse(saved.costs).filter((c: { category: string }) => c.category === "accommodation")).toEqual(expect.arrayContaining([expect.objectContaining({ roomCount: 3, nightCount: 1, unitAmountCents: 18050 })]));
   await page.reload(); await page.getByRole("tab", { name: "住宿推荐", exact: true }).click(); await expect(page.getByLabel("房间数")).toHaveValue("3"); await expect(page.getByLabel("离店日期", { exact: true })).toHaveValue(trip.snapshot.endDate!);
@@ -52,11 +52,12 @@ test("hotel search candidates remain distinct from availability and confirm with
     const c = { provider: "osm", poiId: "node:888", name: "演练酒店", city: "长沙", district: "测试区域", address: "合成地址，仅供验证", adcode: "", category: "tourism:hotel", longitude: 112.97, latitude: 28.19, coordinateSystem: "WGS84", retrievedAt: new Date().toISOString() };
     await route.fulfill({ json: { candidates: [{ ...c, selectionToken: createSignedPayload({ scope: "place-selection", dataGeneration: route.request().headers()["x-data-generation"], tripId: trip.id, version: Number(new URL(route.request().url()).pathname.split("/").at(-2)), eventId: "d1-hotel", candidate: c, exp: Date.now() + 60000 }) }] } });
   });
-  await open(page, trip.id); await propose(page); await page.getByRole("button", { name: "应用住宿选择", exact: true }).click(); await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
+  await open(page, trip.id); await propose(page); await page.getByRole("button", { name: "应用住宿选择", exact: true }).click(); await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
   await page.getByRole("radio", { name: "确认具体酒店", exact: true }).check(); await page.getByLabel("酒店完整名称").fill("演练酒店"); await page.getByRole("button", { name: "搜索酒店地点", exact: true }).click(); await page.getByRole("radio", { name: /演练酒店 · 长沙/ }).check();
+  await page.getByText("入住时段、行李寄存与接驳（可选）", { exact: true }).click();
   await page.getByLabel("酒店可入住时间").fill("14:00"); await page.getByLabel("酒店退房截止").fill("12:00");
   await propose(page); await expect(page.getByLabel("住宿调整预览")).toContainText("确认实际酒店：演练酒店"); await expect(page.getByLabel("住宿调整预览")).toContainText("不表示已预订");
-  await page.screenshot({ path: path.join(evidence, "hotel-preview.png") }); await page.getByRole("button", { name: "应用住宿选择", exact: true }).click(); await expect(page.getByRole("heading", { name: /计划版本 3/ })).toBeVisible();
+  await page.screenshot({ path: path.join(evidence, "hotel-preview.png") }); await page.getByRole("button", { name: "应用住宿选择", exact: true }).click(); await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V3");
   await page.reload(); await page.getByRole("tab", { name: "住宿推荐", exact: true }).click(); await expect(page.getByText(/已确认具体酒店地点 · 演练酒店/)).toBeVisible();
   const row = await db.planVersion.findUniqueOrThrow({ where: { tripId_versionNumber: { tripId: trip.id, versionNumber: 3 } } }); expect(JSON.parse(row.places)[0].precision).toBe("poi"); expect(JSON.parse(row.routeLegs)).toEqual([]);
 });

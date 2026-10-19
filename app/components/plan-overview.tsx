@@ -1,12 +1,14 @@
 "use client";
 import { businessFetch } from "@/lib/business-fetch";
+import { createTripWithPlan, generatePlanWithRetry } from "@/lib/trip-auto-planning";
 
 import {
   CalendarRange,
-  CircleAlert,
-  History,
+  ChevronDown,
+  Download,
   ListChecks,
   PencilLine,
+  SlidersHorizontal,
   Sparkles,
   XCircle,
 } from "lucide-react";
@@ -37,7 +39,8 @@ import { AccommodationPanel } from "./accommodation-panel";
 import { ChecklistPanel } from "./checklist-panel";
 import { ReplanPanel } from "./replan-panel";
 import { TripBottomNav } from "./trip-bottom-nav";
-import { AdvisoryPanel, AdvisorySummary, useAdvisories } from "./advisory-panel";
+import { AdvisoryPanel, useAdvisories } from "./advisory-panel";
+import { PlanCompanion } from "./plan-companion";
 import type { Place } from "@/lib/places";
 import type { RouteLeg } from "@/lib/routes";
 import type { Ticket } from "@/lib/tickets";
@@ -48,6 +51,7 @@ import type {
 } from "@/lib/plan";
 import type { EvidenceFactClient } from "@/lib/evidence";
 import type { RequestSnapshot } from "@/lib/trip-request";
+import styles from "./plan-workspace.module.css";
 
 export type PlanVersionClient = {
   id: string;
@@ -80,28 +84,26 @@ type Feedback = {
   message: string;
 };
 
-async function readApiError(response: Response) {
-  const payload = (await response.json().catch(() => null)) as {
-    error?: string;
-  } | null;
-  return (
-    payload?.error ??
-    `生成失败（HTTP ${response.status}）。已有计划没有被覆盖，请稍后重试。`
-  );
-}
-
 export function PlanOverview({
   tripId,
   tripTitle,
   plans,
   selectedVersionNumber,
   requestState,
+  onOpenRequirements,
+  onPlanGenerated,
+  originalRequest,
+  planningNotice,
 }: {
   tripId: string;
   tripTitle: string;
   plans: PlanVersionClient[];
   selectedVersionNumber: number | null;
   requestState: PlanRequestState;
+  onOpenRequirements?: () => void;
+  onPlanGenerated?: () => void;
+  originalRequest: string;
+  planningNotice?: string | null;
 }) {
   const router = useRouter();
   const currentPlan = plans.find((plan) => plan.isCurrent) ?? null;
@@ -116,6 +118,7 @@ export function PlanOverview({
   );
   const [selectedDayNumber, setSelectedDayNumber] = useState(1);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
   const [pendingTimelineScrollEventId, setPendingTimelineScrollEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
     "timeline" | "transport" | "budget" | "map" | "accommodation" | "checklist" | "advisories" | "replan" | "more"
@@ -129,6 +132,17 @@ export function PlanOverview({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const generatedCallbackRef = useRef(onPlanGenerated);
+
+  useEffect(() => {
+    if (!feedback || feedback.tone === "error" || isGenerating) return;
+    const timer = window.setTimeout(() => setFeedback(null), 4500);
+    return () => window.clearTimeout(timer);
+  }, [feedback, isGenerating]);
+
+  useEffect(() => {
+    generatedCallbackRef.current = onPlanGenerated;
+  }, [onPlanGenerated]);
 
   useEffect(() => {
     setPreviewPlan(selectedPlan);
@@ -142,7 +156,7 @@ export function PlanOverview({
 
   useEffect(() => {
     const view = new URL(window.location.href).searchParams.get("view");
-    if (view === "timeline" || view === "map" || view === "budget" || view === "more") {
+    if (view === "timeline" || view === "map" || view === "budget" || view === "more" || view === "transport") {
       setActiveTab(view);
       document.getElementById("plan-views")?.scrollIntoView({ block: "start" });
     }
@@ -182,7 +196,7 @@ export function PlanOverview({
   const advisoryData = useAdvisories(tripId, displayPlan);
   const openAdvisories = () => { setActiveTab("advisories"); document.getElementById("plan-views")?.scrollIntoView({ block: "start" }); };
   const canGenerate =
-    !isGenerating && requestState.confirmed && !requestState.hasUnsavedEdits;
+    !isGenerating && (requestState.confirmed || !displayPlan) && !requestState.hasUnsavedEdits;
   const days = useMemo(
     () =>
       displayPlan
@@ -236,23 +250,22 @@ export function PlanOverview({
       message: "正在生成基础行程...页面会保留当前计划，失败不会覆盖。",
     });
     try {
-      const response = await businessFetch(`/api/trips/${tripId}/plans/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          expectedRequestRevision: requestState.requestRevision,
-          expectedPlanVersion: currentPlan?.versionNumber ?? null,
-        }),
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        throw new Error(await readApiError(response));
+      if (!requestState.confirmed) {
+        await createTripWithPlan({ originalRequest, existingTripId: tripId,
+          fetcher: businessFetch, signal: controller.signal });
+        generatedCallbackRef.current?.();
+        router.replace(`/trips/${tripId}`, { scroll: false });
+        router.refresh();
+        setFeedback({ tone: "success", message: "行程已生成，旅程准备就绪。" });
+        return;
       }
-
-      const payload = (await response.json()) as {
-        plan: PlanVersionClient;
-      };
-      handlePlanSaved(payload.plan);
+      const payload = await generatePlanWithRetry({ tripId,
+        expectedRequestRevision: requestState.requestRevision,
+        expectedPlanVersion: currentPlan?.versionNumber ?? null,
+        fetcher: businessFetch, signal: controller.signal });
+      handlePlanSaved(payload.plan, true);
+      // Read the latest callback so edits typed during generation remain open.
+      generatedCallbackRef.current?.();
       setSelectedDayNumber(1);
       setFeedback({
         tone: payload.plan.validationResults.warnings.length > 0
@@ -288,13 +301,31 @@ export function PlanOverview({
     abortControllerRef.current?.abort();
   };
 
-  const handlePlanSaved = (savedPlan: PlanVersionClient) => {
+  const openRequirements = () => {
+    onOpenRequirements?.();
+    window.requestAnimationFrame(() => {
+      document.getElementById("request-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const handlePlanSaved = (savedPlan: PlanVersionClient, generated = false) => {
     setPreviewPlan(savedPlan);
     // A URL pinned to the old current version must not select that now-historic
     // version again after a successful save. Navigation fetches the new current
     // version; the unpinned route only needs its server data refreshed.
-    if (selectedVersionNumber !== null) {
-      router.replace(`/trips/${tripId}`, { scroll: false });
+    if (selectedVersionNumber !== null || generated) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("planVersion");
+      if (generated) {
+        url.searchParams.delete("editRequirements");
+        url.searchParams.delete("planningNotice");
+      }
+      const destination = `${url.pathname}${url.search}${url.hash}`;
+      if (destination !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+        router.replace(destination, { scroll: false });
+      } else {
+        router.refresh();
+      }
     } else {
       router.refresh();
     }
@@ -315,7 +346,13 @@ export function PlanOverview({
     setPendingTimelineScrollEventId(target === "timeline" ? eventId : null);
   }, [displayPlan]);
 
+  const handleCompanionSelect = useCallback((id: string) => {
+    const event = displayPlan?.events.find((item) => item.id === id);
+    if (event) handleEventSelect(id, "timeline", event.dayNumber);
+  }, [displayPlan, handleEventSelect]);
+
   const handleDayChange = useCallback((dayNumber: number) => {
+    setHoveredEventId(null);
     setSelectedDayNumber(dayNumber);
     setSelectedEventId((current) => {
       const event = displayPlan?.events.find((item) => item.id === current);
@@ -347,70 +384,23 @@ export function PlanOverview({
   return (
     <section
       aria-labelledby="plan-overview-title"
-      className="rounded-lg border border-sand/80 bg-white p-5 shadow-[0_1px_2px_rgba(35,42,38,0.06)] sm:p-6"
+      className={styles.workspace}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="flex items-center gap-2 text-sm font-medium text-sage">
-            <CalendarRange aria-hidden="true" className="size-4 shrink-0" />
-            行程总览
-          </p>
-          <h2
-            id="plan-overview-title"
-            className="mt-2 break-words text-2xl font-bold leading-8 text-charcoal"
-          >
-            {displayPlan
-              ? `计划版本 ${displayPlan.versionNumber}｜${tripTitle}`
-              : `${tripTitle}｜尚无基础计划`}
-          </h2>
-          {displayPlan ? (
-            <p className="mt-2 text-sm leading-6 text-graphite">
-              依据需求修订 {displayPlan.requestRevision} 的确认快照生成；
-              摘要、每日安排和待确认事项来自同一计划版本。
-            </p>
-          ) : null}
-        </div>
-        <div className="flex max-w-full shrink-0 flex-col items-end gap-2">
-          <span
-            className={`inline-flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
-              !displayPlan || (!displayPlan.isCurrent && !requiresUpdate)
-                ? "bg-shell text-graphite"
-                : requiresUpdate
-                  ? "bg-clay-soft text-clay"
-                  : "bg-sage-soft text-sage"
-            }`}
-          >
-            <CircleAlert aria-hidden="true" className="size-4" />
-            {statusLabel}
-          </span>
-          {requestState.hasUnsavedEdits ? (
-            <span className="inline-flex min-h-9 items-center rounded-md bg-clay-soft px-3 text-sm text-clay">
-              需求修改未保存
-            </span>
-          ) : null}
-          {plans.length > 1 ? (
-            <span className="inline-flex max-w-full flex-wrap items-center justify-end gap-2 text-sm text-graphite">
-              <History aria-hidden="true" className="size-4" />
-              历史版本：
-              {plans.map((plan) => (
-                <a
-                  key={plan.id}
-                  href={`/trips/${tripId}?planVersion=${plan.versionNumber}`}
-                  className={`rounded px-1 underline-offset-4 hover:underline ${
-                    plan.versionNumber === displayPlan?.versionNumber
-                      ? "font-semibold text-sage"
-                      : "text-graphite"
-                  }`}
-                >
-                  V{plan.versionNumber}
-                </a>
-              ))}
-            </span>
-          ) : null}
+      <div className={styles.workspaceHeading}>
+        <div><p className={styles.eyebrow}>YOUR TRAVEL JOURNAL</p><h2 id="plan-overview-title" className={styles.overviewTitle}><CalendarRange size={22} aria-hidden="true" />行程总览</h2></div>
+        <div className={styles.versionTools}>
+          {displayPlan && <details className={styles.versionMenu}>
+            <summary data-testid="plan-version-select" aria-label={`版本 V${displayPlan.versionNumber}`}>版本 V{displayPlan.versionNumber}<ChevronDown size={14} aria-hidden="true" /></summary>
+            <div className={styles.versionOptions}>{(plans.some((plan) => plan.versionNumber === displayPlan.versionNumber) ? plans : [displayPlan, ...plans]).map((plan) => <a key={plan.id} href={`/trips/${tripId}?planVersion=${plan.versionNumber}`} aria-current={plan.versionNumber === displayPlan.versionNumber ? "true" : undefined}>V{plan.versionNumber}<span>{plan.isCurrent ? "当前版本" : "历史版本"}</span></a>)}</div>
+          </details>}
+          {displayPlan && (!displayPlan.isCurrent || requiresUpdate) ? <span className={styles.statusNote}>{statusLabel}</span> : null}
+          {requestState.hasUnsavedEdits ? <span className={styles.statusNote}>需求修改未保存</span> : null}
         </div>
       </div>
 
       {displayPlan ? (
+        <details className={styles.snapshot}>
+          <summary>查看本版需求快照<ChevronDown aria-hidden="true" className="size-4" /></summary>
         <dl className="mt-5 grid gap-x-5 gap-y-4 border-y border-sand/80 py-4 sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <dt className="text-sm text-graphite">旅行标题</dt>
@@ -454,6 +444,7 @@ export function PlanOverview({
             </dd>
           </div>
         </dl>
+        </details>
       ) : null}
 
       {displayPlan && requiresUpdate ? (
@@ -462,17 +453,17 @@ export function PlanOverview({
         </p>
       ) : null}
 
-      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-        {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/execute`} className="inline-flex min-h-12 items-center justify-center rounded-lg bg-sage px-5 py-3 font-semibold text-white">进入旅行执行模式</Link>}
-        {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/mobile`} className="inline-flex min-h-12 items-center justify-center rounded-lg border border-sage px-5 py-3 font-semibold text-sage">手机一页版 · 离线保存</Link>}
-        {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/text`} className="inline-flex min-h-12 items-center justify-center rounded-lg border border-sage px-5 py-3 font-semibold text-sage">文字导出 · 复制与下载</Link>}
-        {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/pdf`} className="inline-flex min-h-12 items-center justify-center rounded-lg border border-sage px-5 py-3 font-semibold text-sage">PDF旅行手册 · 保存与打印</Link>}
-        {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/image`} className="inline-flex min-h-12 items-center justify-center rounded-lg border border-sage px-5 py-3 font-semibold text-sage">旅行长图 · 保存图片</Link>}
+      <div className={styles.toolbar} hidden={!displayPlan}>
+        {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/execute`} className={styles.primaryAction}>进入旅行执行模式</Link>}
+        <details name="trip-plan-actions" className={styles.actionMenu} open={displayPlan ? undefined : true}>
+          <summary hidden={!displayPlan}><SlidersHorizontal aria-hidden="true" className="size-4" />调整 / 重排行程<ChevronDown aria-hidden="true" className="size-4" /></summary>
+          <div className={displayPlan ? styles.actionMenuPanel : styles.initialActions}>
+            {displayPlan ? <button type="button" onClick={() => { setActiveTab("replan"); document.getElementById("plan-views")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className={styles.menuItem}>AI 重新规划</button> : null}
         <button
           type="button"
           onClick={generatePlan}
           disabled={!canGenerate}
-          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-sage px-5 py-3 text-base font-semibold text-white transition-colors hover:bg-focus disabled:cursor-not-allowed disabled:bg-graphite/70"
+          className={displayPlan ? styles.menuItem : styles.primaryAction}
         >
           <Sparkles aria-hidden="true" className="size-5" />
           {isGenerating
@@ -483,17 +474,23 @@ export function PlanOverview({
         </button>
         <a
           href="#request-workspace"
-          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md border border-sage px-5 py-3 text-base font-semibold text-sage transition-colors hover:bg-sage-soft"
+          onClick={(event) => { event.preventDefault(); openRequirements(); }}
+          className={displayPlan ? styles.menuItem : styles.secondaryAction}
         >
           <PencilLine aria-hidden="true" className="size-5" />
           修改需求
         </a>
-        <Link
-          href="/trips"
-          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md border border-sand px-5 py-3 text-base font-semibold text-graphite transition-colors hover:border-sage hover:text-sage"
-        >
-          返回旅行列表
-        </Link>
+          </div>
+        </details>
+        {displayPlan?.isCurrent ? <details name="trip-plan-actions" className={styles.actionMenu}>
+          <summary><Download aria-hidden="true" className="size-4" />导出随身资料<ChevronDown aria-hidden="true" className="size-4" /></summary>
+          <div className={styles.actionMenuPanel}>
+            <Link href={`/trips/${tripId}/mobile`} className={styles.menuItem}>手机一页版 · 离线保存</Link>
+            <Link href={`/trips/${tripId}/text`} className={styles.menuItem}>文字导出 · 复制与下载</Link>
+            <Link href={`/trips/${tripId}/pdf`} className={styles.menuItem}>PDF旅行手册 · 保存与打印</Link>
+            <Link href={`/trips/${tripId}/image`} className={styles.menuItem}>旅行长图 · 保存图片</Link>
+          </div>
+        </details> : null}
         {isGenerating ? (
           <button
             type="button"
@@ -506,9 +503,10 @@ export function PlanOverview({
         ) : null}
       </div>
 
-      <div
+      {feedback && displayPlan ? <div
+        role="status"
         aria-live="polite"
-        className={`mt-4 min-h-11 rounded-md px-4 py-3 text-base leading-7 ${
+        className={`${styles.feedback} ${
           feedback?.tone === "error"
             ? "bg-clay-soft text-clay"
             : feedback?.tone === "success"
@@ -516,27 +514,12 @@ export function PlanOverview({
               : "bg-shell text-graphite"
         }`}
       >
-        {feedback?.message ??
-          "生成会使用当前已确认的需求修订；生成期间需求或计划版本变化时，旧结果会被拒绝。"}
-      </div>
+        {feedback.message}
+      </div> : null}
 
       {displayPlan ? (
         <>
-          <RedlinePanel key={displayPlan.id} tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} />
-          {displayPlan.isCurrent && <AdvisorySummary data={advisoryData} onOpen={openAdvisories} />}
-          {displayPlan.validationResults.warnings.length > 0 ? (
-            <div className="mt-4 rounded-md bg-clay-soft p-4">
-              <h3 className="text-base font-semibold text-clay">
-                需要注意的校验结果
-              </h3>
-              <ul className="mt-2 space-y-1 text-sm leading-6 text-charcoal">
-                {displayPlan.validationResults.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
+          <RedlinePanel key={displayPlan.id} tripId={tripId} plan={displayPlan} onSaved={handlePlanSaved} onlyRisks={activeTab !== "transport"} />
           {displayPlan.validationResults.errors.length > 0 ? (
             <div className="mt-4 rounded-md border border-clay bg-clay-soft p-4">
               <h3 className="text-base font-semibold text-clay">
@@ -555,7 +538,7 @@ export function PlanOverview({
               <div
                 role="tablist"
                 aria-label="计划视图"
-                className="grid max-w-full grid-cols-2 gap-1 rounded-md border border-sand bg-cream p-1 sm:flex sm:flex-wrap"
+                className={styles.viewTabs}
               >
                 <button
                   type="button"
@@ -612,47 +595,16 @@ export function PlanOverview({
             </div>
 
             <div hidden={activeTab !== "timeline"} role="tabpanel" aria-label="每日时间轴">
-                <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-                  {days.map((day) => (
-                    <button
-                      key={day.dayNumber}
-                      type="button"
-                      onClick={() => handleDayChange(day.dayNumber)}
-                      aria-pressed={day.dayNumber === selectedDay?.dayNumber}
-                      className={`min-h-16 min-w-40 max-w-72 shrink-0 rounded-md border px-3 py-2 text-left transition-colors ${
-                        day.dayNumber === selectedDay?.dayNumber
-                          ? "border-sage bg-sage-soft text-sage"
-                          : "border-sand bg-cream text-graphite hover:border-sage"
-                      }`}
-                    >
-                      <span className="block text-sm font-semibold">
-                        第 {day.dayNumber} 天｜{day.date}
-                      </span>
-                      <span className="mt-1 block break-words text-sm leading-5">
-                        {day.theme}｜{day.events.length} 项
-                      </span>
-                    </button>
-                  ))}
+              <div className={styles.chapters} aria-label="选择行程日期">{days.map((day) => <button key={day.dayNumber} type="button" onClick={() => handleDayChange(day.dayNumber)} aria-pressed={day.dayNumber === selectedDay?.dayNumber} aria-label={`第 ${day.dayNumber} 天｜${day.date}｜${day.theme}`} className={styles.chapter}>
+                <span className={styles.chapterNumber}>Day {String(day.dayNumber).padStart(2, "0")}</span><span className={styles.chapterInfo}><strong>{day.theme}</strong><span>{day.date.slice(5).replace("-", ".")} · {day.events.length} 项安排</span></span>
+              </button>)}</div>
+              {selectedDay ? <div className={styles.companionLayout}>
+                <div className={styles.timelineColumn}>
+                  <div className={styles.dayHeading}><h4>{selectedDay.theme}</h4><span>{selectedDay.date}</span></div>
+                  <PlanTimeline tripId={tripId} plan={displayPlan} day={selectedDay} onSaved={handlePlanSaved} selectedEventId={selectedEventId} highlightedEventId={hoveredEventId} onEventHover={setHoveredEventId} onEventSelect={handleEventSelect} advisories={advisoryData.view?.items ?? []} onAdvisories={openAdvisories} />
                 </div>
-
-                {selectedDay ? (
-                  <>
-                    <h4 className="mt-5 text-lg font-semibold text-charcoal">
-                      第 {selectedDay.dayNumber} 天｜{selectedDay.date}｜
-                      {selectedDay.theme}
-                    </h4>
-                    <PlanTimeline
-                      tripId={tripId}
-                      plan={displayPlan}
-                      day={selectedDay}
-                      onSaved={handlePlanSaved}
-                      selectedEventId={selectedEventId}
-                      onEventSelect={handleEventSelect}
-                      advisories={advisoryData.view?.items ?? []}
-                      onAdvisories={openAdvisories}
-                    />
-                  </>
-                ) : null}
+                <PlanCompanion plan={displayPlan} day={selectedDay} selectedEventId={selectedEventId} highlightedEventId={hoveredEventId} onEventHover={setHoveredEventId} advisories={advisoryData} onEventSelect={handleCompanionSelect} onMap={() => setActiveTab("map")} onBudget={() => setActiveTab("budget")} onAdvisories={openAdvisories} />
+              </div> : null}
             </div>
             <div hidden={activeTab !== "map"} role="tabpanel" aria-label="地图">
               {hasOpenedMap || activeTab === "map" ? (
@@ -664,7 +616,7 @@ export function PlanOverview({
               {(hasOpenedChecklist || activeTab === "checklist") && <ChecklistPanel key={displayPlan.id} tripId={tripId} plan={displayPlan} onEvent={handleEventSelect} advisories={advisoryData.view?.items ?? []} onAdvisories={openAdvisories} focusId={checklistFocusId} />}
             </div>
             {activeTab === "advisories" && <div role="tabpanel" aria-label="行程提醒"><AdvisoryPanel data={advisoryData} plan={displayPlan} onEvent={handleEventSelect} onChecklist={(id) => { setChecklistFocusId(id); setActiveTab("checklist"); }} /></div>}
-            {activeTab === "replan" && <div role="tabpanel" aria-label="AI 重新规划"><ReplanPanel key={displayPlan.id} tripId={tripId} plan={displayPlan} requestState={requestState} onSaved={handlePlanSaved} /></div>}
+            {activeTab === "replan" && <div role="tabpanel" aria-label="AI 重新规划"><ReplanPanel key={displayPlan.id} tripId={tripId} plan={displayPlan} requestState={requestState} onSaved={handlePlanSaved} onOpenRequirements={openRequirements} /></div>}
             {activeTab === "more" && <div role="tabpanel" aria-label="更多" className="grid gap-3 py-4"><Link href={`/trips/${tripId}/execute`} className="min-h-12 rounded-lg bg-sage px-4 py-3 font-semibold text-white">进入旅行执行模式</Link>{([["replan", "AI 重新规划"], ["transport", "门到门交通"], ["advisories", "行程提醒"], ["accommodation", "住宿推荐"]] as const).map(([view, title]) => <button key={view} className="min-h-12 rounded-lg border border-sand px-4 py-3 text-left font-semibold" onClick={() => setActiveTab(view)}>{title}</button>)}</div>}
             {activeTab !== "checklist" && <button type="button" className="mt-4 inline-flex min-h-12 items-center gap-2 rounded-lg border border-sage px-4 py-3 font-semibold text-sage sm:hidden" onClick={() => { setActiveTab("checklist"); document.getElementById("plan-views")?.scrollIntoView({ block: "start" }); }}><ListChecks className="size-5" aria-hidden="true" />打开出发前清单</button>}
             <TripBottomNav tripId={tripId} active={activeTab} onSelect={(view) => { setActiveTab(view); document.getElementById("plan-views")?.scrollIntoView({ block: "start" }); }} />
@@ -688,30 +640,18 @@ export function PlanOverview({
             </div>
           </div>
 
-          <div className="mt-6 rounded-md bg-shell p-4">
-            <h3 className="flex items-center gap-2 text-base font-semibold text-charcoal">
-              <ListChecks aria-hidden="true" className="size-4 text-sage" />
-              待确认事项（{displayPlan.pendingItems.length}）
-            </h3>
-            <ul className="mt-2 space-y-2 text-sm leading-6 text-graphite">
-              {displayPlan.pendingItems.map((item) => (
-                <li key={item.id}>
-                  <strong className="text-charcoal">{item.title}</strong>
-                  <span className="ml-2">{item.reason}</span>
-                  {item.requiredBefore ? (
-                    <span className="ml-2 text-sage">
-                      建议在 {item.requiredBefore} 前确认
-                    </span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </div>
         </>
       ) : (
-        <p className="mt-5 rounded-md bg-shell px-4 py-3 text-base leading-7 text-graphite">
-          当前还没有保存的基础计划。确认需求修订后，可以生成包含去返程、餐饮、活动、休息、住宿区域和准备事项的基础草稿。
-        </p>
+        <div className={styles.emptyPlan}>
+          <div className={styles.emptyIcon}><Sparkles size={30} strokeWidth={1.3} aria-hidden="true" /></div>
+          <p className={styles.eyebrow}>A JOURNEY IN THE MAKING</p>
+          <h3>你的旅行想法，已妥善收藏</h3>
+          <p>{planningNotice || "行程还在等待成形。轻点下方按钮，我们会接着为你安排一路的风景与停留。"}</p>
+          <button type="button" onClick={generatePlan} disabled={!canGenerate} className={styles.primaryAction}><Sparkles size={17} aria-hidden="true" />{isGenerating ? `正在生成... ${elapsedSeconds} 秒` : "一键重试生成行程"}</button>
+          {isGenerating ? <button type="button" onClick={cancelGeneration} className={styles.textAction}>取消生成</button> : null}
+          {feedback ? <p role={feedback.tone === "error" ? "alert" : "status"} className={feedback.tone === "error" ? styles.emptyError : styles.emptyStatus}>{feedback.message}</p> : null}
+          <span className={styles.emptyFootnote}>需要调整想法时，可使用右上角的「修改需求 / 重新生成」。</span>
+        </div>
       )}
     </section>
   );

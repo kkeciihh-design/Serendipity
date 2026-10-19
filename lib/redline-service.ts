@@ -1,7 +1,7 @@
 import type { PlanVersionRecord } from "./plan-service";
 import { planEventEnd, planEventStart } from "./plan";
 import { defaultRedlinePreferences } from "./redline-preferences";
-import { isActiveTicket, type Ticket } from "./tickets";
+import { isActiveTicket, isTicketAccessEvent, type Ticket } from "./tickets";
 import { readCachedRoute, routeCacheKey, writeCachedRoute, type RouteLeg } from "./routes";
 import { cityRouteOriginIssue } from "./route-origin";
 import { forwardCheck, isoAt, routeApplies, type RedlineDeadline, type RedlineInput, type RedlineStep, type TimingRoute } from "./redlines";
@@ -83,7 +83,7 @@ export function ticketRedlineInput(plan: PlanVersionRecord, ticket: Ticket): Red
   // route's total may be excluded. Preparation and unrelated travel still
   // occupy time, including an earlier long event ending after a later one.
   const occupiedUntil = plan.events.filter((event) => event.id !== ticket.eventId && departure !== null &&
-    planEventStart(event).getTime() <= departure).filter((event) => !(
+    planEventStart(event).getTime() <= departure).filter((event) => !isTicketAccessEvent(event, ticket)).filter((event) => !(
     event.type === "local_transport" && linked?.transportEventIds?.includes(event.id) &&
     linked.status !== "unavailable" && linked.includedTimes.length > 0 && !linked.manualReference?.requiresReconfirmation &&
     routeStart !== null && routeEnd !== null && planEventStart(event).getTime() >= routeStart &&

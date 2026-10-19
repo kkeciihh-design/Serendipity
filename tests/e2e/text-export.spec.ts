@@ -115,7 +115,7 @@ test("empty state, API validation, stale versions, access isolation and applicat
   const empty = (await (await request.post("/api/trips", { data: { originalRequest: "没有计划的文字导出测试" } })).json()).trip;
   await page.goto(`/trips/${empty.id}/text`); await expect(page.getByText("还没有已保存的计划，请返回旅行先生成。")).toBeVisible(); await expect(page.getByRole("button", { name: "生成文字预览" })).toBeDisabled();
   const trip = await seed(request), url = `/api/trips/${trip.id}/exports`;
-  for (const data of [{ format: "pdf", expectedPlanVersion: 1, options: {} }, { format: "plain-text", expectedPlanVersion: 99, options: {} }, { format: "markdown", expectedPlanVersion: 1, options: { includeSeats: "false" } }, { format: "plain-text", expectedPlanVersion: 1, options: { dates: ["1999-01-01"] } }]) expect((await request.post(url, { data })).status()).toBeGreaterThanOrEqual(400);
+  for (const data of [{ format: "docx", expectedPlanVersion: 1, options: {} }, { format: "plain-text", expectedPlanVersion: 99, options: {} }, { format: "markdown", expectedPlanVersion: 1, options: { includeSeats: "false" } }, { format: "plain-text", expectedPlanVersion: 1, options: { dates: ["1999-01-01"] } }]) expect((await request.post(url, { data })).status()).toBeGreaterThanOrEqual(400);
   expect((await request.post(url, { headers: { Origin: "https://foreign.invalid" }, data: { format: "plain-text", expectedPlanVersion: 1, options: {} } })).status()).toBe(403);
   expect((await request.get(`${url}?kind=text`, { headers: { Host: "untrusted.invalid" } })).status()).toBe(401);
   expect(await db.exportFile.count({ where: { tripId: trip.id } })).toBe(0);

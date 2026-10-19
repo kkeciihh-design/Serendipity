@@ -29,19 +29,21 @@ export const mapMarkerEventSchema = z.object({
   id: z.string().min(1).max(80),
   visitNumber: z.number().int().min(1).max(64),
   visitLabel: z.literal("宿").optional(),
-  title: z.string().min(1).max(120),
+  title: z.string().min(1).max(240),
   timeRange: z.string().min(1).max(40),
 });
 
 export const mapMarkerSchema = z.object({
   placeId: z.string().min(1).max(120),
-  name: z.string().min(1).max(160),
+  name: z.string().min(1).max(240),
   city: z.string().min(1).max(100),
   address: z.string().max(300),
   precision: z.enum(["poi", "area_reference"]),
   coordinateSystem: z.enum(["GCJ-02", "WGS84"]),
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
+  illustrative: z.boolean().optional(),
+  geographic: z.boolean().optional(),
   events: z.array(mapMarkerEventSchema).min(1).max(64),
 });
 
@@ -52,6 +54,7 @@ export const mapRouteSchema = z.object({
   mode: z.enum(["walking", "public_transit", "driving"]),
   status: z.enum(["verified", "estimated", "pending_confirmation", "unavailable"]),
   coordinateSystem: z.enum(["WGS84", "GCJ-02"]),
+  illustrative: z.boolean().optional(),
   polyline: z.array(z.object({
     latitude: z.number().min(-90).max(90),
     longitude: z.number().min(-180).max(180),

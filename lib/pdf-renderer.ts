@@ -1,4 +1,5 @@
-import { chromium, type Browser } from "playwright";
+import type { Browser } from "playwright";
+import { launchExportBrowser } from "./export-browser";
 import { ExportError } from "./export-snapshot";
 import { PDF_LIMITS as limits, type PdfManifest } from "./pdf";
 
@@ -11,7 +12,7 @@ export async function printPdf(html: string, signal?: AbortSignal): Promise<PdfM
   try {
     if (signal?.aborted) throw new ExportError("PDF生成已取消。", 409);
     if (Buffer.byteLength(html) > limits.htmlBytes) throw new ExportError("PDF资料超出本机上限，请减少所选日期。");
-    browser = await chromium.launch({ headless: true, timeout: 15_000, chromiumSandbox: true });
+    browser = await launchExportBrowser();
     if (stopped) throw new ExportError("PDF生成超时或已取消，请重试。", 503);
     const context = await browser.newContext({ viewport: { width: 800, height: 1123 }, serviceWorkers: "block", acceptDownloads: false });
     await context.route("**/*", (route) => route.abort());
@@ -24,7 +25,7 @@ export async function printPdf(html: string, signal?: AbortSignal): Promise<PdfM
       if (!(await document.fonts.load('12px "Noto Sans SC"', text)).length || !document.fonts.check('12px "Noto Sans SC"', text)) throw new Error("FONT_MISSING");
       await Promise.all([...document.images].map(async (img) => { await img.decode(); if (!img.naturalWidth) throw new Error("IMAGE_MISSING"); }));
       if (!document.querySelector(".event") || !document.querySelector("#checklist")) throw new Error("EMPTY_DOCUMENT");
-      if (document.body.dataset.pdfMode === "complete" && [...document.querySelectorAll(".day")].some((day) => !day.querySelector("svg"))) throw new Error("MAP_MISSING");
+      if (document.body.dataset.pdfMode === "complete" && [...document.querySelectorAll(".day")].some((day) => !day.querySelector("svg,.map-unavailable"))) throw new Error("MAP_MISSING");
     });
     const metadata = await page.evaluate((maxPages) => {
       const originalText = (document.body.textContent ?? "").replace(/\s/g, "");
@@ -32,21 +33,30 @@ export async function printPdf(html: string, signal?: AbortSignal): Promise<PdfM
       const header = document.querySelector<HTMLElement>("body>header")!;
       const version = [...header.querySelectorAll("p")].find((p) => p.textContent?.startsWith("计划 V"))!.textContent!;
       const title = header.querySelector("h1")!.textContent!;
-      const units: { node: HTMLElement; chapter?: string; fresh?: boolean }[] = [{ node: header, chapter: "封面", fresh: true }];
+      const units: { node: HTMLElement; chapter?: string; fresh?: boolean }[] = [{ node: header, chapter: "旅行总览" }];
       for (const section of [...document.querySelectorAll<HTMLElement>("main>section")]) {
         const heading = section.querySelector<HTMLElement>("h2")!;
         const chapter = heading.textContent!;
         if (section.classList.contains("day")) {
           const visuals = [...section.querySelector<HTMLElement>(".visuals")!.children] as HTMLElement[];
-          const first = document.createElement("section"); first.append(heading, visuals.shift()!);
-          units.push({ node: first, chapter, fresh: true }, ...visuals.map((node) => ({ node, chapter })));
+          const first = document.createElement("section"); first.append(heading, ...[...section.children].filter((node) => node.matches(".weather")), visuals.shift()!);
+          units.push({ node: first, chapter }, ...visuals.map((node) => ({ node, chapter })));
           const events = [...section.querySelectorAll<HTMLElement>(".timeline>.event")];
-          units.push(...events.map((node, i) => ({ node, chapter: `${chapter} · 时间轴`, fresh: i === 0 })));
+          units.push(...events.map((node) => ({ node, chapter: `${chapter} · 时间轴` })));
         } else {
-          const children = [...section.children] as HTMLElement[];
+          const children = [...section.children].flatMap((node) => {
+            if (!node.classList.contains("cost-grid")) return [node as HTMLElement];
+            // Treat each pair of compact expense rows as one page unit. A
+            // complete grid would strand its heading above a large blank area.
+            const costs = [...node.children], rows: HTMLElement[] = [];
+            for (let i = 0; i < costs.length; i += 2) {
+              const row = document.createElement("div"); row.className = "cost-grid";
+              row.append(...costs.slice(i, i + 2)); rows.push(row);
+            }
+            return rows;
+          });
           const first = document.createElement("section"); first.append(...children.splice(0, 2));
-          const startsChapter = /^(旅行总览|景点推荐|全程预算|出发前清单|资料来源)/.test(chapter);
-          units.push({ node: first, chapter, fresh: startsChapter }, ...children.map((node) => ({ node, chapter })));
+          units.push({ node: first, chapter, fresh: false }, ...children.map((node) => ({ node, chapter })));
         }
       }
       units.push({ node: document.querySelector<HTMLElement>("body>footer")!, chapter: "资料结束" });

@@ -69,11 +69,12 @@ function keepFocusInDialog(event: KeyboardEvent<HTMLDialogElement>) {
   }
 }
 
-export function SampleTripDialog({ trip, issue, mode, onClose }: {
+export function SampleTripDialog({ trip, issue, mode, onClose, onStartPlanning }: {
   trip: SampleTrip;
   issue?: string;
   mode: "photo" | "sketch";
   onClose: () => void;
+  onStartPlanning: () => void;
 }) {
   const id = useId();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -216,6 +217,10 @@ export function SampleTripDialog({ trip, issue, mode, onClose }: {
           <p id={`${id}-note`} className={styles.sampleNote}>内置参考样本 · 时段、交通耗时与费用均为规划估算；请按实际出发日期确认开放、预约、票价与班次。</p>
         </div>
       </div>
+      <footer className={styles.planningFooter}>
+        <p>把这份灵感，写成你的旅程<span>填入旅行想法后，还可以自由调整。</span></p>
+        <button type="button" className={styles.planButton} onClick={onStartPlanning}>以此样本开启规划 <span aria-hidden="true">→</span></button>
+      </footer>
     </dialog>
   );
 }

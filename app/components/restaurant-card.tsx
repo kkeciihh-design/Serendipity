@@ -1,7 +1,7 @@
 "use client";
 import { businessFetch } from "@/lib/business-fetch";
 
-import { BookOpenCheck, Check, ChevronRight, CircleAlert, RefreshCw, Route, Utensils, X } from "lucide-react";
+import { BookOpenCheck, Check, ChevronRight, CircleAlert, MapPin, RefreshCw, Route, Utensils, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { formatMoneyRange } from "@/lib/budget";
 import type { PlanEvent } from "@/lib/plan";
@@ -9,6 +9,7 @@ import type { MealPricing, RestaurantCard, RestaurantPreview, RestaurantRecommen
 import type { PlanVersionClient } from "./plan-overview";
 import { dateLabel, FactBox, Gallery, Photo, SourceLink } from "./recommendation-ui";
 import { RouteSummary } from "./route-summary";
+import styles from "./plan-timeline.module.css";
 
 type Feedback = { error: boolean; message: string };
 type Action = "preview" | "apply";
@@ -105,7 +106,7 @@ function MealDrawer({ event, visitLabel, data, loading, feedback, busy, preview,
   </dialog>;
 }
 
-export function RestaurantTimelineCard({ tripId, plan, event, visitLabel, onSaved }: { tripId: string; plan: PlanVersionClient; event: PlanEvent; visitLabel: string; onSaved: (plan: PlanVersionClient) => void }) {
+export function RestaurantTimelineCard({ tripId, plan, event, visitLabel, onSaved, onMap, compact = false }: { tripId: string; plan: PlanVersionClient; event: PlanEvent; visitLabel: string; onSaved: (plan: PlanVersionClient) => void; onMap: () => void; compact?: boolean }) {
   const [data, setData] = useState<RestaurantRecommendations | null>(null), [loading, setLoading] = useState(true), [open, setOpen] = useState(false), [retry, setRetry] = useState(0);
   const [feedback, setFeedback] = useState<Feedback | null>(null), [busy, setBusy] = useState<Action | null>(null), [preview, setPreview] = useState<RestaurantPreview | null>(null);
   const scope = `${tripId}/${plan.id}/${event.id}`, endpoint = `/api/trips/${tripId}/plans/${plan.versionNumber}/restaurants`;
@@ -153,5 +154,20 @@ export function RestaurantTimelineCard({ tripId, plan, event, visitLabel, onSave
   };
   const close = () => { if (busy === "apply") return; if (busy === "preview") { requestRef.current?.abort(); setBusy(null); setFeedback(null); } setPreview(null); setOpen(false); };
   const photo = data?.current?.images[0] ?? null;
-  return <><div className="flex items-center gap-3 rounded-md border border-sand/80 bg-cream p-3 sm:gap-4"><Photo key={photo?.id ?? "missing"} photo={photo} compact /><div className="min-w-0 flex-1"><p className="text-sm font-semibold">餐厅小档案{event.restaurantSelection ? " · 已选择" : ""}</p><p className="mt-1 text-sm leading-6 text-graphite">{loading ? "正在读取菜品与用餐资料…" : data ? `${data.pricing.dinerCount}人用餐 · 本餐合计${formatMoneyRange(data.currentMealTotal.minCents, data.currentMealTotal.maxCents)} · ${data.current?.queueText ?? "暂无可靠排队信息"}` : "资料暂时不可用，可打开后重试。"}</p><button onClick={() => setOpen(true)} aria-label={`查看餐厅详情：${event.title}`} aria-haspopup="dialog" className="mt-1 inline-flex min-h-11 items-center gap-1.5 px-1 text-sm font-semibold text-sage">查看餐厅与候选<ChevronRight aria-hidden="true" className="size-4" /></button></div></div>{open ? <MealDrawer event={event} visitLabel={visitLabel} data={data} loading={loading} feedback={feedback} busy={busy} preview={preview} onRetry={() => setRetry((value) => value + 1)} onAction={(action, candidateId, pricing) => void perform(action, candidateId, pricing)} onCancelPreview={() => { setPreview(null); setFeedback(null); }} onClose={close} /> : null}</>;
+  return <>
+    {compact ? <div className={styles.recommendationCompact}>
+      <button type="button" onClick={() => setOpen(true)} aria-label={`查看餐厅详情：${event.title}`} aria-haspopup="dialog" title="查看餐厅与候选" className={styles.compactLink}><ChevronRight aria-hidden="true" className="size-3.5" /></button>
+      <button type="button" onClick={onMap} aria-label={`定位地图：${visitLabel}${event.title}`} title="地图与详情" className={styles.compactLink}><MapPin aria-hidden="true" className="size-3.5" /></button>
+    </div> : <div className={styles.recommendation}>
+      <Photo key={photo?.id ?? "missing"} photo={photo} compact />
+      <div className={styles.recommendationBody}>
+        {data ? <p>{data.pricing.dinerCount} 人用餐 · 本餐合计 {formatMoneyRange(data.currentMealTotal.minCents, data.currentMealTotal.maxCents)}{data.current?.queueText ? ` · ${data.current.queueText}` : ""}</p> : null}
+        <div className={styles.recommendationActions}>
+          <button type="button" onClick={() => setOpen(true)} aria-label={`查看餐厅详情：${event.title}`} aria-haspopup="dialog" className={styles.recommendationLink}>查看餐厅与候选<ChevronRight aria-hidden="true" className="size-4" /></button>
+          <button type="button" onClick={onMap} aria-label={`定位地图：${visitLabel}${event.title}`} className={styles.mapLink}><MapPin aria-hidden="true" className="size-4" />地图与详情</button>
+        </div>
+      </div>
+    </div>}
+    {open ? <MealDrawer event={event} visitLabel={visitLabel} data={data} loading={loading} feedback={feedback} busy={busy} preview={preview} onRetry={() => setRetry((value) => value + 1)} onAction={(action, candidateId, pricing) => void perform(action, candidateId, pricing)} onCancelPreview={() => { setPreview(null); setFeedback(null); }} onClose={close} /> : null}
+  </>;
 }

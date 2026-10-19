@@ -1,0 +1,488 @@
+.timeline {
+  --rail-width: 5.5rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+  margin-top: 1.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline::before {
+  position: absolute;
+  top: 1.5rem;
+  bottom: 1.5rem;
+  left: calc(var(--rail-width) - .35rem);
+  width: 1px;
+  background: #e2e5d9;
+  content: "";
+}
+
+.timeline > li {
+  position: relative;
+  min-width: 0;
+  flex: none;
+}
+
+.eventCard {
+  position: relative;
+  display: block;
+  border: 1px solid #e5dfd1;
+  border-radius: 1rem;
+  background: #fffefa;
+  box-shadow: 0 5px 18px rgb(82 69 44 / 3%);
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.eventCard[data-selected="true"],
+.eventCard[data-highlighted="true"] {
+  border-color: #8c9a70;
+  box-shadow: 0 0 0 2px rgb(105 127 72 / 9%);
+}
+
+.eventMain {
+  display: grid;
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  width: 100%;
+  gap: .8rem;
+  align-items: start;
+  padding: 1.25rem 1.25rem .9rem 1rem;
+  text-align: left;
+}
+
+.eventMain:hover {
+  background: #fafaf3;
+}
+
+.eventMain:focus-visible,
+.mapLink:focus-visible,
+.recommendationLink:focus-visible,
+.compactLink:focus-visible {
+  outline: 2px solid var(--color-sage);
+  outline-offset: -3px;
+}
+
+.timeRail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: .55rem;
+  padding-top: .2rem;
+}
+
+.timeRange {
+  color: #63704b;
+  font-size: .7rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+
+.categoryBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  border-radius: 999px;
+  padding: .3rem .5rem;
+  color: #657448;
+  background: #eff2e7;
+  font-size: .7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.categoryBadge[data-category="food"] {
+  color: #a47443;
+  background: #f8eee0;
+}
+
+.categoryBadge[data-category="stay"] {
+  color: #7c7394;
+  background: #f1edf6;
+}
+
+.eventBody {
+  display: block;
+  min-width: 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .7rem;
+}
+
+.eventTitle {
+  min-width: 0;
+  color: #3e4435;
+  font-size: 1.12rem;
+  font-weight: 650;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.statusBadge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: .3rem;
+  margin-top: .3rem;
+  color: #8b8b79;
+  font-size: .63rem;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.statusBadge::before {
+  width: .3rem;
+  height: .3rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  content: "";
+}
+
+.statusBadge[data-status="verified"] {
+  color: #68784f;
+}
+
+.statusBadge[data-status="verified"]::before {
+  background: currentColor;
+}
+
+.statusBadge[data-status="conflict"],
+.statusBadge[data-status="stale"] {
+  color: var(--color-clay);
+}
+
+.eventLocation {
+  display: block;
+  margin-top: .2rem;
+  color: #90917f;
+  font-size: .74rem;
+  line-height: 1.6;
+}
+
+.eventNote {
+  display: block;
+  margin-top: .4rem;
+  color: #626653;
+  font-size: .8rem;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.costRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .65rem;
+  margin-top: .65rem;
+  color: #7b7e69;
+  font-size: .73rem;
+  line-height: 1.6;
+}
+
+.cost,
+.locked {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+}
+
+.locked {
+  color: #7b785e;
+  font-size: .7rem;
+}
+
+.recommendation {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  margin-left: calc(var(--rail-width) + 1.8rem);
+  padding: 0 1.25rem .8rem 0;
+}
+
+.recommendation > img {
+  width: 4.75rem;
+  height: 4.75rem;
+  border-radius: .65rem;
+}
+
+.recommendationBody {
+  min-width: 0;
+  flex: 1;
+  color: #888774;
+  font-size: .75rem;
+  line-height: 1.8;
+}
+
+.recommendationBody > p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.recommendationActions,
+.eventFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem .8rem;
+}
+
+.eventFooter {
+  margin-left: calc(var(--rail-width) + 1.8rem);
+  padding: 0 1.25rem .5rem 0;
+}
+
+.recommendationLink,
+.mapLink {
+  display: inline-flex;
+  min-height: 2.25rem;
+  align-items: center;
+  gap: .25rem;
+  color: #75815b;
+  font-size: .7rem;
+  font-weight: 550;
+}
+
+.compactCard {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: .2rem;
+  border: 1px solid transparent;
+  border-radius: .7rem;
+  padding-right: .45rem;
+  background: #f2f3eb;
+  box-shadow: none;
+}
+
+.compactCard[data-selected="true"] {
+  border-color: #a6b28e;
+  background: #edf0e5;
+}
+
+.compactCard .eventMain {
+  display: flex;
+  min-width: 0;
+  min-height: 3.15rem;
+  flex: 1;
+  align-items: center;
+  gap: .65rem;
+  padding: .45rem .1rem .45rem 1rem;
+}
+
+.compactTime {
+  width: var(--rail-width);
+  flex: none;
+  color: #92977f;
+  font-size: .67rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+
+.compactIcon {
+  width: .9rem;
+  height: .9rem;
+  flex: none;
+  color: #92997e;
+}
+
+.compactTitle {
+  min-width: 0;
+  flex: 1;
+  color: #7c816c;
+  font-size: .75rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.compactCost {
+  color: #959983;
+  font-size: .65rem;
+  white-space: nowrap;
+}
+
+.compactLink {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #879170;
+}
+
+.compactLink:hover {
+  color: var(--color-sage);
+  background: #e8eddf;
+}
+
+.compactActions,
+.recommendationCompact {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+
+.compactCard .statusBadge {
+  margin: 0 .1rem;
+}
+
+.compactCard .locked {
+  font-size: 0;
+}
+
+.connection,
+.routeConnection {
+  min-width: 0;
+  margin: .3rem 0 0 calc(var(--rail-width) + 1rem);
+  color: #a0a38f;
+  font-size: .66rem;
+  line-height: 1.6;
+}
+
+.connection {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .2rem 0;
+}
+
+.connection[data-conflict="true"] {
+  color: var(--color-clay);
+}
+
+.routeConnection > summary {
+  display: flex;
+  min-height: 1.75rem;
+  align-items: center;
+  gap: .45rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.routeConnection > summary::-webkit-details-marker {
+  display: none;
+}
+
+.routeConnection[open] > summary {
+  color: var(--color-sage);
+}
+
+.advisory {
+  position: static;
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  align-items: center;
+  gap: .4rem;
+  padding: .6rem 1rem;
+  color: var(--color-clay);
+  background: #fbf2e6;
+  font-size: .72rem;
+  line-height: 1.7;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.visitBadge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: #466855;
+  color: white;
+  font-size: 1.2rem;
+  line-height: 1;
+  box-shadow: 0 1px 5px #0002;
+}
+
+.briefingCard { background: #f2f3eb; border-color: transparent; box-shadow: none; }
+.briefingCard .eventMain { grid-template-columns: auto minmax(0, 1fr); align-items: center; padding: .7rem 1rem; }
+.briefingBody { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .6rem; color: #737b66; font-size: .75rem; line-height: 1.75; overflow-wrap: anywhere; }
+.briefingBody strong { font-weight: 500; color: #52634b; }
+.briefingLabel { font-size: .65rem; color: #7c876e; }
+.briefingCard .advisory { border-radius: 0 0 1rem 1rem; }
+
+@media (max-width: 639px) {
+  .timeline {
+    --rail-width: 4.7rem;
+    gap: .6rem;
+  }
+
+  .eventMain {
+    gap: .65rem;
+    padding: 1rem .85rem .65rem .7rem;
+  }
+
+  .titleRow {
+    flex-wrap: wrap;
+    gap: .1rem .4rem;
+  }
+
+  .eventTitle {
+    font-size: 1rem;
+  }
+
+  .timeRange {
+    font-size: .63rem;
+  }
+
+  .recommendation,
+  .eventFooter {
+    margin-left: calc(var(--rail-width) + 1.35rem);
+    padding-right: .85rem;
+  }
+
+  .recommendation {
+    flex-wrap: wrap;
+  }
+
+  .recommendation > img {
+    width: 100%;
+    height: 7rem;
+  }
+
+  .recommendationBody {
+    flex-basis: 100%;
+  }
+
+  .recommendationActions {
+    gap: 0 .75rem;
+  }
+
+  .compactCard .eventMain {
+    gap: .4rem;
+    padding-left: .65rem;
+  }
+
+  .compactIcon,
+  .compactCost,
+  .compactCard .statusBadge {
+    display: none;
+  }
+
+  .compactTitle {
+    font-size: .7rem;
+  }
+
+  .compactTime {
+    font-size: .61rem;
+  }
+
+  .compactLink {
+    width: 1.75rem;
+  }
+}

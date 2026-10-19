@@ -1,7 +1,7 @@
 "use client";
 import { businessFetch } from "@/lib/business-fetch";
 
-import { BookOpenCheck, Check, ChevronRight, CircleAlert, Clock3, RefreshCw, Route, Sparkles, X } from "lucide-react";
+import { BookOpenCheck, Check, ChevronRight, CircleAlert, Clock3, MapPin, RefreshCw, Route, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AttractionCard, AttractionRecommendations, AttractionReplacementPreview } from "@/lib/attractions";
 import { formatMoneyRange, type BudgetSummary } from "@/lib/budget";
@@ -9,6 +9,7 @@ import type { PlanEvent } from "@/lib/plan";
 import { dateLabel, Photo, SourceLink, FactBox, Gallery } from "./recommendation-ui";
 import type { PlanVersionClient } from "./plan-overview";
 import { RouteSummary } from "./route-summary";
+import styles from "./plan-timeline.module.css";
 
 type Feedback = { error: boolean; message: string };
 type Action = "preview" | "apply" | "keep";
@@ -128,8 +129,8 @@ function AttractionDrawer({ event, visitLabel, data, loading, feedback, busy, pr
   </dialog>;
 }
 
-export function AttractionTimelineCard({ tripId, plan, event, visitLabel, onSaved }: {
-  tripId: string; plan: PlanVersionClient; event: PlanEvent; visitLabel: string; onSaved: (plan: PlanVersionClient) => void;
+export function AttractionTimelineCard({ tripId, plan, event, visitLabel, onSaved, onMap, compact = false }: {
+  tripId: string; plan: PlanVersionClient; event: PlanEvent; visitLabel: string; onSaved: (plan: PlanVersionClient) => void; onMap: () => void; compact?: boolean;
 }) {
   const [data, setData] = useState<AttractionRecommendations | null>(null);
   const [loading, setLoading] = useState(true);
@@ -222,14 +223,19 @@ export function AttractionTimelineCard({ tripId, plan, event, visitLabel, onSave
   const photo = data?.current?.images.find((item) => item.entryId === data.current?.id && item.entityName === data.current?.name && item.displayAllowed) ?? null;
 
   return <>
-    <div className="flex items-center gap-3 rounded-md border border-sand/80 bg-cream p-3 sm:gap-4">
+    {compact ? <div className={styles.recommendationCompact}>
+      <button type="button" onClick={() => setOpen(true)} aria-label={`查看景点详情：${event.title}`} aria-haspopup="dialog" title="查看景点与候选" className={styles.compactLink}><ChevronRight aria-hidden="true" className="size-3.5" /></button>
+      <button type="button" onClick={onMap} aria-label={`定位地图：${visitLabel}${event.title}`} title="地图与详情" className={styles.compactLink}><MapPin aria-hidden="true" className="size-3.5" /></button>
+    </div> : <div className={styles.recommendation}>
       <Photo key={photo?.id ?? "missing"} photo={photo} compact />
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-charcoal">景点小档案{event.attractionSelection?.action === "keep" ? " · 已保留" : event.attractionSelection?.action === "replace" ? " · 已选择" : ""}</p>
-        <p className="mt-1 text-sm leading-6 text-graphite">{loading ? "正在读取图片、游玩和预约资料…" : data?.current?.reasons[0] ?? (feedback?.error ? "资料暂时不可用，可打开后重试。" : "了解图片、游玩、门票和预约，看看是否适合这一天。")}</p>
-        <button type="button" onClick={() => setOpen(true)} aria-label={`查看景点详情：${event.title}`} aria-haspopup="dialog" className="mt-1 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm font-semibold text-sage underline-offset-4 hover:underline">查看景点与候选<ChevronRight aria-hidden="true" className="size-4" /></button>
+      <div className={styles.recommendationBody}>
+        {data?.current?.reasons[0] ? <p>{data.current.reasons[0]}</p> : null}
+        <div className={styles.recommendationActions}>
+          <button type="button" onClick={() => setOpen(true)} aria-label={`查看景点详情：${event.title}`} aria-haspopup="dialog" className={styles.recommendationLink}>查看景点与候选<ChevronRight aria-hidden="true" className="size-4" /></button>
+          <button type="button" onClick={onMap} aria-label={`定位地图：${visitLabel}${event.title}`} className={styles.mapLink}><MapPin aria-hidden="true" className="size-4" />地图与详情</button>
+        </div>
       </div>
-    </div>
+    </div>}
     {open ? <AttractionDrawer event={event} visitLabel={visitLabel} data={data} loading={loading} feedback={feedback} busy={busy} preview={preview}
       onRetry={() => setRetry((value) => value + 1)} onAction={(action, candidateId) => void performAction(action, candidateId)}
       onCancelPreview={() => { setPreview(null); setFeedback(null); }} onClose={close} /> : null}

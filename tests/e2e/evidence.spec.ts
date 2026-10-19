@@ -51,14 +51,18 @@ async function openHours(page: Page) {
   return page.getByRole("dialog");
 }
 
+function museumEvidenceBadge(page: Page) {
+  return page.getByRole("button", { name: /^第 \d+ 项：Example Museum$/ }).locator("[data-status]");
+}
+
 test("old opening-hours verification shows needs-review after refresh without rewriting the stored fact", async ({ page, request }) => {
   const { trip, row } = await seed(request);
   await prisma.evidenceFact.updateMany({ where: { planVersionId: row.id, field: "opening_hours" }, data: { evaluationVersion: 0 } });
   const before = await prisma.evidenceFact.findFirstOrThrow({ where: { planVersionId: row.id, field: "opening_hours" } });
   await page.goto(`/trips/${trip.id}`);
-  const card = page.getByRole("button", { name: /Example Museum/ }).first();
-  await expect(card).toContainText("来源需复核");
-  await expect(card).not.toContainText("4 项来源字段已核验");
+  await expect(museumEvidenceBadge(page)).toHaveAttribute("data-status", "stale");
+  await expect(museumEvidenceBadge(page)).toHaveText("待复核");
+  await expect(museumEvidenceBadge(page)).not.toHaveText("已核实");
   let drawer = await openHours(page);
   await expect(drawer.getByText("需复核", { exact: true })).toBeVisible();
   await expect(drawer.getByText(/原有摘录不足以复核入场及离场限制/)).toBeVisible();
@@ -75,9 +79,9 @@ test("shows traceable field values, unknown dates and conflicts without claiming
   await prisma.evidenceFact.updateMany({ where: { planVersionId: row.id, field: "price" },
     data: { sourceDateStatus: "undated", applicableFrom: null, applicableUntil: null } });
   await page.goto(`/trips/${trip.id}`);
-  const card = page.getByRole("button", { name: /Example Museum/ }).first();
-  await expect(card).toContainText("来源有冲突");
-  await expect(card).not.toContainText("4 项来源字段已核验");
+  await expect(museumEvidenceBadge(page)).toHaveAttribute("data-status", "conflict");
+  await expect(museumEvidenceBadge(page)).toContainText("需调整");
+  await expect(museumEvidenceBadge(page)).not.toHaveText("已核实");
   const drawer = await openHours(page);
   await expect(drawer.getByText("来源冲突", { exact: true })).toBeVisible();
   await expect(drawer.getByText("09:00–17:00", { exact: true })).toBeVisible();
@@ -116,7 +120,8 @@ for (const outcome of ["success", "failure"] as const) {
     });
     try {
       await page.goto(`/trips/${trip.id}`);
-      await expect(page.getByRole("button", { name: /Example Museum/ }).first()).toContainText("4 项来源字段已核验");
+      await expect(museumEvidenceBadge(page)).toHaveAttribute("data-status", "verified");
+      await expect(museumEvidenceBadge(page)).toHaveText("已核实");
       const drawer = await openHours(page);
       await drawer.getByLabel("官方域名").fill("example.com");
       await drawer.getByRole("button", { name: "读取并核验" }).click();
@@ -129,8 +134,9 @@ for (const outcome of ["success", "failure"] as const) {
       const payload = await (await saveResponse).json();
       expect(payload.plan.evidenceFacts.find((fact: EvidenceFactClient) => fact.field === "opening_hours"))
         .toMatchObject({ lastRefreshStatus: "needs_review", effectiveStatus: "stale" });
-      await expect(page.getByRole("heading", { name: /计划版本 2/ })).toBeVisible();
-      await expect(page.getByRole("button", { name: /Example Museum/ }).first()).toContainText("来源需复核");
+      await expect(page.getByTestId("plan-version-select")).toHaveText("版本 V2");
+      await expect(museumEvidenceBadge(page)).toHaveAttribute("data-status", "stale");
+      await expect(museumEvidenceBadge(page)).toHaveText("待复核");
       const historyBefore = await prisma.evidenceFact.findUniqueOrThrow({ where: { id: oldFact.id } });
       const pointerBefore = await prisma.trip.findUniqueOrThrow({ where: { id: trip.id } });
 
@@ -166,5 +172,6 @@ test("rejects a response for a different plan or field even in the active drawer
   await drawer.getByRole("button", { name: "读取并核验" }).click();
   await expect(drawer).toContainText("来源结果属于其他计划或字段");
   await expect(drawer.getByText("需复核", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Example Museum/ }).first()).toContainText("来源需复核");
+  await expect(museumEvidenceBadge(page)).toHaveAttribute("data-status", "stale");
+  await expect(museumEvidenceBadge(page)).toHaveText("待复核");
 });

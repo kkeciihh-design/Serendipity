@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { renderMobileHtml, MOBILE_HTML_CSP } from "./mobile-export";
+import { renderGeographicMap } from "./export-map";
+export { renderGeographicMap } from "./export-map";
 import { exportPrivacy } from "./export-privacy";
 import { sortPlanEvents } from "./plan";
 import { ExportError, type ExportSnapshot, type MobileExportOptions } from "./export-snapshot";
@@ -28,48 +30,8 @@ async function fonts() {
   return fontCss;
 }
 
-export function renderGeographicMap(snapshot: ExportSnapshot, options: MobileExportOptions, date: string, city?: string, readableClusters = false) {
-  const { text: t, privateIds } = exportPrivacy(snapshot, options);
-  const events = sortPlanEvents(snapshot.plan.events).filter((e) => e.date === date);
-  // Never include private points, even when address text was opted in. No route
-  // geometry or home-adjacent segment can reveal the hidden origin.
-  const points = events.flatMap((e, i) => {
-    if (privateIds.has(e.id) || !e.placeId) return [];
-    const place = snapshot.plan.places.find((p) => p.id === e.placeId);
-    if (!place) throw new ExportError("地图地点引用失效，请核对计划后重新生成。");
-    if (city && place.city !== city) return [];
-    if (place.provider !== "osm" || place.coordinateSystem !== "WGS84") throw new ExportError("此地图来源尚未核验图片导出许可。请取消“包含位置示意图”后生成，或使用已确认的 OSM 地点。");
-    if (!Number.isFinite(place.longitude) || !Number.isFinite(place.latitude)) throw new ExportError("地图坐标不可用，请核对地点后重试。");
-    return [{ place, label: `${e.dayNumber}.${i + 1}` }];
-  });
-  if (!points.length) return `<aside class="map"><h3>当日位置示意图</h3><p>尚无可绘制的已确认公开地点；保留完整文字行程，不以城市中心代替地点。</p></aside>`;
-  const centerLat = points.reduce((s, p) => s + p.place.latitude, 0) / points.length;
-  const xs = points.map((p) => p.place.longitude * Math.cos(centerLat * Math.PI / 180)), ys = points.map((p) => p.place.latitude);
-  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-  const scale = Math.min(540 / Math.max(.002, maxX - minX), 290 / Math.max(.002, maxY - minY));
-  const groups = points.map((p, i) => ({ x: 320 + (xs[i] - (minX + maxX) / 2) * scale, y: 180 - (ys[i] - (minY + maxY) / 2) * scale, indices: [i] }));
-  if (readableClusters) {
-    // Merge close markers until all printed labels are distinct. The legend
-    // retains every original daily number, including repeat visits to one POI.
-    let merged = true;
-    while (merged) {
-      merged = false;
-      outer: for (let i = 0; i < groups.length; i++) for (let j = i + 1; j < groups.length; j++) {
-        const a = groups[i], b = groups[j];
-        if (Math.hypot(a.x - b.x, a.y - b.y) >= 50) continue;
-        const size = a.indices.length + b.indices.length;
-        a.x = (a.x * a.indices.length + b.x * b.indices.length) / size; a.y = (a.y * a.indices.length + b.y * b.indices.length) / size;
-        a.indices.push(...b.indices); groups.splice(j, 1); merged = true; break outer;
-      }
-    }
-  }
-  const groupLabel = (i: number) => groups[i].indices.length > 1 ? `A${i + 1}` : points[groups[i].indices[0]].label;
-  const markers = groups.map((g, i) => `<circle cx="${g.x}" cy="${g.y}" r="19" fill="#355b42"/><text x="${g.x}" y="${g.y + 5}" text-anchor="middle" fill="white" font-size="15">${groupLabel(i)}</text>`).join("");
-  return `<aside class="map"><h3>当日位置示意图 · 北 ↑</h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="已确认公开地点的位置示意图"><rect width="640" height="360" rx="16" fill="#e9eee3"/><path d="M0 90H640M0 180H640M0 270H640M160 0V360M320 0V360M480 0V360" stroke="#d6ddcd"/>${markers}</svg><p class="muted">按已保存坐标绘制，无道路底图；${readableClusters ? "相邻点合并为A组标记，完整行程编号见下表" : "同地点编号可能重叠，完整对应见下表"}。用于位置概览，不用于导航。</p><ul>${points.map((p, index) => { const group = groups.findIndex((g) => g.indices.includes(index)); return `<li>${readableClusters && groups[group].indices.length > 1 ? `${groupLabel(group)} · ` : ""}${p.label} · ${t(p.place.name)}${p.place.precision === "area_reference" ? "（区域参考位置）" : ""}</li>`; }).join("")}</ul><p class="credit">地点数据 © OpenStreetMap contributors · ODbL 1.0<br>https://www.openstreetmap.org/copyright</p></aside>`;
-}
-
 export async function renderLongImageHtml(snapshot: ExportSnapshot, options: MobileExportOptions, content: ImageContentOptions) {
-  let html = renderMobileHtml(snapshot, options);
+  let html = renderMobileHtml(snapshot, options, { includeMap: false });
   const { privateIds } = exportPrivacy(snapshot, options);
   const events = sortPlanEvents(snapshot.plan.events), dates = [...new Set(events.map((e) => e.date))].filter((d) => !options.dates || options.dates.includes(d));
   for (const date of dates) {
@@ -89,7 +51,7 @@ export async function renderLongImageHtml(snapshot: ExportSnapshot, options: Mob
           visual += `<figure><img alt="${escape(image.entityName)}资料照片" src="data:image/webp;base64,${clean.toString("base64")}"><figcaption class="credit">${escape(image.entityName)} · ${escape(image.author)} · ${escape(image.license)}<br>${escape(image.sourceUrl)}<br>${escape(image.licenseUrl)}<br>${escape(image.modification)} 版面等比缩小；照片按原许可使用。</figcaption></figure>`;
         } catch { throw new ExportError("许可照片加载失败，请重试，或取消照片选项生成文字与地图长图。", 503); }
       }
-      if (!chosen.size) visual += "<p class=muted>该日暂无已核验可导出的照片。</p>";
+
     }
     html = html.replace(`<ol class="timeline">`, `<div class="visuals">${visual}</div><ol class="timeline" data-mapped="${date}">`);
   }

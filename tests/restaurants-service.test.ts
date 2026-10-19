@@ -41,6 +41,8 @@ async function fixture(options: { routes?: boolean; redline?: boolean; constrain
   const draft = await requests.saveRequestDraft(trip.id, { expectedRequestRevision: 1, request });
   await requests.confirmRequest(trip.id, { expectedRequestRevision: draft.requestRevision });
   const capture = await plans.getPlanGenerationContext(trip.id, draft.requestRevision), content = planFixture(capture.requestSnapshot);
+  // Begin within the test cap; the candidate meal must be what exceeds it.
+  if (options.constraints?.some((text) => /预算/.test(text))) content.events.forEach((event) => { event.costDraftCents = 0; });
   if (options.redline) {
     for (const [id, startTime, endTime] of [["d2-activity", "09:00", "09:30"], ["d2-lunch", "11:30", "11:45"], ["d2-rest", "09:30", "09:45"], ["return", "13:00", "14:30"]]) Object.assign(content.events.find((item) => item.id === id)!, { startTime, endTime });
   }

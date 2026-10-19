@@ -9,6 +9,7 @@ import type { PlanVersionClient } from "./plan-overview";
 import { TripBottomNav } from "./trip-bottom-nav";
 import { useForegroundRefresh, useTravelClock } from "./use-travel-clock";
 import { routeModeLabels } from "./route-summary";
+import { getTripHardTimeConstraints } from "@/lib/trip-hard-constraints";
 type Data = { execution: ExecutionView; plan: PlanVersionClient; serverNow: string };
 const button = "inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-sage px-4 py-3 text-sm font-semibold text-sage disabled:opacity-50";
 const primary = `${button} bg-sage text-white`;
@@ -84,6 +85,7 @@ export function ExecutionPanel({ tripId }: { tripId: string }) {
   const next = summary?.next;
   const route = plan?.routeLegs?.find((r) => r.fromEventId === current?.id && r.toEventId === next?.id);
   return <>
+    {getTripHardTimeConstraints(plan?.requestSnapshot).map((constraint) => <p key={`${constraint.kind}-${constraint.time}`} data-testid="execution-hard-time" className="mt-3 rounded-lg border border-clay bg-clay-soft px-4 py-3 text-sm font-semibold text-clay">{constraint.date} · {constraint.label}</p>)}
     <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4">
       <div><p className="flex items-center gap-2 text-sm text-graphite"><Clock3 className="size-4" />当前时间</p><p data-testid="execution-clock" className="mt-1 text-xl font-semibold tabular-nums">{now === null ? "校时中…" : new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(now)}</p></div>
       <button className={button} disabled={busy} onClick={() => void refresh()}>重新读取</button>

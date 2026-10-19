@@ -1,10 +1,12 @@
 "use client";
 
 import { AlertCircle, ArrowRight, LoaderCircle, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useImperativeHandle, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { businessFetch } from "@/lib/business-fetch";
+import { AUTO_PLANNING_STAGES, AutoPlanningError, autoPlanningRecoveryUrl, createTripWithPlan, type AutoPlanningStage } from "@/lib/trip-auto-planning";
 import styles from "./trip-draft-form.module.css";
 
 const MAX_DRAFT_LENGTH = 3000;
@@ -17,12 +19,6 @@ const quickPrompts = [
   "青岛三天两晚看海，喜欢老建筑和海鲜",
 ];
 
-const readApiError = async (response: Response) => {
-  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-  return payload?.error ??
-    `保存失败（HTTP ${response.status}）。你输入的内容没有丢，请稍后重试。`;
-};
-
 export type TripDraftFormHandle = { fillInspiration: (text: string) => void };
 
 export function TripDraftForm({ ref }: { ref?: Ref<TripDraftFormHandle> }) {
@@ -30,12 +26,16 @@ export function TripDraftForm({ ref }: { ref?: Ref<TripDraftFormHandle> }) {
   const [requestText, setRequestText] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [planningStage, setPlanningStage] = useState<AutoPlanningStage>("saving");
+  const [savedTripId, setSavedTripId] = useState<string | null>(null);
+  const savedOriginalRef = useRef<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isSavingRef = useRef(false);
   const isComposingRef = useRef(false);
   const characterCount = Array.from(requestText).length;
   const isOverLength = characterCount > MAX_DRAFT_LENGTH;
+  const stageIndex = AUTO_PLANNING_STAGES.findIndex((stage) => stage.id === planningStage);
 
   const submitDraft = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -57,15 +57,23 @@ export function TripDraftForm({ ref }: { ref?: Ref<TripDraftFormHandle> }) {
     setIsSaving(true);
     setErrorMessage(null);
     try {
-      const response = await businessFetch("/api/trips", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ originalRequest: requestText }),
+      const tripId = await createTripWithPlan({
+        originalRequest: requestText,
+        fetcher: businessFetch,
+        onStage: setPlanningStage,
+        existingTripId: savedOriginalRef.current === requestText ? savedTripId ?? undefined : undefined,
       });
-      if (!response.ok) throw new Error(await readApiError(response));
       // Keep the submission locked until navigation completes.
-      router.push("/trips");
+      router.push(`/trips/${tripId}`);
     } catch (error) {
+      if (error instanceof AutoPlanningError && error.tripId) {
+        setSavedTripId(error.tripId);
+        savedOriginalRef.current = requestText;
+        if (error.recoverInWorkspace) {
+          router.push(autoPlanningRecoveryUrl(error.tripId, error.message));
+          return;
+        }
+      }
       setErrorMessage(
         error instanceof Error
           ? error.message
@@ -119,11 +127,11 @@ export function TripDraftForm({ ref }: { ref?: Ref<TripDraftFormHandle> }) {
             onCompositionStart={() => { isComposingRef.current = true; }}
             onCompositionEnd={() => { isComposingRef.current = false; }}
             readOnly={isSaving}
-            rows={3}
-            aria-describedby={`trip-request-hint${errorMessage ? " trip-request-feedback" : ""}`}
+            rows={2}
+            aria-describedby={`trip-request-hint${isSaving ? " trip-planning-progress" : ""}${errorMessage ? " trip-request-feedback" : ""}`}
             aria-invalid={isOverLength || Boolean(errorMessage)}
             className={styles.textarea}
-            placeholder="想去哪里走走？比如：12月初和伴侣去成都待三天，预算 3000 元，偏爱地道小馆与不赶路的市区漫步……"
+            placeholder="想去哪里走走？比如：和伴侣去成都三天，预算 3000 元，吃地道小馆，慢慢逛。"
           />
           <div className={styles.actions}>
             <p id="trip-request-hint" className={styles.keyboardHint}>
@@ -133,9 +141,16 @@ export function TripDraftForm({ ref }: { ref?: Ref<TripDraftFormHandle> }) {
               {characterCount} / {MAX_DRAFT_LENGTH}
             </span>
             <button type="submit" disabled={isSaving} className={styles.saveButton} data-testid="create-trip-submit">
-              {isSaving ? <><LoaderCircle aria-hidden="true" size={16} className={styles.spinner} />正在保存…</> : <>开启旅程规划<ArrowRight aria-hidden="true" size={16} /></>}
+              {isSaving ? <><LoaderCircle aria-hidden="true" size={16} className={styles.spinner} />正在规划…</> : <>{savedTripId && savedOriginalRef.current === requestText ? "继续生成行程" : "开启旅程规划"}<ArrowRight aria-hidden="true" size={16} /></>}
             </button>
           </div>
+          {isSaving ? (
+            <div id="trip-planning-progress" className={styles.planningProgress} role="status" aria-live="polite" data-testid="trip-planning-progress" data-stage={planningStage}>
+              <div><span>{AUTO_PLANNING_STAGES[stageIndex].label}</span><span>{stageIndex + 1} / {AUTO_PLANNING_STAGES.length}</span></div>
+              <div className={styles.progressTrack} aria-hidden="true">{AUTO_PLANNING_STAGES.map((stage, index) => <span key={stage.id} data-active={index <= stageIndex} />)}</div>
+              <p>将自动生成完整行程，日期与偏好稍后都可以调整。</p>
+            </div>
+          ) : null}
         </div>
       </form>
 
@@ -150,7 +165,7 @@ export function TripDraftForm({ ref }: { ref?: Ref<TripDraftFormHandle> }) {
       {errorMessage ? createPortal(
         <div id="trip-request-feedback" role="alert" data-testid="trip-request-feedback" className={styles.feedback}>
           <AlertCircle aria-hidden="true" size={18} />
-          <p>{errorMessage}</p>
+          <p>{errorMessage}{savedTripId ? <> <Link href={`/trips/${savedTripId}`}>打开已保存旅行</Link></> : null}</p>
           <button type="button" aria-label="关闭提示" onClick={() => setErrorMessage(null)}><X aria-hidden="true" size={16} /></button>
         </div>,
         document.body,

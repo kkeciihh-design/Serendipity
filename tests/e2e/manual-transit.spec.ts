@@ -80,7 +80,7 @@ async function saveReference(page: Page, card: Locator, version: number) {
   const saved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().endsWith("/routes"));
   await card.getByRole("button", { name: /^(保存人工参考|重新确认并保存)$/ }).click();
   expect((await saved).status()).toBe(200);
-  await expect(page.getByRole("heading", { name: new RegExp(`计划版本 ${version}`) })).toBeVisible();
+  await expect(page.getByTestId("plan-version-select")).toHaveText(`版本 V${version}`);
 }
 
 async function savedVersion(tripId: string, versionNumber: number) {
@@ -197,7 +197,8 @@ test("leaves blank fare and duration unknown on a 390px screen", async ({ page, 
   await expect(card.getByText(/每人票价：费用待确认/).first()).toBeVisible();
   await expect(card.getByText(/(?:^|｜)1 分钟(?:｜|$)/)).toHaveCount(0);
   const mapFrame = page.frameLocator('iframe[title="行程地点地图"]');
-  await expect(mapFrame.locator("path.leaflet-interactive")).toHaveCount(0);
+  await expect.poll(() => mapFrame.locator("path.leaflet-interactive[stroke-dasharray]").count()).toBeGreaterThan(0);
+  await expect(mapFrame.locator("path.leaflet-interactive:not([stroke-dasharray])")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.reload();
   await page.getByRole("tab", { name: "地图", exact: true }).click();
@@ -280,7 +281,7 @@ test("clears acknowledgement across map dates and never applies another day's re
   expect((await savedVersion(trip.id, 2)).row.routeLegs).toBe(original.row.routeLegs);
 });
 
-test("records no service at night without an invented duration, arrival, fare, or map line", async ({ page, request }) => {
+test("records no service at night while drawing only illustrative daily links", async ({ page, request }) => {
   const trip = await seed(request);
   const card = await openTransit(page, trip.id);
   await card.getByLabel("出发时刻", { exact: true }).fill("23:30");
@@ -298,8 +299,9 @@ test("records no service at night without an invented duration, arrival, fare, o
   await expect(card.getByText(/人工记录：无路线／停运/).first()).toBeVisible();
   await expect(card.getByText(/(?:^|｜)1 分钟(?:｜|$)/)).toHaveCount(0);
   const mapFrame = page.frameLocator('iframe[title="行程地点地图"]');
-  await expect(mapFrame.locator(".serendipity-map-route-arrow")).toHaveCount(0);
-  await expect(mapFrame.locator("path.leaflet-interactive")).toHaveCount(0);
+  await expect.poll(() => mapFrame.locator(".serendipity-map-route-arrow").count()).toBeGreaterThan(0);
+  await expect(mapFrame.locator("path.leaflet-interactive:not([stroke-dasharray])")).toHaveCount(0);
+  await expect(page.getByText("虚线为动线示意", { exact: false })).toBeVisible();
   await page.reload();
   await page.getByRole("tab", { name: "地图", exact: true }).click();
   await expect(card.getByRole("combobox", { name: /^查询结果/ })).toHaveValue("no_service");

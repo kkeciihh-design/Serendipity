@@ -47,7 +47,7 @@ export function MobileExportPanel({ tripId }: { tripId: string }) {
         <label className="flex min-h-11 items-center gap-3"><input type="checkbox" className="size-5 accent-sage" checked={includePrivateAddress} onChange={(e) => { setPrivate(e.target.checked); edit(); }} />包含私人起终点地址</label>
         {!includePrivateAddress && <label className="block text-sm">附近公共地标（选填）<input maxLength={100} value={publicLandmark} onChange={(e) => { setLandmark(e.target.value); edit(); }} placeholder="例如：市民中心南门" className="mt-2 min-h-12 w-full rounded-lg border border-sand px-3 text-base" /><span className="mt-2 block leading-6 text-graphite">仅供辨认。红线沿用原起点计算，不会按地标重算。</span></label>}
         <label className="flex min-h-11 items-center gap-3"><input type="checkbox" className="size-5 accent-sage" checked={includeSeats} onChange={(e) => { setSeats(e.target.checked); edit(); }} />包含票面座位</label>
-        <p className="text-sm leading-6 text-graphite">默认隐藏地址和座位；文件不包含定位坐标、图片或导航链接。</p>
+        <p className="text-sm leading-6 text-graphite">默认隐藏私人地址和座位，保留公共站点、每日动线图与待核实建议标点；断网也能阅读。</p>
         <button onClick={generate} className={`${button} w-full bg-sage text-white`}>{busy ? "正在生成…" : "生成预览"}</button>
       </fieldset>
       {error && <p role="alert" className="mt-4 rounded-lg bg-clay-soft p-3 text-clay">{error}</p>}

@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, ImageOff, Images } from "lucide-react";
+import { ExternalLink, Images } from "lucide-react";
 import { useState } from "react";
 import type { AttractionFact, AttractionImage, AttractionSource } from "@/lib/attraction-catalog";
 import type { AttractionCard } from "@/lib/attractions";
@@ -18,10 +18,7 @@ export function Photo({ photo, compact = false }: { photo: AttractionImage | nul
   // The directory only supplies bounded local images associated with this place.
   const available = photo?.displayAllowed && /^\/(?:attractions|restaurants)\/[a-z0-9-]+\.webp$/.test(photo.url) && !failed;
   if (!available || !photo) {
-    return <div className={`flex flex-col items-center justify-center gap-2 rounded-md bg-shell text-graphite ${compact ? "h-24 w-24 shrink-0 p-2" : "aspect-[4/3] w-full p-5"}`}>
-      <ImageOff aria-hidden="true" className="size-6" />
-      <span className="text-center text-sm">暂无可用图片</span>
-    </div>;
+    return null;
   }
   return <img src={photo.url} alt={`${photo.city} · ${photo.entityName}实景`} width={photo.width} height={photo.height}
     loading="lazy" decoding="async" onError={() => setFailed(true)}
@@ -62,9 +59,10 @@ export function FactBox({ title, fact, sources, children }: {
 
 export function Gallery({ card }: { card: Pick<AttractionCard, "images" | "id" | "name" | "city"> }) {
   const photos = card.images.filter((photo) => photo.entryId === card.id && photo.entityName === card.name && photo.city.replace(/市$/, "") === card.city.replace(/市$/, "") && photo.displayAllowed && /^\/(?:attractions|restaurants)\/[a-z0-9-]+\.webp$/.test(photo.url)).slice(0, 2);
+  if (!photos.length) return null;
   return <section aria-label={`${card.name}实景与图片来源`}>
     <div className={`grid gap-3 ${photos.length > 1 ? "sm:grid-cols-2" : ""}`}>
-      {photos.length ? photos.map((photo) => <figure key={photo.id} className="min-w-0">
+      {photos.map((photo) => <figure key={photo.id} className="min-w-0">
         <Photo photo={photo} />
         <figcaption className="mt-2 text-sm leading-6 text-graphite">{photo.entityName} · 摄影：{photo.author}</figcaption>
         <details className="text-sm text-graphite">
@@ -79,7 +77,7 @@ export function Gallery({ card }: { card: Pick<AttractionCard, "images" | "id" |
             </div>
           </div>
         </details>
-      </figure>) : <Photo photo={null} />}
+      </figure>)}
     </div>
   </section>;
 }

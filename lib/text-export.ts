@@ -1,8 +1,9 @@
+import { getTripHardTimeConstraints } from "./trip-hard-constraints";
 import { calculateBudgetSummary, costCategoryLabels, formatMoneyRange, formatMoneyValue } from "./budget";
 import { checklistGroups } from "./checklist";
 import { evidenceFieldLabels, evidenceStatusLabels } from "./evidence";
 import { exportPrivacy } from "./export-privacy";
-import { EMPTY_EXPORT_ADVISORIES, EXPORT_ADVISORY_NOTICE, projectExportAdvisories } from "./export-advisories";
+import { EMPTY_EXPORT_ADVISORIES, EXPORT_ADVISORY_NOTICE, projectExportAdvisories, projectExportWeather } from "./export-advisories";
 import { ExportError, mobileExportOptionsSchema, type ExportSnapshot, type MobileExportOptions, type TextExportFormat } from "./export-snapshot";
 import { formatPlanDate, planEventEnd, sortPlanEvents } from "./plan";
 import { formatBudgetTarget, formatRequestDateRange, formatTravelerCount } from "./plan-overview";
@@ -57,6 +58,7 @@ export function renderTextExport(snapshot: ExportSnapshot, rawOptions: MobileExp
   else if (budget.overspendStatus === "possible") paragraph("预算提醒：费用区间可能超过预算目标。");
 
   heading("关键时间红线");
+  for (const constraint of getTripHardTimeConstraints(plan.requestSnapshot).filter((value) => dates.includes(value.date))) paragraph(`硬时间红线：${constraint.date} ${constraint.label}；须严格遵守。`);
   const redlines = snapshot.redlines.filter((r) => selectedIds.has(r.input.eventId) || r.suggestedAt && dates.includes(formatPlanDate(new Date(r.suggestedAt))));
   if (!redlines.length) paragraph("所选日期没有可计算的有效票据红线。请核对票面、出发接驳与截止时刻，不能据此认定时间充裕。");
   for (const r of redlines) {
@@ -112,6 +114,8 @@ export function renderTextExport(snapshot: ExportSnapshot, rawOptions: MobileExp
   for (const pending of plan.pendingItems) item(`${pending.title}：${pending.reason}${pending.requiredBefore ? `（${pending.requiredBefore} 前）` : ""}`);
   for (const note of [...plan.validationResults.errors, ...plan.validationResults.warnings]) item(note);
   paragraph("天气、班次、预约与营业情况可能变化；本文件保留导出时提示，出发前请到官方渠道复核。");
+  heading("已获取天气预报");
+  for (const line of projectExportWeather(snapshot, dates)) paragraph(line);
   heading("旅行提醒与注意事项");
   paragraph(EXPORT_ADVISORY_NOTICE);
   const advisories = projectExportAdvisories(snapshot, dates);

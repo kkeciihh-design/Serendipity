@@ -5,10 +5,11 @@ import Link from "next/link";
 import { CalendarClock, MapPin, Route, Search } from "lucide-react";
 import type { Place, SignedPlaceCandidate } from "@/lib/places";
 import { buildPlanOverviewDays } from "@/lib/plan-overview";
-import { buildMapMarkers, buildMapRoutes, numberPlanEvents } from "@/lib/map-link";
+import { numberPlanEvents } from "@/lib/map-link";
+import { buildDailyRouteLinks, buildDailyRouteMarkers } from "@/lib/route-illustration";
 import type { RouteMode } from "@/lib/routes";
 import { cityRouteOriginIssue } from "@/lib/route-origin";
-import { routeDayEvents } from "@/lib/route-day";
+import { routeDayEvents, routeWaypointEvents } from "@/lib/route-day";
 import { buildAmapTransitLink } from "@/lib/transit-reference";
 import type { PlanVersionClient } from "./plan-overview";
 import { MapCanvas } from "./map-canvas";
@@ -50,18 +51,17 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
   useEffect(() => () => controller.current?.abort(), []);
   const events = useMemo(() => numberPlanEvents(routeDayEvents(plan.events, plan.events.find((event) => event.dayNumber === day)?.date ?? "")), [plan.events, day]);
   const dayPlaces = (plan.places ?? []).filter((place) => events.some((item) => item.event.placeId === place.id));
-  const cities = [...new Set(dayPlaces.map((place) => place.city))];
+  const allMarkers = useMemo(() => buildDailyRouteMarkers(events.map((item) => item.event), plan.places ?? [], plan.requestSnapshot.destination), [events, plan.places, plan.requestSnapshot.destination]);
+  const cities = [...new Set(allMarkers.map((place) => place.city))];
   const filter = cities.includes(cityFilter) ? cityFilter : "";
-  const markers = useMemo(() => buildMapMarkers(
-    events.map((item) => item.event),
-    (plan.places ?? []).filter((place) => !filter || place.city === filter),
-  ), [events, plan.places, filter]);
-  const mapRoutes = useMemo(() => buildMapRoutes((plan.routeLegs ?? []).filter((route) => {
+  const markers = useMemo(() => allMarkers.filter((marker) => !filter || marker.city === filter), [allMarkers, filter]);
+  const mapRoutes = useMemo(() => buildDailyRouteLinks(events.map((item) => item.event), markers, (plan.routeLegs ?? []).filter((route) => {
     if (cityRouteOriginIssue(plan.events.find((event) => event.id === route.fromEventId))) return false;
     const key = `${route.fromEventId}->${route.toEventId}`;
     return (!routeModes[key] || routeModes[key] === route.mode) && (!routeDepartures[key] || routeDepartures[key] === route.departureTime);
-  }), markers), [plan.routeLegs, plan.events, routeModes, routeDepartures, markers]);
-  const placedEvents = events.filter((item) => item.event.placeId);
+  })), [plan.routeLegs, plan.events, routeModes, routeDepartures, markers, events]);
+  const waypointIds = new Set(routeWaypointEvents(events.map((item) => item.event)).map((event) => event.id));
+  const placedEvents = events.filter((item) => waypointIds.has(item.event.id));
   const routePairs = placedEvents.slice(0, -1).map((item, index) => ({
     from: item,
     to: placedEvents[index + 1],
@@ -132,7 +132,7 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
   return <section className="mt-4" aria-label="地图定位">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h3 className="flex items-center gap-2 text-lg font-semibold text-charcoal"><MapPin className="size-5 text-sage" />行程地点</h3>
-        <p className="mt-1 text-sm leading-6 text-graphite">选择准确地点后才会标点。地点确认不代表门票、营业时间或住宿已核验。</p></div>
+        <p className="mt-1 text-sm leading-6 text-graphite">生成后即显示每日编号动线。虚线连接日程站点，建议位置可通过地点搜索进一步核对。</p></div>
       <Link href="/settings#map-settings" className="min-h-11 py-2 text-sm text-sage underline">地图设置</Link>
     </div>
     <div className="my-3 flex flex-wrap gap-3">
@@ -140,7 +140,8 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
       <label className="min-w-44 text-sm text-graphite">地图范围<select aria-label="地图范围" value={filter} onChange={(event) => setCityFilter(event.target.value)} className={inputStyle}><option value="">当天全部地点 · 跨城概览</option>{cities.map((item) => <option key={item} value={item}>{item} · 城市详图</option>)}</select></label>
     </div>
     <MapCanvas markers={markers} routes={mapRoutes} focusEventId={selectedEventId} onEventSelect={selectEvent} />
-    <p className="mt-2 text-sm leading-6 text-graphite">实心点：已确认地点；空心点：区域参考点。{dayPlaces.length === 0 ? "当天还没有已确认的地点，地图中不会放置推测标记。" : "可拖动地图，使用加减按钮或双指缩放。"}</p>
+    <p className="mt-2 text-sm leading-6 text-graphite">编号按日程顺序排列；浅色点为 AI 建议或区域参考，虚线为动线示意。{dayPlaces.length === 0 ? "当天还没有已确认的地点，已先展示建议位置与行程连线。" : "可拖动地图，使用加减按钮或双指缩放。"}</p>
+    <ol aria-label="地图当日动线站点" className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm leading-6 text-sage">{events.filter(({ event }) => markers.some((marker) => marker.events.some((item) => item.id === event.id))).map(({ event, visitLabel }, index) => <li key={event.id}>{index > 0 ? <span aria-hidden="true" className="mr-2 text-graphite">→</span> : null}<button type="button" onClick={() => selectEvent(event.id)} className="min-h-8 text-left">{visitLabel} {markers.find((marker) => marker.events.some((item) => item.id === event.id))?.name ?? event.title}</button></li>)}</ol>
     {events.some((item) => item.visitLabel === "宿") && <p className="mt-2 text-sm text-graphite">“宿”表示从前晚住宿出发，不占用当天日程编号；查看日程会返回对应住宿那一晚。</p>}
     <p className="mt-1 text-xs leading-6 text-graphite">免费地图 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline">OpenStreetMap contributors</a> · 搜索 Nominatim。公共服务需联网，可能限流；请用公共地标代替私人住址。</p>
     {(plan.tickets ?? []).some((ticket) => ticket.status === "active" && ticket.confirmedAt) ? <section aria-label="跨城交通示意" className="mt-4 rounded-md border border-sand bg-cream p-4">
@@ -203,7 +204,7 @@ export function PlanMap({ tripId, plan, onSaved, selectedDayNumber, onDayChange,
           <p className="text-sm text-graphite"><span aria-hidden="true" className="mr-2 font-semibold text-sage">{visitLabel}</span>{event.ticketTimingPending ? "票面时刻待补 / 冲突" : `${event.startTime}–${event.endTime}`}</p>
           <h4 className="mt-1 font-semibold text-charcoal">{event.title}</h4>
           <p className="mt-1 break-words text-sm leading-6 text-charcoal">{place?.name ?? event.locationName ?? "尚未指定地点"}</p>
-          <p className={`mt-1 text-sm ${place ? "text-sage" : "text-clay"}`}>{place ? place.precision === "area_reference" ? "区域参考点 · 并非已订酒店" : "用户已确认地点" : "待确认位置"}</p>
+          <p className="mt-1 text-sm text-sage">{place ? place.precision === "area_reference" ? "区域参考点 · 并非已订酒店" : "用户已确认地点" : "建议位置 · 已纳入每日动线"}</p>
           {place ? <><p className="mt-1 break-words text-sm leading-6 text-graphite">{place.city} · {place.address}</p><p className="mt-1 text-xs leading-5 text-graphite">{place.source} · {place.coordinateSystem} · 查询于 {new Date(place.retrievedAt).toLocaleDateString("zh-CN")}</p></> : null}
           <div className="mt-3 flex flex-wrap gap-2">
             <button type="button" className={`${actionStyle} inline-flex items-center gap-2`} aria-label={`查看日程：${visitLabel}${event.title}`} title={`查看日程：${visitLabel}${event.title}`} onClick={() => onEventSelect(event.id, "timeline", event.dayNumber)}><CalendarClock className="size-4" />查看日程</button>

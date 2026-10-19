@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { calculateBudgetSummary } from "../lib/budget";
+import { calculateBudgetSummary, derivePlanCosts } from "../lib/budget";
 import { validatePlan } from "../lib/plan";
 import { planFixture, requestFixture } from "./helpers/plan-fixtures";
 import { isolatedDatabase } from "./helpers/test-database";
@@ -54,6 +54,35 @@ async function pay(current: Record, costId: string, amount: number, paymentStatu
 
 describe("atomic ticket fact persistence", () => {
   const importSource: TicketImportSource = { engine: "tesseract-local", imageFingerprint: "a".repeat(64), cropFingerprint: "b".repeat(64), recognizedAt: "2026-10-15T08:00:00.000Z", documentKind: "ticket" };
+
+  it("merges an AI station access estimate into the ticket fare once without losing the station node", async () => {
+    let current = await fixture();
+    const returning = current.events.find((event) => event.id === "return")!;
+    const access = { ...returning, id: "quanzhou-station-access", type: "local_transport" as const,
+      title: "打车至泉州站并候车", locationName: "泉州站", startTime: "13:00", endTime: "16:00",
+      status: "suggested" as const, locked: false, costDraftCents: 3000, costStatus: "estimated" as const };
+    await db.planVersion.update({ where: { id: current.id }, data: {
+      events: JSON.stringify([...current.events, access]), costs: JSON.stringify([...current.costs, ...derivePlanCosts([access])]),
+    } });
+    current = await plans.getPlanVersion(current.tripId, current.versionNumber);
+    const saved = await act(current, { action: "activate", acknowledged: true, ticket: core(current, {
+      eventId: returning.id, direction: "return", date: returning.date, arrivalDate: returning.date,
+      departureTime: "16:00", arrivalTime: "20:30", fromName: "泉州站", toName: "深圳北站",
+      accessDurationMinutes: 30, accessFareCents: 3000, egressMode: null,
+    }) });
+    expect(saved.events.find((event) => event.id === access.id)?.ticketAccessForEventId).toBe(returning.id);
+    expect(saved.costs.filter((cost) => cost.linkedEventId === access.id)).toEqual([]);
+    expect(saved.costs.filter((cost) => cost.id.startsWith("ticket-transfer-"))).toEqual([
+      expect.objectContaining({ linkedEventId: returning.id, unitAmountCents: 3000, transferSide: "access" }),
+    ]);
+  });
+
+  it("rejects impossible typed arrival before writing any version", async () => {
+    const current = await fixture();
+    await expect(act(current, { action: "create_draft", ticket: core(current, { departureTime: "16:00", arrivalTime: "15:00" }) }))
+      .rejects.toThrow("到达时间必须晚于出发时间");
+    expect((await plans.listPlanVersions(current.tripId))[0].versionNumber).toBe(current.versionNumber);
+  });
 
   it("rechecks stored OCR draft identity against the final plan and requires a fresh companion decision", async () => {
     let current = await fixture();

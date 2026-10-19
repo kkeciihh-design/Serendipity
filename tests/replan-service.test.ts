@@ -38,6 +38,37 @@ async function fixture(t31 = false, requestOverrides: Partial<RequestSnapshot> =
 async function state(p: PlanVersionRecord) { return { trip: await db.trip.findUnique({ where: { id: p.tripId } }), plans: await db.planVersion.findMany({ where: { tripId: p.tripId } }), checklist: await db.checklistState.findUnique({ where: { tripId: p.tripId } }) }; }
 async function evidence(name: string, value: unknown) { const directory = verificationEvidenceDirectory("phase22-core"); await fs.mkdir(directory, { recursive: true }); await fs.writeFile(path.join(directory, `${name}.json`), JSON.stringify(value, null, 2)); }
 describe("阶段22：候选、时间与原子提交", () => {
+  it("retries a delete-only rain response into a concrete indoor replacement and connected transport", async () => {
+    const original = await fixture();
+    const activity = original.events.find((event) => event.id === "d2-activity")!;
+    const events = original.events.map((event) => event.id === activity.id ? { ...event, title: "洛伽寺拍照", locationName: "洛伽寺", latitude: 24.8519, longitude: 118.6466 } : event);
+    events.push({ ...activity, id: "rain-in", type: "local_transport", title: "打车至洛伽寺", locationName: "洛伽寺", startTime: "09:30", endTime: "10:00" },
+      { ...activity, id: "rain-out", type: "local_transport", title: "洛伽寺返回西街", locationName: "西街", startTime: "12:00", endTime: "12:30" });
+    await db.planVersion.update({ where: { id: original.id }, data: { events: JSON.stringify(events), costs: JSON.stringify(derivePlanCosts(events)) } });
+    const p = await plans.getPlanVersion(original.tripId, original.versionNumber);
+    let calls = 0;
+    const candidate = await service.previewReplan({ ...input(p), reason: "第2天下雨，把洛伽寺改成室内博物馆并调整交通" }, { completion: async (args) => {
+      calls++;
+      if (calls === 1) return completion({ requirementChange: null, edits: ["d2-activity", "rain-in", "rain-out"].map((eventId) => ({ eventId, remove: true, fields: {} })) })();
+      expect(args.userPrompt).toContain("替换目标未完成");
+      return completion({ requirementChange: null, edits: [
+        { eventId: "d2-activity", remove: false, fields: { title: "泉州海外交通史博物馆", locationName: "泉州海外交通史博物馆", costDraftCents: 0 } },
+        { eventId: "rain-in", remove: false, fields: { title: "打车至海外交通史博物馆", locationName: "泉州海外交通史博物馆" } },
+        { eventId: "rain-out", remove: false, fields: { title: "博物馆返回西街" } },
+      ] })();
+    } });
+    expect(calls).toBe(2);
+    expect(candidate.summary.added).toContain("泉州海外交通史博物馆");
+    expect(candidate.plan.events.find((event) => event.id === activity.id)?.latitude).toBeNull();
+    expect((await plans.listPlanVersions(p.tripId))).toHaveLength(1);
+  });
+  it("blocks a draft whose lower cost fits but explicit upper price exceeds the hard budget", async () => {
+    const p = await fixture(false, { constraints: ["总预算不超过1500元"] });
+    await expect(service.previewReplan(input(p), { completion: completion({ requirementChange: null, edits: [], additions: [
+      { type: "local_transport", dayNumber: 2, date: p.requestSnapshot.endDate!, startTime: "09:00", endTime: "09:30", title: "打车前往博物馆", locationName: "博物馆", costDraftCents: 1000, note: "网约车费用约10-2000元" },
+    ] }) })).rejects.toThrow("预算上限");
+    expect(await db.replanCandidate.count({ where: { tripId: p.tripId } })).toBe(0);
+  });
   it.each(["rain", "late", "remove"])("%s previews and applies with current R and one shared plan/checklist version", async (kind) => {
     const p = await fixture(), proposal = kind === "rain" ? edit("d2-activity", { title: "室内展览", locationName: "市内展馆", costDraftCents: 3000 })
       : kind === "late" ? edit("d2-breakfast", { startTime: "09:00", endTime: "09:30" })

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { ArrowUpRight } from "lucide-react";
 import { samplePhotography } from "@/lib/destination-gallery";
@@ -15,13 +15,24 @@ export function SampleTripCard({
   trip,
   issue,
   mode = "photo",
+  onStartPlanning,
 }: {
   trip: SampleTrip;
   issue?: string;
   mode?: "photo" | "sketch";
+  onStartPlanning: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const startPlanningAfterClose = useRef(false);
   const photo = samplePhotography[trip.destination as keyof typeof samplePhotography];
+
+  useEffect(() => {
+    if (open || !startPlanningAfterClose.current) return;
+    startPlanningAfterClose.current = false;
+    // The dialog has now released its focus trap and restored page scrolling.
+    // Focus the composer only after its unmount cleanup restores the opener.
+    onStartPlanning();
+  }, [open, onStartPlanning]);
   return (
     <>
     <article className={styles.card} data-testid="sample-trip-card">
@@ -71,7 +82,7 @@ export function SampleTripCard({
         </div>
       </div>
     </article>
-    {open ? <SampleTripDialog trip={trip} issue={issue} mode={mode} onClose={() => setOpen(false)} /> : null}
+    {open ? <SampleTripDialog trip={trip} issue={issue} mode={mode} onClose={() => setOpen(false)} onStartPlanning={() => { startPlanningAfterClose.current = true; setOpen(false); }} /> : null}
     </>
   );
 }

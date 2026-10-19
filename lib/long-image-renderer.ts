@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { chromium, type Browser } from "playwright";
+import type { Browser } from "playwright";
+import { launchExportBrowser } from "./export-browser";
 import sharp from "sharp";
 import { ExportError } from "./export-snapshot";
 import { LONG_IMAGE_LIMITS as limits, type ImageManifest } from "./long-image";
@@ -24,7 +25,7 @@ async function screenshotAtHeight(html: string, prefix: string, renderHeight: nu
   try {
     if (signal?.aborted) throw new ExportError("长图生成已取消。", 409);
     if (Buffer.byteLength(html) > 40 * 1024 * 1024) throw new ExportError("长图资料超出本机渲染上限，请按单日生成。");
-    browser = await chromium.launch({ headless: true, timeout: 15_000, chromiumSandbox: true });
+    browser = await launchExportBrowser();
     if (stopped) throw new ExportError("长图生成超时或已取消，请重试。", 503);
     const context = await browser.newContext({ viewport: { width: limits.width, height: 900 }, deviceScaleFactor: limits.scale, serviceWorkers: "block", acceptDownloads: false });
     // setContent on about:blank only. No application URL, cookies, local files,
@@ -63,7 +64,7 @@ async function screenshotAtHeight(html: string, prefix: string, renderHeight: nu
             // Direct visual blocks only, never duplicate their descendant text.
             const visuals = [...section.querySelector<HTMLElement>(".visuals")!.children] as HTMLElement[];
             const events = [...section.querySelectorAll<HTMLElement>(":scope>.timeline>.event")];
-            const first = document.createElement("section"); first.append(section.querySelector("h2")!, ...(visuals.length ? [visuals.shift()!] : [events.shift()!]));
+            const first = document.createElement("section"); first.append(section.querySelector("h2")!, ...[...section.children].filter((node) => node.matches(".weather")), ...(visuals.length ? [visuals.shift()!] : [events.shift()!]));
             units.push({ node: first, day, newDay: true }, ...[...visuals, ...events].map((node) => ({ node, day })));
           } else units.push({ node: section, day });
         }

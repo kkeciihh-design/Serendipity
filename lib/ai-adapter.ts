@@ -1,5 +1,6 @@
 import { isLoopbackHost } from "./request-security";
 import { randomUUID } from "node:crypto";
+import { asModelRecord, stripModelReasoning } from "./ai-normalizer";
 
 export type AIConnectionTestResult =
   | {
@@ -92,54 +93,102 @@ function parseModels(payload: unknown) {
     .filter((id): id is string => typeof id === "string" && id.length > 0);
 }
 
-function textFromResponse(payload: unknown, provider: AIProvider) {
+function visibleText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((part) => {
+    if (typeof part === "string") return part;
+    const block = asModelRecord(part);
+    if (block.type && !["text", "output_text"].includes(String(block.type))) return "";
+    return typeof block.text === "string" ? block.text
+      : typeof asModelRecord(block.text).value === "string" ? String(asModelRecord(block.text).value) : "";
+  }).join("");
+}
+
+export function textFromResponse(payload: unknown, provider: AIProvider) {
+  const response = asModelRecord(payload);
   if (provider === "openai-chat-completions") {
-    const choices = (payload as { choices?: unknown }).choices;
+    const choices = response.choices;
     const message = Array.isArray(choices)
-      ? (choices[0] as { message?: { content?: unknown } })?.message
-      : undefined;
-    if (typeof message?.content === "string") {
-      return message.content;
-    }
-    if (Array.isArray(message?.content)) {
-      return message.content
-        .map((part) => (part as { text?: unknown }).text)
-        .filter((text): text is string => typeof text === "string")
-        .join("");
-    }
-    return "";
+      ? asModelRecord(asModelRecord(choices[0]).message) : {};
+    const content = visibleText(message.content);
+    if (content.trim()) return content;
+    if (message.parsed && typeof message.parsed === "object") return JSON.stringify(message.parsed);
+    return Array.isArray(choices) ? visibleText(asModelRecord(choices[0]).text) : "";
   }
 
   if (provider === "openai-responses") {
-    const direct = (payload as { output_text?: unknown }).output_text;
-    if (typeof direct === "string") {
+    const direct = response.output_text;
+    if (typeof direct === "string" && direct.trim()) {
       return direct;
     }
 
-    const output = (payload as { output?: unknown }).output;
+    const output = response.output;
     if (!Array.isArray(output)) {
       return "";
     }
 
-    return output
-      .flatMap((item) => {
-        const content = (item as { content?: unknown }).content;
-        return Array.isArray(content) ? content : [];
-      })
-      .map((part) => (part as { text?: unknown }).text)
-      .filter((text): text is string => typeof text === "string")
-      .join("");
+    return output.map((item) => {
+      const block = asModelRecord(item);
+      if (block.type && !["message", "output_text", "text"].includes(String(block.type))) return "";
+      return visibleText(block.content) || visibleText([block]);
+    }).join("");
   }
 
-  const content = (payload as { content?: unknown }).content;
-  if (!Array.isArray(content)) {
-    return "";
-  }
+  return visibleText(response.content);
+}
 
-  return content
-    .map((part) => (part as { text?: unknown }).text)
-    .filter((text): text is string => typeof text === "string")
-    .join("");
+function responseWasTruncated(payload: unknown, provider: AIProvider) {
+  const response = asModelRecord(payload);
+  if (provider === "anthropic-messages") return response.stop_reason === "max_tokens";
+  if (provider === "openai-responses") return response.status === "incomplete" || asModelRecord(response.incomplete_details).reason === "max_output_tokens";
+  return Array.isArray(response.choices) && asModelRecord(response.choices[0]).finish_reason === "length";
+}
+
+function completionBody(input: { provider: AIProvider; model: string; systemPrompt: string; userPrompt: string }, maxTokens: number): Record<string, unknown> {
+  if (input.provider === "anthropic-messages") return {
+    model: input.model, system: input.systemPrompt, max_tokens: maxTokens,
+    messages: [{ role: "user", content: input.userPrompt }],
+  };
+  if (input.provider === "openai-responses") return {
+    model: input.model, instructions: input.systemPrompt, input: input.userPrompt,
+    max_output_tokens: maxTokens,
+  };
+  return {
+    model: input.model,
+    messages: [{ role: "system", content: input.systemPrompt }, { role: "user", content: input.userPrompt }],
+    // Reasoning models reject legacy max_tokens and temperature=0. Keep the
+    // request minimal; JSON is normalized locally instead of strict API formats.
+    [/^(?:o[1-9](?:-|$)|gpt-(?:[5-9]|[1-9]\d)(?:[.-]|$))/i.test(input.model) ? "max_completion_tokens" : "max_tokens"]: maxTokens,
+  };
+}
+
+async function requestCompletion(url: URL, provider: AIProvider, apiKey: string, body: Record<string, unknown>, signal: AbortSignal) {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(url, { method: "POST", headers: providerHeaders(provider, apiKey),
+      body: JSON.stringify(body), signal, cache: "no-store", redirect: "error" });
+    const responseText = await readResponseText(response);
+    if (response.status === 400 && attempt < 2) {
+      // Compatible gateways differ on the standard token-limit parameter.
+      // Retry only an explicit parameter rejection, not arbitrary service errors.
+      const key = "max_output_tokens" in body ? "max_output_tokens" : "max_completion_tokens" in body ? "max_completion_tokens" : "max_tokens";
+      if (provider === "openai-chat-completions" && responseText.includes(key) && /unsupported|not.support|not.allowed|unrecognized|unknown.parameter/i.test(responseText)) {
+        const alternate = key === "max_tokens" ? "max_completion_tokens" : "max_tokens";
+        body = { ...body, [alternate]: body[key] };
+        delete body[key];
+        continue;
+      }
+      const bound = responseText.match(/(?:at most|up to|less than or equal to|no more than|maximum(?: allowed)?(?: value)?(?: is| of|:)?|<=)\s*(\d[\d,]*)/i)
+        ?? responseText.match(/between\s*\d+\s*and\s*(\d[\d,]*)/i)
+        ?? responseText.match(/\[\s*\d+\s*,\s*(\d+)\s*\]/);
+      const limit = bound ? Number(bound[1].replaceAll(",", "")) : null;
+      if (responseText.includes(key) && limit !== null && limit >= 1024 && limit < Number(body[key])) {
+        body = { ...body, [key]: limit };
+        continue;
+      }
+    }
+    return { response, responseText };
+  }
 }
 
 function requestUrl(baseUrl: string, provider: AIProvider) {
@@ -152,6 +201,11 @@ function limitText(text: string, maxLength: number) {
   return characters.length <= maxLength
     ? text
     : `${characters.slice(0, maxLength).join("")}...`;
+}
+
+function missingModel(status: number, message: string) {
+  return status === 404 || (status === 400 && /model|模型/i.test(message)
+    && /not.found|does.not.exist|unknown.model|invalid.model|不存在|未找到/i.test(message));
 }
 
 async function readResponseText(response: Response) {
@@ -228,61 +282,9 @@ export async function testTextConnection(input: {
   }
 
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: providerHeaders(input.provider, input.apiKey),
-      body: JSON.stringify(
-        input.provider === "openai-chat-completions"
-          ? {
-              model: input.model,
-              messages: [
-                { role: "system", content: input.systemPrompt },
-                {
-                  role: "user",
-                  content: `${input.basePrompt}\n请只回复：${challenge}`,
-                },
-              ],
-              temperature: 0,
-              max_tokens: 32,
-            }
-          : input.provider === "openai-responses"
-            ? {
-                model: input.model,
-                instructions: input.systemPrompt,
-                input: `${input.basePrompt}\n请只回复：${challenge}`,
-                max_output_tokens: 32,
-                temperature: 0,
-              }
-            : {
-                model: input.model,
-                system: input.systemPrompt,
-                max_tokens: 32,
-                messages: [
-                  {
-                    role: "user",
-                    content: `${input.basePrompt}\n请只回复：${challenge}`,
-                  },
-                ],
-              },
-      ),
-      signal: AbortSignal.timeout(input.timeoutMs ?? REQUEST_TIMEOUT_MS),
-      cache: "no-store",
-      redirect: "error",
-    });
-
-    let responseText;
-    try {
-      responseText = await readResponseText(response);
-    } catch (error) {
-      if (error instanceof Error && error.message === "response too large") {
-        return {
-          ok: false,
-          category: "service",
-          message: "服务响应过大，已终止本次测试。",
-        };
-      }
-      throw error;
-    }
+    const { response, responseText } = await requestCompletion(url, input.provider, input.apiKey,
+      completionBody({ ...input, userPrompt: `${input.basePrompt}\n请只回复：${challenge}` }, 2048),
+      AbortSignal.timeout(input.timeoutMs ?? REQUEST_TIMEOUT_MS));
 
     if (responseText.length > MAX_RESPONSE_BYTES) {
       return {
@@ -329,11 +331,7 @@ export async function testTextConnection(input: {
           )
         : "";
 
-    if (
-      response.status === 404 ||
-      ((response.status === 400 || response.status === 404) &&
-        /model/i.test(serviceErrorMessage))
-    ) {
+    if (missingModel(response.status, serviceErrorMessage)) {
       return {
         ok: false,
         category: "model",
@@ -357,7 +355,7 @@ export async function testTextConnection(input: {
       };
     }
 
-    const content = textFromResponse(payload, input.provider);
+    const content = stripModelReasoning(textFromResponse(payload, input.provider));
     if (typeof content !== "string" || content.trim().length === 0) {
       return {
         ok: false,
@@ -380,6 +378,9 @@ export async function testTextConnection(input: {
       challenge,
     };
   } catch (error) {
+    if (error instanceof Error && error.message === "response too large") {
+      return { ok: false, category: "service", message: "服务响应过大，已终止本次测试。" };
+    }
     if (error instanceof Error && error.name === "TimeoutError") {
       return {
         ok: false,
@@ -446,46 +447,11 @@ export async function completeText(input: {
     };
   }
 
-  const maxTokens = input.maxTokens ?? 1600;
+  const maxTokens = input.maxTokens ?? 8192;
   const timeoutSignal = AbortSignal.timeout(input.timeoutMs ?? REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: providerHeaders(input.provider, input.apiKey),
-      body: JSON.stringify(
-        input.provider === "openai-chat-completions"
-          ? {
-              model: input.model,
-              messages: [
-                { role: "system", content: input.systemPrompt },
-                { role: "user", content: input.userPrompt },
-              ],
-              temperature: 0,
-              max_tokens: maxTokens,
-            }
-          : input.provider === "openai-responses"
-            ? {
-                model: input.model,
-                instructions: input.systemPrompt,
-                input: input.userPrompt,
-                max_output_tokens: maxTokens,
-                temperature: 0,
-              }
-            : {
-                model: input.model,
-                system: input.systemPrompt,
-                max_tokens: maxTokens,
-                messages: [{ role: "user", content: input.userPrompt }],
-              },
-      ),
-      signal: input.signal
-        ? AbortSignal.any([timeoutSignal, input.signal])
-        : timeoutSignal,
-      cache: "no-store",
-      redirect: "error",
-    });
-
-    const responseText = await readResponseText(response);
+    const { response, responseText } = await requestCompletion(url, input.provider, input.apiKey,
+      completionBody(input, maxTokens), input.signal ? AbortSignal.any([timeoutSignal, input.signal]) : timeoutSignal);
     if (response.status === 401 || response.status === 403) {
       return {
         ok: false,
@@ -520,15 +486,18 @@ export async function completeText(input: {
               "",
           )
         : "";
-    if (
-      response.status === 404 ||
-      ((response.status === 400 || response.status === 404) &&
-        /model/i.test(serviceErrorMessage))
-    ) {
+    if (missingModel(response.status, serviceErrorMessage)) {
       return {
         ok: false,
         category: "model",
         message: "AI 服务没有找到这个模型，请在设置页核对模型名称。",
+      };
+    }
+    if (response.status === 408 || response.status === 504) {
+      return {
+        ok: false,
+        category: "timeout",
+        message: "AI 服务响应超时，请稍后重试。",
       };
     }
     if (!response.ok) {
@@ -546,6 +515,9 @@ export async function completeText(input: {
       };
     }
 
+    if (responseWasTruncated(payload, input.provider)) {
+      return { ok: false, category: "invalid_response", message: "AI 输出被模型或网关的长度上限截断。请提高输出长度上限，或缩短旅行天数后重试。" };
+    }
     const content = textFromResponse(payload, input.provider);
     if (!content.trim()) {
       return {
@@ -557,6 +529,9 @@ export async function completeText(input: {
 
     return { ok: true, content };
   } catch (error) {
+    if (error instanceof Error && error.message === "response too large") {
+      return { ok: false, category: "service", message: "AI 服务响应过大，已终止本次请求。" };
+    }
     if (
       error instanceof Error &&
       (error.name === "AbortError" || error.name === "TimeoutError") &&

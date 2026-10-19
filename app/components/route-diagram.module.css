@@ -1,0 +1,11 @@
+.diagram { position: relative; isolation: isolate; height: 260px; overflow: hidden; border-radius: .55rem; background-color: #edf0e2; background-image: linear-gradient(#d7dfca60 1px, transparent 1px), linear-gradient(90deg, #d7dfca60 1px, transparent 1px), radial-gradient(ellipse at 20% 60%, #d9e4c4, transparent 70%); background-size: 30px 30px, 30px 30px, 100% 100%; }
+.label { position: absolute; z-index: 2; top: 10px; left: 12px; right: 12px; display: flex; justify-content: space-between; gap: 1rem; color: #71805e; font-size: .6rem; letter-spacing: .05em; }
+.label span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.label span:last-child { flex-shrink: 0; }
+.lines { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pin { position: absolute; display: grid; min-width: 34px; height: 34px; padding: 0 3px; place-items: center; transform: translate(-50%, -50%); border: 2px solid #fffff7; border-radius: 50%; background: #657b50; box-shadow: 0 2px 5px #30422c2b; color: white; font-size: 1.25rem; line-height: 1; cursor: pointer; }
+.pin:hover, .pin[data-selected="true"] { background: #af754b; z-index: 3; box-shadow: 0 0 0 4px #af754b22; }
+.pin:focus-visible { outline: 3px solid #a3773f; outline-offset: 2px; }
+.pinGroup { position: absolute; display: flex; transform: translate(-50%, -50%); }
+.groupedPin { position: static; transform: none; }
+.legend { position: absolute; bottom: 9px; left: 12px; color: #7c866e; font-size: .55rem; }

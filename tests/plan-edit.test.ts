@@ -14,6 +14,15 @@ function edit(changes: Partial<PlanEventEditInput>) {
 }
 
 describe("explicit time edit rules", () => {
+  it("preserves detailed generated directions when editing or confirming an event", () => {
+    const note = "沟口检票后乘观光车至五花海站，再沿木栈道步行至珍珠滩瀑布。".repeat(12);
+    const { event, original } = edit({ note, status: "confirmed", timeEdit: "preserve" });
+    expect(note.length).toBeGreaterThan(240);
+    expect(event.note).toBe(note);
+    expect(event.startTime).toBe(original.startTime);
+    expect(event.endTime).toBe(original.endTime);
+  });
+
   it("changes duration only when explicitly requested, including the stale legacy duration value", () => {
     expect(edit({ timeEdit: "start_duration", durationMinutes: 60 }).event).toMatchObject({ startTime: "10:00", endTime: "11:00", suggestedDurationSeconds: 3600 });
     expect(edit({ timeEdit: "start_duration", durationMinutes: 90 }).event).toMatchObject({ endTime: "11:30", suggestedDurationSeconds: 5400 });

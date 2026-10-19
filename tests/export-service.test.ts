@@ -43,10 +43,12 @@ describe("durable coherent export records", () => {
   }, 90_000);
   it("PDF resource failures and cancellation at registration leave no partial file", async () => {
     const id = await seed();
-    await expect(service.createExport(id, { expectedPlanVersion: 1, format: "pdf", options: {} })).rejects.toThrow("缺少已确认公开地点");
     const controller = new AbortController();
-    const spy = vi.spyOn(pdfRenderer, "printPdf").mockImplementation(async () => { controller.abort(); return { schemaVersion: 1, pages: 1, bytes: 0, eventIds: [], base64: "" }; });
+    const spy = vi.spyOn(pdfRenderer, "printPdf").mockRejectedValueOnce(new Error("controlled missing font resource"));
     try {
+      await expect(service.createExport(id, { expectedPlanVersion: 1, format: "pdf", options: {} })).rejects.toThrow("missing font resource");
+      expect(await db.exportFile.count({ where: { tripId: id } })).toBe(0);
+      spy.mockImplementation(async () => { controller.abort(); return { schemaVersion: 1, pages: 1, bytes: 0, eventIds: [], base64: "" }; });
       await expect(service.createExport(id, { expectedPlanVersion: 1, format: "pdf", options: {}, pdfContent: { mode: "simplified" } }, controller.signal)).rejects.toThrow("取消");
       expect(await db.exportFile.count({ where: { tripId: id } })).toBe(0);
     } finally { spy.mockRestore(); }

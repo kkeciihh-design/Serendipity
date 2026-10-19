@@ -2,14 +2,26 @@
 import { businessFetch } from "@/lib/business-fetch";
 
 import {
+  CalendarDays,
+  ChevronDown,
   CircleAlert,
-  HardDriveDownload,
+  Clock3,
+  MapPin,
+  PencilLine,
   Save,
+  SlidersHorizontal,
   Trash2,
+  Users,
+  Wallet,
+  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { formatTripDateTime } from "@/lib/trip-format";
+import { tripSummaryBudget, tripSummaryDates, tripSummaryDays, tripSummaryTravelers } from "@/lib/trip-summary";
+import { tripDisplayTitle } from "@/lib/trip-title";
+import { getTripHardTimeConstraints } from "@/lib/trip-hard-constraints";
+import styles from "./trip-editor.module.css";
 import {
   PlanOverview,
   type PlanRequestState,
@@ -51,13 +63,21 @@ export function TripEditor({
   request,
   plans,
   selectedVersionNumber,
+  planningNotice = null,
 }: {
   trip: TripEditorTrip;
   request: TripRequestClient;
   plans: PlanVersionClient[];
   selectedVersionNumber: number | null;
+  planningNotice?: string | null;
 }) {
   const router = useRouter();
+  // Entry URLs and incomplete AI runs must never open the detailed editor.
+  const [requirementsOpen, setRequirementsOpen] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const requirementsToggleRef = useRef<HTMLButtonElement>(null);
+  const [planningNoticeDismissed, setPlanningNoticeDismissed] = useState(false);
+  const [currentRequest, setCurrentRequest] = useState(request);
   const [savedTrip, setSavedTrip] = useState(trip);
   const [title, setTitle] = useState(trip.title);
   const [feedback, setFeedback] = useState<SaveFeedback | null>(null);
@@ -80,6 +100,19 @@ export function TripEditor({
   const isDirty = title !== savedTrip.title;
   const isTitleTooLong = countCharacters(title.trim()) > MAX_TITLE_LENGTH;
   const canConfirmDelete = deleteConfirmation === savedTrip.title;
+  const currentPlan = plans.find((plan) => plan.isCurrent) ?? plans[0];
+  const confirmedSnapshot = currentRequest.confirmedRevision === currentRequest.requestRevision
+    ? currentRequest.confirmedRequest : null;
+  const summarySnapshot = confirmedSnapshot ?? currentPlan?.requestSnapshot ?? currentRequest.extractedRequest;
+  const summaryDays = tripSummaryDays(summarySnapshot);
+  const summaryTravelers = tripSummaryTravelers(summarySnapshot, confirmedSnapshot || !currentPlan ? currentRequest.originalRequest : undefined);
+  const summaryBudget = tripSummaryBudget(summarySnapshot);
+  const displayTitle = tripDisplayTitle({ title: savedTrip.title, originalRequest: currentRequest.originalRequest, snapshot: summarySnapshot });
+  const originalQuote = currentRequest.originalRequest.replace(/\s+/g, " ").trim();
+  const focusRequirementsToggle = () => {
+    requirementsToggleRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    requirementsToggleRef.current?.focus({ preventScroll: true });
+  };
 
   const saveTitle = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -164,33 +197,45 @@ export function TripEditor({
   };
 
   return (
-    <div className="mt-5 space-y-5">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium text-sage">旅行详情</p>
-          <h1 className="mt-1 text-3xl font-bold leading-9 text-charcoal">
-            {savedTrip.title}
-          </h1>
+    <div className={styles.editor}>
+      <header className={styles.tripHeader} data-testid="compact-trip-header">
+        <div className={styles.headingRow}>
+          <div className={styles.headingCopy}>
+            <p className={styles.eyebrow}><span>SERENDIPITY / TRAVEL JOURNAL</span><span>旅行详情</span></p>
+            <h1 className={styles.tripTitle} aria-label={displayTitle}>
+              <button type="button" className={styles.titleButton} onClick={() => setIsEditingTitle(true)} aria-label={`修改旅行标题：${displayTitle}`}>
+                {displayTitle}<PencilLine aria-hidden="true" className={styles.titleEditIcon} />
+              </button>
+            </h1>
+            {originalQuote && originalQuote !== displayTitle ? <blockquote className={styles.originalQuote} title={originalQuote} aria-label="出发灵感" data-testid="trip-original-quote">“{originalQuote}”</blockquote> : null}
+          </div>
+          <button ref={requirementsToggleRef} type="button" onClick={() => setRequirementsOpen((open) => !open)} aria-expanded={requirementsOpen} aria-controls="trip-requirements-panel" className={styles.requirementsToggle}>
+            <SlidersHorizontal aria-hidden="true" size={15} />修改需求 / 重新生成
+            <ChevronDown aria-hidden="true" size={14} className={requirementsOpen ? styles.chevronOpen : undefined} />
+          </button>
         </div>
-        <span
-          className={`inline-flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
-            isDirty ? "bg-clay-soft text-clay" : "bg-sage-soft text-sage"
-          }`}
-        >
-          <HardDriveDownload aria-hidden="true" className="size-4" />
-          {isDirty
-            ? "标题未保存"
-            : `已保存 · ${formatTripDateTime(new Date(savedTrip.updatedAt))}`}
-        </span>
+        <div className={styles.summaryTags} aria-label="当前生效的旅行要素">
+          <span className={styles.destinationTag}><MapPin aria-hidden="true" size={14} />{summarySnapshot?.destination ?? "目的地待补充"}</span>
+          <span><CalendarDays aria-hidden="true" size={14} />{tripSummaryDates(summarySnapshot)}{summaryDays ? ` · ${summaryDays} 天` : ""}</span>
+          {summaryTravelers ? <span><Users aria-hidden="true" size={14} />{summaryTravelers}</span> : null}
+          {summaryBudget ? <span><Wallet aria-hidden="true" size={14} />{summaryBudget}</span> : null}
+          {getTripHardTimeConstraints(summarySnapshot).map((constraint) => <span className={styles.hardTimeTag} key={`${constraint.kind}-${constraint.date}-${constraint.time}`}><Clock3 aria-hidden="true" size={14} />{constraint.label}</span>)}
+          {summarySnapshot?.interests.slice(0, 3).map((interest) => <span className={styles.interestTag} key={interest}>{interest}</span>)}
+        </div>
+        {isDirty || requestState.hasUnsavedEdits ? <p className={styles.unsavedNote} role="status">{isDirty ? "标题未保存" : "需求有未保存修改"}{isDirty && requestState.hasUnsavedEdits ? " · 需求有未保存修改" : ""}</p> : null}
       </header>
 
+      <div hidden={!isEditingTitle}>
       <form
         onSubmit={saveTitle}
-        className="rounded-lg border border-sand/80 bg-white p-5 shadow-[0_1px_2px_rgba(35,42,38,0.06)] sm:p-6"
+        className={styles.titleForm}
       >
+        <div className="flex items-center justify-between gap-3">
         <label htmlFor="trip-title" className="text-lg font-semibold text-charcoal">
           旅行标题
         </label>
+        <button type="button" onClick={() => setIsEditingTitle(false)} className={styles.closeButton} aria-label="收起标题编辑"><X aria-hidden="true" size={18} /></button>
+        </div>
         <input
           id="trip-title"
           name="trip-title"
@@ -210,6 +255,7 @@ export function TripEditor({
             <Save aria-hidden="true" className="size-5" />
             {isSaving ? "正在保存..." : "保存标题"}
           </button>
+          <span className="text-xs text-graphite">已保存 · {formatTripDateTime(new Date(savedTrip.updatedAt))}</span>
           <button
             type="button"
             onClick={() => {
@@ -223,21 +269,34 @@ export function TripEditor({
           </button>
         </div>
       </form>
+      </div>
 
+      <div id="trip-requirements-panel" hidden={!requirementsOpen} className={styles.requirementsPanel}>
+      <div className={styles.panelHeading}><p>按你的心意，微调这趟旅程。</p><button type="button" onClick={() => setRequirementsOpen(false)} className={styles.closeButton} aria-label="收起需求编辑"><X aria-hidden="true" size={18} /></button></div>
       <TripRequestWorkspace
         initialRequest={request}
         onStateChange={handleRequestStateChange}
+        onRecordChange={setCurrentRequest}
       />
+      </div>
 
       <PlanOverview
         tripId={trip.id}
-        tripTitle={savedTrip.title}
+        tripTitle={displayTitle}
+        originalRequest={currentRequest.originalRequest}
+        planningNotice={planningNoticeDismissed ? null : planningNotice}
         plans={plans}
         selectedVersionNumber={selectedVersionNumber}
         requestState={requestState}
+        onOpenRequirements={focusRequirementsToggle}
+        onPlanGenerated={() => {
+          setPlanningNoticeDismissed(true);
+          if (!requestState.hasUnsavedEdits) setRequirementsOpen(false);
+          if (!isDirty) setIsEditingTitle(false);
+        }}
       />
 
-      <div
+      {feedback ? <div
         id="trip-editor-feedback"
         aria-live="polite"
         className={`min-h-11 rounded-md px-4 py-3 text-base leading-7 ${
@@ -248,9 +307,8 @@ export function TripEditor({
               : "bg-shell text-graphite"
         }`}
       >
-        {feedback?.message ??
-          "标题修改不进入需求修订；原话、摘要和追问答案在需求确认区统一保存。"}
-      </div>
+        {feedback.message}
+      </div> : null}
 
       {showDeleteConfirm ? (
         <section
