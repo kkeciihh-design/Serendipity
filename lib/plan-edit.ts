@@ -7,6 +7,7 @@ import {
   type PlanEvent,
   type PlanEventStatus,
 } from "./plan";
+import { sanitizeTravelerText } from "./content-sanitizer";
 
 export type PlanEventEditInput = {
   eventId: string;
@@ -55,7 +56,7 @@ function sameEditableValues(event: PlanEvent, input: PlanEventEditInput) {
   return (
     event.startTime === time.startTime && event.endTime === time.endTime &&
     formatPlanDate(planEventEnd(event)) === time.endDate &&
-    (event.note ?? "") === (input.note ?? "").trim() &&
+    (event.note ?? "") === sanitizeTravelerText(input.note ?? "") &&
     (event.status ?? "suggested") === input.status
   );
 }
@@ -143,7 +144,8 @@ export function applyPlanEventEdit(
   }
 
   const time = resolveTimeEdit(target, input);
-  const note = input.note?.trim() ? input.note.trim() : null;
+  const cleanedNote = sanitizeTravelerText(input.note);
+  const note = cleanedNote ? cleanedNote : null;
 
   return {
     events: plan.events.map((event) =>

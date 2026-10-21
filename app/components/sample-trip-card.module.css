@@ -153,7 +153,7 @@
   height: 14px;
   border: 1px solid rgb(24 32 28 / 12%);
   border-radius: 50%;
-  background: #f2ede2;
+  background: var(--home-parchment, #f7f6f2);
   content: "";
 }
 

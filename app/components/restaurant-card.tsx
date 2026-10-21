@@ -9,6 +9,7 @@ import type { MealPricing, RestaurantCard, RestaurantPreview, RestaurantRecommen
 import type { PlanVersionClient } from "./plan-overview";
 import { dateLabel, FactBox, Gallery, Photo, SourceLink } from "./recommendation-ui";
 import { RouteSummary } from "./route-summary";
+import { ItineraryArrangementCard } from "./itinerary-arrangement-card";
 import styles from "./plan-timeline.module.css";
 
 type Feedback = { error: boolean; message: string };
@@ -87,6 +88,7 @@ function MealDrawer({ event, visitLabel, data, loading, feedback, busy, preview,
       <header className="flex shrink-0 items-start justify-between gap-3 border-b border-sand px-4 py-4 sm:px-6"><div className="min-w-0"><p className="text-sm font-medium text-sage">餐厅小档案 · 第 {event.dayNumber} 天 · {visitLabel}</p><h2 id="restaurant-drawer-title" className="mt-1 break-words text-xl font-bold">{selected?.name ?? event.title}</h2><p className="mt-1 text-sm text-graphite">{event.date} · {event.startTime}–{event.endTime} · {selectedId ? "替换候选" : "当前用餐"}{data?.readOnly ? " · 历史版本只读" : ""}</p></div><button ref={closeRef} type="button" onClick={onClose} disabled={saving} aria-label="关闭餐厅详情" className="inline-flex size-11 shrink-0 items-center justify-center rounded-md border border-sand bg-white disabled:opacity-50"><X aria-hidden="true" className="size-5" /></button></header>
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6">
         {loading ? <p role="status" className="rounded-md bg-shell p-4 text-sm">正在读取菜品、营业和用餐资料…</p> : null}
+        {!selected ? <ItineraryArrangementCard event={event} kind="restaurant" /> : null}
         {feedback ? <div role={feedback.error ? "alert" : "status"} className={`rounded-md p-4 text-sm leading-6 ${feedback.error ? "bg-clay-soft text-clay" : "bg-sage-soft text-sage"}`}><p>{feedback.message}</p>{feedback.error && !data ? <button onClick={onRetry} disabled={loading} className="mt-2 min-h-11 rounded-md border border-clay px-3 font-semibold">重试读取</button> : null}</div> : null}
         {selected ? <Gallery key={selected.id} card={selected} /> : null}
         {data ? <>
@@ -99,14 +101,14 @@ function MealDrawer({ event, visitLabel, data, loading, feedback, busy, preview,
         </> : null}
         {inputError ? <p role="alert" className="rounded-md bg-clay-soft p-3 text-sm text-clay">{inputError}</p> : null}
         {preview ? <section ref={previewRef} aria-label="用餐调整预览" className="space-y-3 rounded-md border-2 border-sage bg-white p-4"><h3 className="text-lg font-semibold">用餐调整预览</h3><ul className="list-disc space-y-2 pl-5 text-sm leading-6">{preview.changes.map((change, index) => <li key={index}>{change}</li>)}</ul><div className="rounded-md bg-shell p-3 text-sm leading-6"><p>调整前全程预算：{formatMoneyRange(preview.beforeBudget.totalMinCents, preview.beforeBudget.totalMaxCents)}（另有 {preview.beforeBudget.unknownItemCount} 项未知）</p><p>调整后全程预算：{formatMoneyRange(preview.afterBudget.totalMinCents, preview.afterBudget.totalMaxCents)}（另有 {preview.afterBudget.unknownItemCount} 项未知）</p></div>{preview.conflicts.length ? <div role="alert" className="rounded-md bg-clay-soft p-3 text-sm leading-6 text-clay"><p className="font-semibold">存在冲突，不能应用</p>{preview.conflicts.map((message, index) => <p key={index}>{message}</p>)}</div> : null}<details><summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold text-sage">仍需确认（{preview.warnings.length}）</summary><ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-graphite">{preview.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details></section> : null}
-        {selected ? <RestaurantDetails key={selected.id} card={preview?.card ?? selected} /> : data ? <div className="space-y-3"><Photo photo={null} /><p className="rounded-md bg-white p-4 text-sm leading-6 text-graphite">还没有与“{data.eventName}”准确对应的门店资料。菜品、人均、营业、排队与搬迁状态待确认；不会借用同品牌其他门店的照片。</p></div> : null}
+        {selected ? <RestaurantDetails key={selected.id} card={preview?.card ?? selected} /> : null}
       </div>
       <footer className="shrink-0 space-y-2 border-t border-sand bg-cream px-4 py-3 sm:px-6">{data?.readOnly ? <p className="py-2 text-sm">历史版本只读，请回到当前计划操作。</p> : preview ? <div className="flex gap-3"><button onClick={() => onAction("apply", selectedId)} disabled={!editable || busy !== null || !preview.canApply} className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-md bg-sage px-3 font-semibold text-white disabled:bg-graphite/50"><Check aria-hidden="true" className="size-5" />{saving ? "正在保存新版本…" : "应用用餐调整"}</button><button onClick={onCancelPreview} disabled={busy !== null} className="min-h-12 rounded-md border border-sand bg-white px-3">取消预览</button></div> : <button onClick={submit} disabled={!editable || busy !== null || (!selectedId && data?.current?.eligibility === "excluded")} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-sage px-3 font-semibold text-white disabled:bg-graphite/50"><RefreshCw aria-hidden="true" className={`size-5 ${busy ? "animate-spin" : ""}`} />{busy ? "正在检查营业、路线和费用…" : selectedId ? "预览替换餐厅" : "预览本餐人数与预算"}</button>}<p className="text-sm leading-6 text-graphite">{saving ? "正在保存计划，完成后可关闭。" : "应用后保存新的计划版本；未订餐，排队和有座情况未知。"}</p></footer>
     </div>
   </dialog>;
 }
 
-export function RestaurantTimelineCard({ tripId, plan, event, visitLabel, onSaved, onMap, compact = false }: { tripId: string; plan: PlanVersionClient; event: PlanEvent; visitLabel: string; onSaved: (plan: PlanVersionClient) => void; onMap: () => void; compact?: boolean }) {
+export function RestaurantTimelineCard({ tripId, plan, event, visitLabel, onSaved, onMap, compact = false, actionsOnly = false }: { tripId: string; plan: PlanVersionClient; event: PlanEvent; visitLabel: string; onSaved: (plan: PlanVersionClient) => void; onMap: () => void; compact?: boolean; actionsOnly?: boolean }) {
   const [data, setData] = useState<RestaurantRecommendations | null>(null), [loading, setLoading] = useState(true), [open, setOpen] = useState(false), [retry, setRetry] = useState(0);
   const [feedback, setFeedback] = useState<Feedback | null>(null), [busy, setBusy] = useState<Action | null>(null), [preview, setPreview] = useState<RestaurantPreview | null>(null);
   const scope = `${tripId}/${plan.id}/${event.id}`, endpoint = `/api/trips/${tripId}/plans/${plan.versionNumber}/restaurants`;
@@ -158,6 +160,9 @@ export function RestaurantTimelineCard({ tripId, plan, event, visitLabel, onSave
     {compact ? <div className={styles.recommendationCompact}>
       <button type="button" onClick={() => setOpen(true)} aria-label={`查看餐厅详情：${event.title}`} aria-haspopup="dialog" title="查看餐厅与候选" className={styles.compactLink}><ChevronRight aria-hidden="true" className="size-3.5" /></button>
       <button type="button" onClick={onMap} aria-label={`定位地图：${visitLabel}${event.title}`} title="地图与详情" className={styles.compactLink}><MapPin aria-hidden="true" className="size-3.5" /></button>
+    </div> : actionsOnly ? <div className={styles.recommendationActions}>
+      <button type="button" onClick={() => setOpen(true)} aria-label={`查看餐厅详情：${event.title}`} aria-haspopup="dialog" className={styles.recommendationLink}>查看餐厅与候选<ChevronRight aria-hidden="true" className="size-4" /></button>
+      <button type="button" onClick={onMap} aria-label={`定位地图：${visitLabel}${event.title}`} className={styles.mapLink}><MapPin aria-hidden="true" className="size-4" />地图与详情</button>
     </div> : <div className={styles.recommendation}>
       <Photo key={photo?.id ?? "missing"} photo={photo} compact />
       <div className={styles.recommendationBody}>

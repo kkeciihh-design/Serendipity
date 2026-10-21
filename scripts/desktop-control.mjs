@@ -5,6 +5,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { alive, checkFiles, control, friendlyError, readConfig, readJson, saveJson, serviceEnvironment, withOperationLock } from "./desktop-runtime.mjs";
 import { prepareDesktopBuild } from "./desktop-build.mjs";
 import { runDesktopStart } from "./desktop-update.mjs";
+import { pruneDesktopBuilds } from "./desktop-build-cleanup.mjs";
+
+// stdout remains one JSON result for existing callers. The Windows launcher
+// consumes these optional stderr events without exposing compiler output.
+const reportProgress = (message) => process.stderr.write(`SERENDIPITY_PROGRESS ${JSON.stringify({ message })}\n`);
 
 async function stopManaged(state) {
   if (!await control(state, "stop")) throw new Error("停止请求没有成功，请稍后重试。");
@@ -67,16 +72,26 @@ try {
       // Reject a missing original database before spending time on a new build.
       checkFiles(config);
       const running = await runDesktopStart(config, {
-        inspect, alive, prepareBuild: prepareDesktopBuild,
+        inspect, alive, prepareBuild: (selected) => prepareDesktopBuild(selected, { onProgress: reportProgress, configFile }),
         readConfig: () => readConfig(configFile),
         saveBuild: (buildDirectory) => {
           const raw = JSON.parse(fs.readFileSync(configFile, "utf8").replace(/^\uFEFF/, ""));
           saveJson(configFile, { ...raw, buildDirectory });
         },
-        stopService: stopManaged,
-        startService: (selected) => startManaged(selected, configFile),
+        stopService: (state) => { reportProgress("新版已就绪，正在切换服务"); return stopManaged(state); },
+        startService: (selected) => { reportProgress("正在启动旅行助手并检查连接"); return startManaged(selected, configFile); },
       });
-      return { ok: true, ...running, ...details };
+      let cleanup;
+      // Housekeeping runs only after a healthy service is ready, under the same
+      // project build lock as compilation. Failure cannot undo a good startup.
+      if (config.autoBuild === true) {
+        try {
+          cleanup = await pruneDesktopBuilds({ ...config, buildDirectory: running.buildDirectory }, { onProgress: reportProgress, protectedDirectories: [config.buildDirectory] });
+        } catch (error) {
+          cleanup = { skipped: true, reason: error.message };
+        }
+      }
+      return { ok: true, ...running, ...details, cleanup };
     }
     const { state, running } = await inspect();
     if (action === "stop") {

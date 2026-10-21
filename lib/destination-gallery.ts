@@ -3,12 +3,15 @@
  * and the client's first render always describe the same landscape.
  * Coordinates are approximate scenic-area references, not navigation waypoints.
  */
-export type DestinationGalleryId = "jiuzhaigou" | "west-lake" | "li-river" | "hongcun" | "xiapu";
+import type { LandscapeParameters } from "./landscape-template";
+import additions from "./gallery-additions.json";
+export type DestinationGalleryId = string;
 
 export type GalleryPhoto = {
   src: string;
   alt: string;
   position?: string;
+  thumb?: string;
   author: string;
   source: string;
   license: string;
@@ -26,7 +29,15 @@ export type GalleryDestination = {
   note: string;
   prompt: string;
   photo: GalleryPhoto;
+  photoCandidates?: GalleryPhoto[];
+  visual?: LandscapeParameters;
+  custom?: boolean;
+  generation?: "ai" | "local";
+  generationNotice?: string;
+  photoKind?: "commons" | "upload" | "atmosphere";
 };
+
+export type GalleryOverride = Partial<Pick<GalleryDestination, "region" | "coordinates" | "season" | "note" | "prompt" | "visual" | "photo" | "photoCandidates" | "photoKind" | "generation" | "generationNotice">>;
 
 const localPhotoModification = "原图等比缩小并转换为 WebP；页面以裁切和暗色渐变呈现。图像衍生物沿用原许可。";
 
@@ -41,14 +52,14 @@ export const destinationGallery: readonly GalleryDestination[] = [
     note: "山色沉入五花海，风把秋天写得很轻。沿着木栈道慢走，把一整天交给澄澈的蓝。",
     prompt: "想在秋天去九寨沟旅行 3 天，和朋友一起看五花海与彩林，沿栈道轻松慢走，留足休息和拍照的时间。请帮我规划交通、住宿和每日路线。",
     photo: {
-      src: "/images/jiuzhaigou-home.jpg",
+      src: "/images/gallery/jiuzhaigou.webp",
       alt: "九寨沟五花海的碧蓝湖水、彩林与群山实景",
       position: "center 54%",
-      author: "Chensiyuan",
-      source: "https://commons.wikimedia.org/wiki/File:1_jiuzhaigou_valley_wu_hua_hai_2011b.jpg",
-      license: "CC BY-SA 4.0",
-      licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
-      modification: "使用原有 1280px 缩略图；页面以裁切和暗色渐变呈现。图像衍生物沿用 CC BY-SA 4.0。",
+      author: "George Lu",
+      source: "https://commons.wikimedia.org/wiki/File:%E4%B9%9D%E5%AF%A8%E6%B2%9F%E4%BA%94%E8%8A%B1%E6%B5%B7%E5%85%A8%E6%99%AF_Jiuzhaigou_Five_Flower_Lake_Panorama.jpg",
+      license: "CC BY 2.0",
+      licenseUrl: "https://creativecommons.org/licenses/by/2.0/",
+      modification: localPhotoModification,
     },
   },
   {
@@ -131,9 +142,37 @@ export const destinationGallery: readonly GalleryDestination[] = [
       modification: localPhotoModification,
     },
   },
-];
+].map((place) => ({ ...place, photoKind: "commons" as const }));
 
+// Licensed local photographs and original drawings; no hot-linked images.
+(destinationGallery as GalleryDestination[]).push(...additions as GalleryDestination[]);
 export const defaultDestination = destinationGallery[0];
+
+export function mergeGallery(
+  custom: readonly GalleryDestination[],
+  overrides: Readonly<Record<string, GalleryOverride>> = {},
+) {
+  return [
+    ...destinationGallery.map((place) => {
+      const override = overrides[place.id];
+      if (!override) return place;
+      // Older regeneration saved atmosphere fallbacks over built-in photos.
+      // Keep their fieldnotes/drawing edits, but restore the licensed photograph.
+      if (override.photoKind === "atmosphere") {
+        const { photo: _photo, photoKind: _kind, photoCandidates: _candidates, ...drawing } = override;
+        return { ...place, ...drawing };
+      }
+      return { ...place, ...override };
+    }),
+    ...custom,
+  ];
+}
+
+export function nextGalleryDestination(places: readonly GalleryDestination[], currentId: string, photographyOnly = false) {
+  const available = photographyOnly ? places.filter((place) => place.photoKind !== "atmosphere") : places;
+  const index = available.findIndex((place) => place.id === currentId);
+  return available[(index + 1) % available.length] ?? defaultDestination;
+}
 
 /** City cards use photographs of their own destinations, never substitute scenery. */
 export const samplePhotography: Record<"杭州" | "成都" | "青岛", GalleryPhoto> = {

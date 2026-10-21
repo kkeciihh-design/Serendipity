@@ -1,4 +1,5 @@
 import { planEventEnd, planEventStart, sortPlanEvents } from "./plan";
+import { sanitizeTravelerText } from "./content-sanitizer";
 import type { ExportSnapshot, MobileExportOptions } from "./export-snapshot";
 import { exactTransportTimeCopy } from "./trip-hard-constraints";
 const escape = (v: string) => v.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -68,7 +69,7 @@ export function exportPrivacy(snapshot: ExportSnapshot, options: MobileExportOpt
   }
   const seats = plan.tickets.map((t) => t.seat).filter((s): s is string => Boolean(s));
   const clean = (value: string | null | undefined) => {
-    let s = exactTransportTimeCopy(value ?? "", plan.requestSnapshot);
+    let s = sanitizeTravelerText(exactTransportTimeCopy(value ?? "", plan.requestSnapshot));
     if (!options.includePrivateAddress) {
       for (const token of [...privateNames].filter(Boolean).sort((a, b) => b.length - a.length)) s = s.replaceAll(token, "私人地点已隐藏");
       // Redact residential fragments, never the whole transport paragraph. In

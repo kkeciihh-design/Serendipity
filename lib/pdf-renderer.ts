@@ -24,14 +24,15 @@ export async function printPdf(html: string, signal?: AbortSignal): Promise<PdfM
       const text = document.body.textContent ?? "";
       if (!(await document.fonts.load('12px "Noto Sans SC"', text)).length || !document.fonts.check('12px "Noto Sans SC"', text)) throw new Error("FONT_MISSING");
       await Promise.all([...document.images].map(async (img) => { await img.decode(); if (!img.naturalWidth) throw new Error("IMAGE_MISSING"); }));
-      if (!document.querySelector(".event") || !document.querySelector("#checklist")) throw new Error("EMPTY_DOCUMENT");
+      if (!document.querySelector(".event") || !document.querySelector("#preparation")) throw new Error("EMPTY_DOCUMENT");
       if (document.body.dataset.pdfMode === "complete" && [...document.querySelectorAll(".day")].some((day) => !day.querySelector("svg,.map-unavailable"))) throw new Error("MAP_MISSING");
     });
     const metadata = await page.evaluate((maxPages) => {
-      const originalText = (document.body.textContent ?? "").replace(/\s/g, "");
+      const footer = document.querySelector<HTMLElement>("body>footer")!;
+      const originalText = [...document.body.childNodes].filter((node) => node !== footer)
+        .map((node) => node.textContent ?? "").join("").replace(/\s/g, "");
       const eventIds = [...document.querySelectorAll<HTMLElement>("[data-event]")].map((e) => e.dataset.event!);
       const header = document.querySelector<HTMLElement>("body>header")!;
-      const version = [...header.querySelectorAll("p")].find((p) => p.textContent?.startsWith("计划 V"))!.textContent!;
       const title = header.querySelector("h1")!.textContent!;
       const units: { node: HTMLElement; chapter?: string; fresh?: boolean }[] = [{ node: header, chapter: "旅行总览" }];
       for (const section of [...document.querySelectorAll<HTMLElement>("main>section")]) {
@@ -39,27 +40,20 @@ export async function printPdf(html: string, signal?: AbortSignal): Promise<PdfM
         const chapter = heading.textContent!;
         if (section.classList.contains("day")) {
           const visuals = [...section.querySelector<HTMLElement>(".visuals")!.children] as HTMLElement[];
-          const first = document.createElement("section"); first.append(heading, ...[...section.children].filter((node) => node.matches(".weather")), visuals.shift()!);
+          const first = document.createElement("section");
+          const route = section.querySelector<HTMLElement>(".day-route");
+          first.append(heading);
+          if (route) first.append(route);
+          first.append(...[...section.children].filter((node) => node.matches(".weather")), visuals.shift()!);
           units.push({ node: first, chapter }, ...visuals.map((node) => ({ node, chapter })));
           const events = [...section.querySelectorAll<HTMLElement>(".timeline>.event")];
           units.push(...events.map((node) => ({ node, chapter: `${chapter} · 时间轴` })));
         } else {
-          const children = [...section.children].flatMap((node) => {
-            if (!node.classList.contains("cost-grid")) return [node as HTMLElement];
-            // Treat each pair of compact expense rows as one page unit. A
-            // complete grid would strand its heading above a large blank area.
-            const costs = [...node.children], rows: HTMLElement[] = [];
-            for (let i = 0; i < costs.length; i += 2) {
-              const row = document.createElement("div"); row.className = "cost-grid";
-              row.append(...costs.slice(i, i + 2)); rows.push(row);
-            }
-            return rows;
-          });
-          const first = document.createElement("section"); first.append(...children.splice(0, 2));
+          const children = [...section.children] as HTMLElement[];
+          const first = document.createElement("section"); first.id = section.id; first.append(...children.splice(0, 2));
           units.push({ node: first, chapter, fresh: false }, ...children.map((node) => ({ node, chapter })));
         }
       }
-      units.push({ node: document.querySelector<HTMLElement>("body>footer")!, chapter: "资料结束" });
       document.body.replaceChildren();
       const sheets: HTMLElement[] = []; let sheet: HTMLElement, area: HTMLElement, chapter = "";
       function fresh() {
@@ -71,7 +65,41 @@ export async function printPdf(html: string, signal?: AbortSignal): Promise<PdfM
         sheet.append(h, area); document.body.append(sheet); sheets.push(sheet);
       }
       function fits() { return area.scrollHeight <= area.clientHeight + 1 && area.scrollWidth <= area.clientWidth + 1; }
+      function appendCosts(node: HTMLElement) {
+        const costs = [...node.children] as HTMLElement[];
+        let offset = 0;
+        while (offset < costs.length) {
+          const grid = node.cloneNode(false) as HTMLElement;
+          const left = document.createElement("div"), right = document.createElement("div");
+          grid.append(left, right); area.append(grid);
+          let count = 0;
+          const layout = (size: number) => {
+            const split = Math.ceil(size / 2);
+            left.replaceChildren(...costs.slice(offset, offset + split));
+            right.replaceChildren(...costs.slice(offset + split, offset + size));
+          };
+          // Measure each candidate split in its final two-column layout. Both
+          // screen and print now use the same DOM and left-then-right order.
+          while (offset + count < costs.length) {
+            layout(count + 1);
+            if (!fits()) { costs[offset + count].remove(); layout(count); break; }
+            count += 1;
+          }
+          if (count) { offset += count; }
+          else {
+            grid.remove();
+            const hasContent = [...area.children].some((child) => !(child as HTMLElement).dataset.repeat);
+            if (!hasContent) { append(costs[offset]); offset += 1; }
+          }
+          if (offset < costs.length) {
+            fresh();
+            const heading = document.createElement("h2"); heading.dataset.repeat = "true";
+            heading.textContent = `${chapter}（续）`; area.append(heading);
+          }
+        }
+      }
       function append(node: HTMLElement, continued?: HTMLElement) {
+        if (node.matches(".cost-grid")) { appendCosts(node); return; }
         area.append(node);
         if (fits()) return;
         const nodeHeight = node.getBoundingClientRect().height;
@@ -91,7 +119,7 @@ export async function printPdf(html: string, signal?: AbortSignal): Promise<PdfM
           repeat.textContent = `${node.querySelector(".number")?.textContent ?? ""} ${node.querySelector("h3")?.textContent ?? ""}（续）`;
         }
         const wrap = (child: HTMLElement) => {
-          const container = document.createElement("div"); container.className = node.className;
+          const container = document.createElement("div"); container.className = node.className; container.id = node.id;
           if (node.dataset.event) container.dataset.event = node.dataset.event;
           container.append(child); return container;
         };
@@ -128,7 +156,8 @@ export async function printPdf(html: string, signal?: AbortSignal): Promise<PdfM
         content.querySelectorAll("[data-repeat]").forEach((node) => node.remove());
         if (!content.textContent?.trim()) throw new Error("EMPTY_PAGE");
         const footer = document.createElement("div"); footer.className = "pdf-footer";
-        const left = document.createElement("span"); left.textContent = version;
+        const left = document.createElement("span");
+        left.textContent = i === sheets.length - 1 ? `${title} · 行程结束 · 请核对返家安排` : title;
         const right = document.createElement("span"); right.textContent = `第 ${i + 1} / ${sheets.length} 页`;
         footer.append(left, right); s.append(footer);
       }

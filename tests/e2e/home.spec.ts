@@ -69,7 +69,7 @@ test("顶部导航继续打开旅行列表、运行状态与设置", async ({ pa
   const destinations = [
     { name: "我的旅行", path: "/trips", heading: "我的旅行" },
     { name: "运行状态", path: "/runtime", heading: "运行状态与数据" },
-    { name: "个人设置", path: "/settings", heading: "AI 服务与旅行数据" },
+    { name: "个人设置", path: "/settings", heading: "AI 服务与旅行工作台" },
   ];
   for (const destination of destinations) {
     await page.goto("/");

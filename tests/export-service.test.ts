@@ -26,8 +26,9 @@ describe("durable coherent export records", () => {
       const { id: oldId, createdAt, updatedAt, ...fields } = old; void oldId; void createdAt; void updatedAt;
       const next = await db.planVersion.create({ data: { ...fields, versionNumber: 2 } });
       await db.trip.update({ where: { id }, data: { currentPlanVersionId: next.id } });
-      await db.executionState.update({ where: { tripId: id }, data: { revision: 99 } });
-      expect(html.split("</head>")[1]).toContain("执行修订 4"); expect(html).not.toContain("2040-01-01");
+      await db.executionState.update({ where: { tripId: id }, data: { revision: 99, payload:JSON.stringify({ startedAt:null,endedAt:null,currentEventId:"return",location:null,items:[] }) } });
+      const body = html.split("</head>")[1];
+      expect(body).toContain("已手动记录完成 1 / 13 项"); expect(body).toContain("当时当前步骤：午餐"); expect(html).not.toContain("2040-01-01");
       return original(html, signal);
     });
     try {
@@ -58,9 +59,9 @@ describe("durable coherent export records", () => {
     const spy = vi.spyOn(renderer, "screenshotLongImage").mockImplementation(async (html, prefix, signal) => {
       // A concurrent update can commit during the slow renderer. It must not be
       // queried back into this file, even when R, V and execution are now newer.
-      await db.executionState.update({ where: { tripId: id }, data: { revision: 99 } });
+      await db.executionState.update({ where: { tripId: id }, data: { revision: 99, payload:JSON.stringify({ startedAt:null,endedAt:null,currentEventId:"return",location:null,items:[] }) } });
       const body = html.split("</head>")[1];
-      expect(body.includes("执行修订 4")).toBe(true); expect(body.includes("4 人")).toBe(true); expect(body.includes("2040-01-01")).toBe(false);
+      expect(body).toContain("已手动记录完成 1 / 13 项"); expect(body).toContain("当时当前步骤：午餐"); expect(body.includes("4 人")).toBe(true); expect(body.includes("2040-01-01")).toBe(false);
       return original(html, prefix, signal);
     });
     try {

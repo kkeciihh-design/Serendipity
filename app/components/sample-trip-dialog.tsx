@@ -81,7 +81,6 @@ export function SampleTripDialog({ trip, issue, mode, onClose, onStartPlanning }
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
-  const backdropPressed = useRef(false);
   const [section, setSection] = useState(0);
   const [dayIndex, setDayIndex] = useState(0);
   const day = trip.days[dayIndex];
@@ -117,26 +116,18 @@ export function SampleTripDialog({ trip, issue, mode, onClose, onStartPlanning }
     scrollToContent();
   }
 
-  function isOutsideCard(event: { clientX: number; clientY: number }) {
-    const bounds = dialogRef.current?.getBoundingClientRect();
-    return bounds && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom);
-  }
-
   return (
     <dialog
       ref={dialogRef}
-      className={styles.dialog}
+      className={styles.mask}
       aria-labelledby={`${id}-title`}
       aria-describedby={`${id}-note`}
       data-testid="sample-trip-dialog"
       onCancel={(event) => { event.preventDefault(); onClose(); }}
       onKeyDown={keepFocusInDialog}
-      onPointerDown={(event) => { backdropPressed.current = Boolean(isOutsideCard(event)); }}
-      onClick={(event) => {
-        if (backdropPressed.current && isOutsideCard(event)) onClose();
-        backdropPressed.current = false;
-      }}
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
+      <div className={styles.dialog} onClick={(event) => event.stopPropagation()}>
       <header className={styles.windowHeader}>
         <p><span className={styles.folio}>NO. {issue ?? "01"}</span><span className={styles.headerDivider} />精选旅程<span className={styles.headerLatin}> / THE TRAVEL NOTES</span></p>
         <button type="button" className={styles.close} aria-label="关闭完整规划" onClick={onClose}><X size={20} strokeWidth={1.5} aria-hidden="true" /></button>
@@ -221,6 +212,7 @@ export function SampleTripDialog({ trip, issue, mode, onClose, onStartPlanning }
         <p>把这份灵感，写成你的旅程<span>填入旅行想法后，还可以自由调整。</span></p>
         <button type="button" className={styles.planButton} onClick={onStartPlanning}>以此样本开启规划 <span aria-hidden="true">→</span></button>
       </footer>
+      </div>
     </dialog>
   );
 }

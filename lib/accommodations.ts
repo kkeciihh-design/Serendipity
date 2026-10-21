@@ -3,7 +3,8 @@ import { budgetFactorsFromSnapshot, calculateBudgetSummary, costItemLineTotals, 
 import { confirmedBudgetLimit } from "./attractions";
 import { nextPlanDate, planEventEnd, sortPlanEvents, type PlanEvent } from "./plan";
 import type { PlanVersionRecord } from "./plan-service";
-import { toWgs84, type Place } from "./places";
+import { toWgs84, type Coordinate, type Place } from "./places";
+import { destinationReferenceCoordinate } from "./route-illustration";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((v) => Number.isFinite(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v);
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
@@ -22,7 +23,7 @@ export const stayInputSchema = z.object({
 export type StayInput = z.infer<typeof stayInputSchema>;
 export type StayArea = {
   id: string; name: string; focus: string; reference: Place | null; reasons: string[];
-  distances: { label: string; name: string; meters: number | null }[];
+  distances: { label: string; name: string; meters: number | null; estimated: boolean }[];
   price: { minCents: number | null; maxCents: number | null; source: string };
   warnings: string[]; conflicts: string[]; score: number;
 };
@@ -59,9 +60,9 @@ export function stayInputIssues(plan: PlanVersionRecord, eventId: string, input:
   }
   return issues;
 }
-export function stayPointDistance(a: Place | null, b: Place | null) {
+export function stayPointDistance(a: (Coordinate & { coordinateSystem?: Place["coordinateSystem"] }) | null, b: (Coordinate & { coordinateSystem?: Place["coordinateSystem"] }) | null) {
   if (!a || !b) return null;
-  const p = toWgs84(a, a.coordinateSystem), q = toWgs84(b, b.coordinateSystem), r = Math.PI / 180;
+  const p = toWgs84(a, a.coordinateSystem ?? "WGS84"), q = toWgs84(b, b.coordinateSystem ?? "WGS84"), r = Math.PI / 180;
   const h = Math.sin((q.latitude - p.latitude) * r / 2) ** 2 + Math.cos(p.latitude * r) * Math.cos(q.latitude * r) * Math.sin((q.longitude - p.longitude) * r / 2) ** 2;
   return Math.round(12_742_000 * Math.asin(Math.min(1, Math.sqrt(h))));
 }
@@ -78,6 +79,17 @@ export function buildStayRecommendations(plan: PlanVersionRecord, eventId: strin
   const ticket = plan.tickets.find((t) => t.direction === "return" && t.status === "active" && t.confirmedAt);
   const early = (ticket?.departureTime ?? returning?.startTime ?? "23:59") < "10:00";
   const ref = (e?: PlanEvent) => plan.places.find((p) => p.id === e?.placeId) ?? null;
+  // Comparison coordinates never become a confirmed Place or hotel selection.
+  const estimate = (e?: PlanEvent) => {
+    const place = ref(e);
+    if (place) return { point: place, estimated: false, destinationOnly: false };
+    if (e && typeof e.latitude === "number" && Number.isFinite(e.latitude) && Math.abs(e.latitude) <= 90 &&
+      typeof e.longitude === "number" && Number.isFinite(e.longitude) && Math.abs(e.longitude) <= 180 && (e.latitude !== 0 || e.longitude !== 0)) {
+      return { point: { latitude: e.latitude, longitude: e.longitude, coordinateSystem: e.coordinateSystem }, estimated: true, destinationOnly: false };
+    }
+    const named = destinationReferenceCoordinate(e?.locationName) ?? destinationReferenceCoordinate(e?.title);
+    return { point: named ?? destinationReferenceCoordinate(plan.requestSnapshot.destination), estimated: true, destinationOnly: !named };
+  };
   const returnPlace = ref(returning);
   const returnName = ticket?.fromName || returning?.locationName || "返程车站 / 机场";
   const anchors = [
@@ -93,8 +105,15 @@ export function buildStayRecommendations(plan: PlanVersionRecord, eventId: strin
   const price = { minCents: line?.minCents == null ? null : Math.floor(line.minCents / divisor), maxCents: line?.maxCents == null ? null : Math.ceil(line.maxCents / divisor), source: "本计划原住宿预算分摊，仅作选区比较；不是当地酒店报价，房态未知。" };
   const budget = calculateBudgetSummary(plan.costs, plan.requestSnapshot), hard = confirmedBudgetLimit(plan);
   const areas: StayArea[] = anchors.map((anchor) => {
-    const distances = anchors.map((other) => ({ label: other.focus, name: other.name, meters: stayPointDistance(anchor.place, other.place) }));
+    const origin = estimate(anchor.event);
+    const distances = anchors.map((other) => {
+      const target = estimate(other.event);
+      // The same fallback city centre does not imply zero distance between two unknown stops.
+      const meters = origin.destinationOnly && target.destinationOnly ? null : stayPointDistance(origin.point, target.point);
+      return { label: other.focus, name: other.name, meters, estimated: origin.estimated || target.estimated };
+    });
     const warnings = ["区域参考点仅作方位比较，直线距离不是道路里程或交通时间。", "酒店候选、实际房价与房态尚待查询，未预订。", "入住、离店和行李寄存条件须向具体酒店核对。"];
+    if (distances.some((distance) => distance.estimated && distance.meters !== null)) warnings.push("参考距离采用行程建议坐标或目的地基准，仅为直线估算；确定具体酒店后需重新核对。");
     if (!anchor.place) warnings.push("此参考点尚无已确认坐标，地图保持空缺，请先在地图定位相关活动或站点。");
     if (plan.requestSnapshot.accommodation) warnings.push(`你的住宿偏好：${plan.requestSnapshot.accommodation}；具体房型、噪声和容量待核对。`);
     const conflicts = hard !== null && budget.totalMinCents > hard ? ["原计划已知预算下限已超过明确上限；换区前需调整住宿报价或其他费用。"] : [];

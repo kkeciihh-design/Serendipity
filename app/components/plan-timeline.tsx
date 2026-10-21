@@ -3,7 +3,6 @@ import { businessFetch } from "@/lib/business-fetch";
 
 import {
   ArrowDown,
-  Banknote,
   BedDouble,
   BriefcaseBusiness,
   CircleAlert,
@@ -25,7 +24,7 @@ import {
   formatPlanEventTimeRange,
   type PlanOverviewDay,
 } from "@/lib/plan-overview";
-import { costCertaintyLabels, eventCostSummary, formatMoneyRange } from "@/lib/budget";
+import { eventCostSummary } from "@/lib/budget";
 import {
   planEventEnd,
   planEventStart,
@@ -36,7 +35,7 @@ import {
 } from "@/lib/plan";
 import type { PlanVersionClient } from "./plan-overview";
 import type { EvidenceFactClient, EvidenceField } from "@/lib/evidence";
-import { effectiveEvidenceStatus, evidenceFieldLabels, evidenceStatusLabels, summarizeEventEvidence } from "@/lib/evidence";
+import { effectiveEvidenceStatus, evidenceFieldLabels, evidenceStatusLabels } from "@/lib/evidence";
 import { numberPlanEvents } from "@/lib/map-link";
 import { RouteSummary, routeModeLabels } from "./route-summary";
 import { EvidenceDrawer } from "./evidence-drawer";
@@ -46,6 +45,7 @@ import { RestaurantTimelineCard } from "./restaurant-card";
 import type { MapLinkTarget } from "./plan-map";
 import { useVersionedDraft } from "./use-versioned-draft";
 import { predepartureBriefingIds, timelinePresentation } from "@/lib/timeline-presentation";
+import { sanitizeTravelerText } from "@/lib/content-sanitizer";
 import styles from "./plan-timeline.module.css";
 
 const eventStatusLabels: Record<PlanEventStatus, string> = {
@@ -92,11 +92,22 @@ const incomingDraftValue = (field: keyof Draft, value: Draft[keyof Draft]) => {
 
 function formatGap(minutes: number) {
   if (minutes < 60) {
-    return `${minutes} 分钟`;
+    return `约 ${minutes} 分钟`;
   }
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest === 0 ? `${hours} 小时` : `${hours} 小时 ${rest} 分钟`;
+  const hours = minutes / 60;
+  const compactHours = Number.isInteger(hours)
+    ? `${hours}`
+    : `${hours.toFixed(2)}`.replace(/0+$/, "").replace(/\.$/, "");
+  return `约 ${compactHours} 小时`;
+}
+
+function formatCardCost(minCents: number | null, maxCents: number | null) {
+  if (minCents === null) return "待确认";
+  if (minCents === 0 && (maxCents ?? 0) === 0) return "免费";
+  const min = minCents / 100;
+  const max = maxCents === null || maxCents === minCents ? null : maxCents / 100;
+  const amount = (value: number) => Number.isInteger(value) ? `${value}` : value.toFixed(2);
+  return max === null ? `¥${amount(min)}` : `¥${amount(min)}–${amount(max)}`;
 }
 
 function connectionLabel(current: PlanEvent, next: PlanEvent) {
@@ -121,6 +132,12 @@ async function readApiError(response: Response) {
     payload?.error ??
     `保存失败（HTTP ${response.status}）。当前计划保持不变，请稍后重试。`
   );
+}
+
+function EventNote({ note }: { note: string | null | undefined }) {
+  const text = sanitizeTravelerText(note);
+  if (!text) return null;
+  return <span className="whitespace-pre-line text-[15px] leading-7 text-[#26322B]">{text}</span>;
 }
 
 export function PlanTimeline({
@@ -262,10 +279,6 @@ export function PlanTimeline({
             numberedEvents[index + 1]?.event ??
             (index === numberedEvents.length - 1 ? nextDayFirstEvent : undefined);
           const locked = event.locked ?? false;
-          const eventFacts = currentFacts.filter(
-            (fact) => fact.targetId === event.id,
-          );
-          const evidence = summarizeEventEvidence(eventFacts);
           const presentation = timelinePresentation(event);
           // Never fold a day's transport or sightseeing into a transition row.
           const compact = briefingIds.has(event.id);
@@ -274,9 +287,6 @@ export function PlanTimeline({
             : presentation.category === "stay" ? BedDouble
             : presentation.category === "transit" ? TrainFront
             : presentation.category === "rest" ? Sofa : BriefcaseBusiness;
-          const openingConflict = advisories.some((item) => item.eventIds.includes(event.id) && item.category === "opening_hours" && item.severity === "action");
-          const status = openingConflict ? "conflict" : evidence.status;
-          const statusLabel = openingConflict ? "开放冲突 · 需调整" : status === "conflict" ? "需调整" : status === "stale" ? "待复核" : status === "verified" ? "已核实" : "待核实";
           const eventAdvisories = advisories.filter((item) => item.eventIds.includes(event.id) && (!item.acknowledged || item.severity === "action"));
           const eventCost = eventCostSummary(event.id, plan.costs, plan.requestSnapshot);
           const route = next
@@ -299,11 +309,11 @@ export function PlanTimeline({
                   aria-expanded={selectedEventId === event.id}
                   aria-label={`第 ${index + 1} 项：${event.title}`}
                   className={styles.eventMain}
-                  title={compact ? `${event.title}${event.note ? ` · ${event.note}` : ""}` : undefined}
+                  title={compact ? `${event.title}${event.note ? ` · ${sanitizeTravelerText(event.note)}` : ""}` : undefined}
                 >
                   {compact ? <>
                     <span className={styles.visitBadge} data-testid="timeline-visit-number">{visitLabel}</span>
-                    <span className={styles.briefingBody}><span className={styles.briefingLabel}>行前提示 · {event.startTime}</span><strong>{event.title}</strong>{event.note ? <span>{event.note}</span> : null}</span>
+                    <span className={styles.briefingBody}><span className={styles.briefingLabel}>行前提示 · {event.startTime}</span><strong>{event.title}</strong>{event.note ? <span>{sanitizeTravelerText(event.note)}</span> : null}</span>
                   </> : <>
                     <span className={styles.timeRail}>
                       <span className={styles.visitBadge} data-testid="timeline-visit-number">{visitLabel}</span>
@@ -313,23 +323,34 @@ export function PlanTimeline({
                     <span className={styles.eventBody}>
                       <span className={styles.titleRow}>
                         <span className={styles.eventTitle}>{event.title}</span>
-                        <span className={styles.statusBadge} data-status={status} title={`${eventStatusLabels[event.status ?? "suggested"]} · ${evidence.label}`}>{statusLabel}</span>
                       </span>
                       {event.locationName && event.locationName !== event.title ? <span className={styles.eventLocation}>{event.locationName}</span> : null}
-                      {event.note ? <span className={styles.eventNote}>{event.note}</span> : null}
-                      <span className={styles.costRow}>
-                        <span className={styles.cost}><Banknote aria-hidden="true" className="size-3.5" />{formatMoneyRange(eventCost?.minCents ?? null, eventCost?.maxCents ?? null)}｜{eventCost ? costCertaintyLabels[eventCost.certainty] : "待确认"}</span>
-                        {locked ? <span className={styles.locked}><Lock aria-hidden="true" className="size-3" />已锁定</span> : null}
-                      </span>
+                      <EventNote note={event.note} />
                     </span>
                   </>}
                 </button>
-                {eventAdvisories.map((item) => <button key={item.id} type="button" onClick={onAdvisories} className={styles.advisory}><CircleAlert aria-hidden="true" className="size-3.5 shrink-0" /><span>行程提醒：{item.title}{item.acknowledged ? "（已知，限制仍适用）" : ""}</span></button>)}
-                {!compact && event.type === "activity" ? <AttractionTimelineCard key={`${scope}/${event.id}`} tripId={tripId} plan={plan} event={event} visitLabel={visitLabel} onMap={() => onEventSelect(event.id, "map", day.dayNumber)} onSaved={(savedPlan) => { if (activeScope.current === scope && plan.isCurrent) onSaved(savedPlan); }} /> : null}
-                {!compact && event.type === "meal" ? <RestaurantTimelineCard key={`${scope}/${event.id}`} tripId={tripId} plan={plan} event={event} visitLabel={visitLabel} onMap={() => onEventSelect(event.id, "map", day.dayNumber)} onSaved={(savedPlan) => { if (activeScope.current === scope && plan.isCurrent) onSaved(savedPlan); }} /> : null}
-                {!compact && event.type !== "activity" && event.type !== "meal" ? <div className={styles.eventFooter}>
-                  {event.type === "departure_transport" || event.type === "return_transport" ? <button type="button" onClick={() => onEventSelect(event.id, "transport", event.dayNumber)} className={styles.compactLink} aria-label="查看交通票面" title="查看交通票面"><TrainFront aria-hidden="true" className="size-3.5" /></button> : null}
-                  <button type="button" onClick={() => onEventSelect(event.id, "map", day.dayNumber)} aria-label={`定位地图：${visitLabel}${event.title}`} title="地图与详情" className={compact ? styles.compactLink : styles.mapLink}><MapPin aria-hidden="true" className="size-3.5" />{compact ? null : "地图与详情"}</button>
+                {!compact ? <div className={`${styles.cardMetaRow} mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#18221D]/8 pt-2.5 text-[13px] font-medium text-[#4A5850]`}>
+                  <span className={styles.factFooter}>
+                    <span className={styles.factItem}>
+                      <span className={styles.factText}>{eventCost ? <strong>{formatCardCost(eventCost.minCents, eventCost.maxCents)}</strong> : "待确认"}</span>
+                    </span>
+                    <span className={styles.factItem}>
+                      <span className={styles.factSeparator} aria-hidden="true">·</span>
+                      <span className={styles.factText}>{formatGap(Math.max(1, Math.round(planEventDurationSeconds(event) / 60)))}</span>
+                    </span>
+                    {locked ? <span className={styles.factItem}><span className={styles.factSeparator} aria-hidden="true">·</span><span className={styles.factText}><Lock aria-hidden="true" className="size-3" />已锁定</span></span> : null}
+                  </span>
+                  <span className={styles.cardMetaRight}>
+                    {event.type === "activity" ? <AttractionTimelineCard key={`${scope}/${event.id}`} tripId={tripId} plan={plan} event={event} visitLabel={visitLabel} actionsOnly onMap={() => onEventSelect(event.id, "map", day.dayNumber)} onSaved={(savedPlan) => { if (activeScope.current === scope && plan.isCurrent) onSaved(savedPlan); }} /> : null}
+                    {event.type === "meal" ? <RestaurantTimelineCard key={`${scope}/${event.id}`} tripId={tripId} plan={plan} event={event} visitLabel={visitLabel} actionsOnly onMap={() => onEventSelect(event.id, "map", day.dayNumber)} onSaved={(savedPlan) => { if (activeScope.current === scope && plan.isCurrent) onSaved(savedPlan); }} /> : null}
+                    {event.type !== "activity" && event.type !== "meal" ? <>
+                      {event.type === "departure_transport" || event.type === "return_transport" ? <button type="button" onClick={() => onEventSelect(event.id, "transport", event.dayNumber)} className={styles.compactLink} aria-label="查看交通票面" title="查看交通票面"><TrainFront aria-hidden="true" className="size-3.5" /></button> : null}
+                      <button type="button" onClick={() => onEventSelect(event.id, "map", day.dayNumber)} aria-label={`定位地图：${visitLabel}${event.title}`} title="地图与详情" className={styles.mapLink}><MapPin aria-hidden="true" className="size-3.5" />地图与详情</button>
+                    </> : null}
+                    {eventAdvisories.length ? <span className={styles.advisoryCorner}>
+                      {eventAdvisories.map((item) => <button key={item.id} type="button" onClick={onAdvisories} className={styles.advisory} aria-label={`行程提醒：${item.title}`} title={`行程提醒：${item.title}`}><CircleAlert aria-hidden="true" className="size-3.5 shrink-0" /><span>{item.title}{item.acknowledged ? "（已知）" : ""}</span></button>)}
+                    </span> : null}
+                  </span>
                 </div> : null}
               </div>
               {route ? <details className={styles.routeConnection}>

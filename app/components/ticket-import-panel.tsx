@@ -11,8 +11,8 @@ const input = "mt-1 min-h-12 w-full min-w-0 rounded-md border border-sand bg-whi
 type Result = RecognitionDraft & Omit<TicketImportSource, "imageFingerprint">;
 export type ImportReview = { fields: RecognizedTicket; source: TicketImportSource; resolution: ImportResolution; targetId?: string };
 
-export function TicketImportPanel({ tickets, disabled, onReview, onRefund, onDiscard }: {
-  tickets: Ticket[]; disabled: boolean; onReview: (review: ImportReview) => void; onRefund: (id: string) => void; onDiscard: () => void;
+export function TicketImportPanel({ tickets, disabled, onReview, onRefund, onDiscard, compact = false }: {
+  tickets: Ticket[]; disabled: boolean; onReview: (review: ImportReview) => void; onRefund: (id: string) => void; onDiscard: () => void; compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [bitmap, setBitmap] = useState<ImageBitmap | null>(null);
@@ -103,9 +103,9 @@ export function TicketImportPanel({ tickets, disabled, onReview, onRefund, onDis
   const active = tickets.filter((ticket) => ticket.status === "active");
   const positions = { left: "左边界", top: "上边界", right: "右边界", bottom: "下边界" };
   const point = (event: React.PointerEvent<HTMLCanvasElement>) => { const rect = event.currentTarget.getBoundingClientRect(); return { x: Math.max(0, Math.min(100, (event.clientX - rect.left) / rect.width * 100)), y: Math.max(0, Math.min(100, (event.clientY - rect.top) / rect.height * 100)) }; };
-  return <section className="mt-4 min-w-0 rounded-md border border-sand bg-cream p-4" aria-label="截图导入">
+  return <section className={compact ? "contents" : "mt-4 min-w-0 rounded-md border border-sand bg-cream p-4"} aria-label="截图导入">
     <button className={button} disabled={disabled} onClick={() => { if (open) { clear(); setMessage(""); } setOpen(!open); }}>{open ? "关闭并清除票图" : "导入高铁票截图"}</button>
-    {open ? <div className="mt-3 min-w-0 space-y-3">
+    {open ? <div className={`mt-3 min-w-0 space-y-3 ${compact ? "order-last basis-full" : ""}`}>
       <p className="text-sm leading-6 text-graphite">先裁剪票面、移除姓名和证件等无关区域。仅选中区域发送到本机 OCR，不发往第三方。图片只在内存中使用，关闭、提交或 30 分钟后清除；不会进入相册或日志。</p>
       <label className="block text-sm font-semibold">选择票图（PNG / JPEG / WebP，≤10MB）<input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy || disabled} className={`${input} py-2`} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ""; }} /></label>
       {bitmap ? <>

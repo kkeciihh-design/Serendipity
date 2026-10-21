@@ -6,6 +6,7 @@ import { validateTripHardTimes } from "./trip-hard-constraints";
 import { validateArrivalLunch, validateVisitHours } from "./planning-quality";
 import { deriveGeneratedPlanCosts } from "./generated-costs";
 import { confirmedRequestBudgetLimit } from "./budget-limit";
+import { sanitizeTravelerText } from "./content-sanitizer";
 
 export const planEventTypeSchema = z.enum([
   "departure_transport",
@@ -222,11 +223,15 @@ export function planEventDurationSeconds(event: PlanEvent) {
 /** Read projection for old generated copy; confirmed or locked event facts stay intact. */
 export function normalizePlanChineseCopy(plan: PlanContent): PlanContent {
   return {
-    events: plan.events.map((event) => event.locked || event.status === "confirmed" ? event : {
-      ...event,
-      title: normalizeGeneratedChineseText(event.title),
-      locationName: event.locationName === null ? null : normalizeGeneratedChineseText(event.locationName),
-      note: event.note == null ? event.note : normalizeGeneratedChineseText(event.note),
+    events: plan.events.map((event) => {
+      const normalized = event.locked || event.status === "confirmed" ? event : {
+        ...event,
+        title: normalizeGeneratedChineseText(event.title),
+        locationName: event.locationName === null ? null : normalizeGeneratedChineseText(event.locationName),
+      };
+      const note = normalized.note == null ? null : event.locked || event.status === "confirmed"
+        ? normalized.note : normalizeGeneratedChineseText(normalized.note);
+      return { ...normalized, note: note == null ? null : sanitizeTravelerText(note) };
     }),
     pendingItems: plan.pendingItems.map((item) => ({
       ...item,

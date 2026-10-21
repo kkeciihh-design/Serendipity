@@ -26,7 +26,7 @@ async function seed(request: APIRequestContext, days = 3) {
   return { id: trip.id as string, snapshot, data };
 }
 async function open(page: Page, id: string) { await page.goto(`/trips/${id}`); await page.getByRole("tab", { name: "住宿推荐", exact: true }).click(); await expect(page.getByLabel("房间数", { exact: true })).toBeVisible(); }
-async function propose(page: Page) { await page.getByRole("checkbox", { name: /我已核对地点/ }).check(); await page.getByRole("button", { name: "预览住宿选择", exact: true }).click(); await expect(page.getByLabel("住宿调整预览", { exact: true })).toBeVisible(); }
+async function propose(page: Page) { await expect(page.getByRole("button", { name: "预览住宿选择", exact: true })).toBeEnabled(); await page.getByRole("button", { name: "预览住宿选择", exact: true }).click(); await expect(page.getByLabel("住宿调整预览", { exact: true })).toBeVisible(); }
 test("area comparison, two-night pricing and responsive layouts persist across refresh and history", async ({ page, request }) => {
   const trip = await seed(request); await fs.mkdir(evidence, { recursive: true }); await fs.writeFile(path.join(evidence, "demo-seed.json"), JSON.stringify(trip.data, null, 2));
   await open(page, trip.id); await expect(page.getByRole("radio", { name: /^选择/ })).toHaveCount(3);
@@ -76,11 +76,11 @@ test("load errors, save failures, cancelled previews and empty hotel searches ke
   expect(await db.planVersion.count({ where: { tripId: trip.id } })).toBe(1);
   await page.getByRole("radio", { name: "先保存区域偏好", exact: true }).check();
   await page.route(url, async (r) => { if (r.request().method() === "POST") { await new Promise((resolve) => setTimeout(resolve, 1500)); return r.fulfill({ status: 503, json: { error: "迟到结果" } }).catch(() => undefined); } return r.continue(); });
-  await page.getByRole("checkbox", { name: /我已核对地点/ }).check(); await page.getByRole("button", { name: "预览住宿选择", exact: true }).click(); await page.getByRole("button", { name: "取消本次查询", exact: true }).click(); await page.waitForTimeout(1700);
+  await page.getByRole("button", { name: "预览住宿选择", exact: true }).click(); await page.getByRole("button", { name: "取消本次查询", exact: true }).click(); await page.waitForTimeout(1700);
   await expect(page.getByLabel("住宿调整预览")).toHaveCount(0); await expect(page.getByRole("button", { name: "预览住宿选择", exact: true })).toBeEnabled();
 });
 test("invalid dates and cross-origin writes cannot create a new version", async ({ page, request }) => {
-  const trip = await seed(request, 2); await open(page, trip.id); await page.getByLabel("离店日期", { exact: true }).fill(trip.snapshot.startDate!); await page.getByRole("checkbox", { name: /我已核对地点/ }).check(); await page.getByRole("button", { name: "预览住宿选择", exact: true }).click(); await expect(page.getByRole("tabpanel", { name: "住宿推荐", exact: true }).getByRole("alert")).toContainText("入住必须早于离店");
+  const trip = await seed(request, 2); await open(page, trip.id); await page.getByLabel("离店日期", { exact: true }).fill(trip.snapshot.startDate!); await page.getByRole("button", { name: "预览住宿选择", exact: true }).click(); await expect(page.getByRole("tabpanel", { name: "住宿推荐", exact: true }).getByRole("alert")).toContainText("入住必须早于离店");
   expect((await request.post(`/api/trips/${trip.id}/plans/1/accommodations`, { headers: { Origin: "https://outside.example" }, data: {} })).status()).toBe(403);
   expect(await db.planVersion.count({ where: { tripId: trip.id } })).toBe(1);
 });

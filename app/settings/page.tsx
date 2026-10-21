@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { ArrowLeft, Settings } from "lucide-react";
 import { cookies, headers } from "next/headers";
 import { isLocalHeaders } from "@/lib/request-security";
 import { verifySessionToken } from "@/lib/security";
@@ -7,7 +6,9 @@ import { getSafeSettings, isPasswordConfigured } from "@/lib/settings";
 import { PasswordSetupForm } from "./components/password-setup-form";
 import { SettingsLoginForm } from "./components/settings-login-form";
 import { SettingsWorkspace } from "./components/settings-workspace";
-import { BackupManager } from "./components/backup-manager";
+import { SettingsGallery } from "@/app/components/gallery-studio";
+import { activeCoverPhoto } from "@/lib/cover-destination";
+import { EditorialCover } from "@/app/components/editorial-cover";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export default async function SettingsPage() {
   const sessionToken = cookieStore.get("serendipity_session")?.value;
   const authenticated = verifySessionToken(sessionToken);
   const csrfToken = cookieStore.get("serendipity_csrf")?.value ?? "";
+  const safeSettings = authenticated ? await getSafeSettings() : null;
 
   let pageContent;
   if (!passwordConfigured) {
@@ -29,36 +31,38 @@ export default async function SettingsPage() {
     pageContent = <SettingsLoginForm />;
   } else {
     pageContent = (
-      <><SettingsWorkspace
-        initialSettings={await getSafeSettings()}
+      <SettingsWorkspace
+        initialSettings={safeSettings!}
         csrfToken={csrfToken}
-      /><BackupManager csrfToken={csrfToken} /></>
+      />
     );
   }
 
   return (
-    <main className="min-h-dvh bg-cream px-5 py-8 sm:px-10 sm:py-12 lg:px-16">
-      <div className="mx-auto max-w-4xl">
-        <Link
-          href="/"
-          className="inline-flex min-h-11 items-center gap-2 rounded-md px-1 text-sm font-medium text-graphite transition-colors hover:text-sage"
-        >
-          <ArrowLeft aria-hidden="true" className="size-4" />
-          返回首页
-        </Link>
-        <header className="mt-5 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="flex items-center gap-2 text-sm font-medium text-sage">
-              <Settings aria-hidden="true" className="size-4" />
-              个人设置
-            </p>
-            <h1 className="mt-2 text-3xl font-bold leading-9 text-charcoal">
-              AI 服务与旅行数据
-            </h1>
-          </div>
-        </header>
-        <Link href="/runtime" className="mt-4 inline-flex min-h-11 items-center rounded-md border border-sage/25 px-4 text-sm font-medium text-sage">运行状态与数据位置</Link>
-        <div className="mt-6">{pageContent}</div>
+    <main className="settings-page">
+      {/* The same photographic cover band as /trips and /runtime: the masthead
+          row and the heading share one landscape, and the warm-white workspace
+          begins on a flat edge below it. The page keeps its 1440px column. */}
+      <EditorialCover
+        photo={activeCoverPhoto()}
+        nav={
+          <>
+            <Link className="inline-flex items-center gap-2 rounded-full bg-white/12 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-white/20" href="/">
+              ← 返回首页
+            </Link>
+            <span className="font-serif text-sm tracking-wide text-white/75">Serendipity · 个人旅行规划工作室</span>
+          </>
+        }
+        title="AI 服务与旅行工作台"
+        note="配置模型、地图与天气源，并管理本机旅行数据"
+        tags={[
+          "● 本机工作台",
+          safeSettings?.ai.connectionStatus === "connected" ? "AI 已连接" : authenticated ? "AI 待配置" : "设置受密码保护",
+        ]}
+        actions={<Link className="inline-flex items-center gap-2 rounded-full bg-white/12 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-white/20" href="/runtime">运行状态 ↗</Link>}
+      />
+      <div className="settings-container">
+        <div className="settings-layout"><aside className="settings-sidebar"><p className="studio-eyebrow">WORKSPACE INDEX</p><nav aria-label="设置分类"><a className="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-[15px] font-medium text-[#1E2B24]" href="#ai-service"><span>01</span>AI 模型服务</a><a className="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-[15px] font-medium text-[#1E2B24]" href="#sources"><span>02</span>地图与天气源</a><a className="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-[15px] font-medium text-[#1E2B24]" href="#gallery"><span>03</span>山河壁纸画廊</a><a className="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-[15px] font-medium text-[#1E2B24]" href="#data-management"><span>04</span>数据备份与运行状态</a></nav><div className="settings-health"><span className="health-dot"/>旅行工作台<p className="text-[13px] leading-6">数据保存在本机<br/>{authenticated ? "设置会话已解锁" : "解锁后配置模型与数据服务"}</p><Link className="text-[13px]" href="/trips">回到我的旅行 ↗</Link></div></aside><div className="settings-main">{authenticated ? pageContent : <><div id="ai-service" className="settings-auth">{pageContent}</div>{isLocal && <SettingsGallery/>}</>}</div></div>
       </div>
     </main>
   );

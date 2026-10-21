@@ -61,7 +61,7 @@ export function PdfPanel({ tripId }: { tripId: string }) {
         <p className="mt-2 text-sm text-graphite">{data?.plan ? `当前计划 V${data.plan.versionNumber} · 需求 R${data.plan.requestRevision}` : data ? "请先保存旅行计划。" : "正在读取旅行资料…"}</p>
         <fieldset disabled={busy || !data?.plan} className="mt-4 space-y-4 disabled:opacity-60">
           <label className="block font-semibold">资料内容<select value={mode} onChange={(e) => { setMode(e.target.value); setConfirmed(false); }} className="mt-2 min-h-12 w-full rounded-lg border border-sand bg-cream px-3"><option value="complete">完整手册 · 含每日地图</option><option value="simplified">简化资料 · 无地图</option></select></label>
-          <p className="text-sm leading-6 text-graphite">完整手册包含每日动线、行程、天气、预算和清单。AI 建议标点可直接导出，并标注待核实。</p>
+        <p className="text-sm leading-6 text-graphite">完整手册包含每日动线、行程、天气、预算和清单。建议地点按当日顺序绘制，出发前请核对入口。</p>
           <label className="block font-semibold">导出日期<select value={date} onChange={(e) => { setDate(e.target.value); setConfirmed(false); }} className="mt-2 min-h-12 w-full rounded-lg border border-sand bg-cream px-3"><option value="all">全部日期</option>{data?.plan?.dates.map((d, i) => <option key={d} value={d}>第 {i + 1} 天 · {d}</option>)}</select></label>
           <label className="flex min-h-11 items-center gap-3"><input type="checkbox" className="size-5 accent-sage" checked={photos} onChange={(e) => setPhotos(e.target.checked)} />包含许可照片</label>
           <label className="flex min-h-11 items-center gap-3"><input type="checkbox" className="size-5 accent-sage" checked={address} onChange={(e) => { setAddress(e.target.checked); setConfirmed(false); }} />包含私人起终点地址</label>

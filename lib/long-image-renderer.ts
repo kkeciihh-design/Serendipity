@@ -64,7 +64,11 @@ async function screenshotAtHeight(html: string, prefix: string, renderHeight: nu
             // Direct visual blocks only, never duplicate their descendant text.
             const visuals = [...section.querySelector<HTMLElement>(".visuals")!.children] as HTMLElement[];
             const events = [...section.querySelectorAll<HTMLElement>(":scope>.timeline>.event")];
-            const first = document.createElement("section"); first.append(section.querySelector("h2")!, ...[...section.children].filter((node) => node.matches(".weather")), ...(visuals.length ? [visuals.shift()!] : [events.shift()!]));
+            const first = document.createElement("section");
+            const route = section.querySelector<HTMLElement>(".day-route");
+            first.append(section.querySelector("h2")!);
+            if (route) first.append(route);
+            first.append(...[...section.children].filter((node) => node.matches(".weather")), ...(visuals.length ? [visuals.shift()!] : [events.shift()!]));
             units.push({ node: first, day, newDay: true }, ...[...visuals, ...events].map((node) => ({ node, day })));
           } else units.push({ node: section, day });
         }

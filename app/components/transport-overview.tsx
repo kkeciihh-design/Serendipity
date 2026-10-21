@@ -311,22 +311,26 @@ function DirectionSection({ tripId, plan, direction, hidden, onSaved }: { tripId
 
   return <section hidden={hidden} aria-label={`${directionLabels[direction]}交通`} className="mt-4 min-w-0">
     {!event ? <p className="rounded-md bg-clay-soft p-4 text-sm leading-6 text-clay">这个计划缺少{directionLabels[direction]}交通事件，请先修复行程再录入票面。</p> : <>
-      <div className="flex flex-wrap items-center justify-between gap-3"><h4 className="text-base font-semibold text-charcoal">{directionLabels[direction]} · {active.length ? `${active.length} 张有效票` : "尚未确认有效票"}</h4><button type="button" disabled={!plan.isCurrent || busy} onClick={() => openEditor()} className={actionStyle}><Plus aria-hidden="true" className="size-4" />录入票面</button></div>
-      {plan.isCurrent ? <TicketImportPanel key={importKey} tickets={tickets} disabled={busy} onDiscard={() => { if (importReview) { setEditorOpen(false); setDraft(null); setImportReview(null); } setOperation(null); setAcknowledged(false); setOperationAcknowledged(false); }} onRefund={(ticketId) => { setOperation({ kind: "cancel", ticketId }); setOperationAcknowledged(false); setEditorOpen(false); requestAnimationFrame(() => operationPanel.current?.scrollIntoView({ behavior: "smooth", block: "center" })); }} onReview={(review) => {
+      <div data-testid="transport-work-card" className="rounded-2xl border border-sand/80 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3"><h4 className="text-base font-semibold text-charcoal">{directionLabels[direction]} · {active.length ? `${active.length} 张有效票` : "尚未确认有效票"}</h4><span className="text-xs text-graphite">票面与接驳，一处核对</span></div>
+        <div className="mt-4 flex flex-wrap items-start gap-2">
+          <button type="button" disabled={!plan.isCurrent || busy} onClick={() => openEditor()} className={actionStyle}><Plus aria-hidden="true" className="size-4" />录入票面</button>
+          {plan.isCurrent ? <TicketImportPanel compact key={importKey} tickets={tickets} disabled={busy} onDiscard={() => { if (importReview) { setEditorOpen(false); setDraft(null); setImportReview(null); } setOperation(null); setAcknowledged(false); setOperationAcknowledged(false); }} onRefund={(ticketId) => { setOperation({ kind: "cancel", ticketId }); setOperationAcknowledged(false); setEditorOpen(false); requestAnimationFrame(() => operationPanel.current?.scrollIntoView({ behavior: "smooth", block: "center" })); }} onReview={(review) => {
         const fields = Object.fromEntries(Object.entries(review.fields).map(([key, value]) => [key, value === null ? "" : key === "fareCents" ? String(Number(value) / 100) : String(value)]));
         setDraft({ ...blankTicket(event, direction, "train"), ...fields });
         setImportReview(review); setCostChoice("pending"); setReplacementId(review.resolution === "replacement" ? review.targetId ?? null : null); setEditTicketId(null); setOperation(null); setAcknowledged(false); setEditorOpen(true);
         requestAnimationFrame(() => editor.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
       }} /> : null}
-      {active.length === 0 ? <div className="mt-3 rounded-md border border-sand bg-cream p-4">
-        <h5 className="text-sm font-semibold">先选候选，再核对实际票面</h5>
-        <p className="mt-2 text-sm leading-6 text-graphite">建议时段：{event.date} {event.startTime} → {event.endDate ?? event.date} {event.endTime}，来自本版行程安排，班次、价格和余票待查询。</p>
-        <div className="mt-3 flex flex-wrap gap-2" aria-label="候选交通方式">{(["train", "flight"] as const).map((value) => <button type="button" key={value} aria-pressed={mode === value} onClick={() => setMode(value)} className={`${actionStyle} ${mode === value ? "bg-sage-soft" : "bg-white"}`}>{value === "train" ? <TrainFront aria-hidden="true" className="size-4" /> : <Plane aria-hidden="true" className="size-4" />}{modeLabels[value]}</button>)}</div>
-        <a href={mode === "train" ? "https://www.12306.cn/index/" : "https://www.umetrip.com/"} target="_blank" rel="noopener noreferrer" className={`${actionStyle} mt-3 bg-white`}><ExternalLink aria-hidden="true" className="size-4" />{mode === "train" ? "前往铁路 12306 查询" : "前往航旅纵横查询"}</a>
-        <p className="mt-2 text-xs leading-5 text-graphite">官方入口不会自动带入条件；请核对完整站名 / 航站楼、日期与行李规定。购票与退改签均在官方平台完成。</p>
-        <p className="mt-3 break-words text-sm leading-7 text-charcoal">{direction === "departure" ? "出发点" : "住宿 / 活动点"} → 前段接驳 → 进站 / 办理 → 城际交通 → 出站 / 取行李 → 后段接驳 → {direction === "departure" ? "住宿 / 活动点" : "最终返回点"}</p>
-        <p className="mt-1 text-xs text-clay">全链地点、接驳与办理条件待补；此建议还不能作为可执行交通链。</p>
-      </div> : null}
+          <a href={mode === "train" ? "https://www.12306.cn/index/" : "https://www.umetrip.com/"} target="_blank" rel="noopener noreferrer" className={actionStyle}><ExternalLink aria-hidden="true" className="size-4" />{mode === "train" ? "前往铁路 12306 查询" : "前往航旅纵横查询"}</a>
+        </div>
+        {active.length === 0 ? <div className="mt-5 border-t border-sand/70 pt-4">
+          <h5 className="text-sm font-semibold">先选候选，再核对实际票面</h5>
+          <p className="mt-2 text-sm leading-6 text-graphite">建议时段：{event.date} {event.startTime} → {event.endDate ?? event.date} {event.endTime}。班次、价格和余票以查询为准。</p>
+          <div className="mt-3 flex flex-wrap gap-2" aria-label="候选交通方式">{(["train", "flight"] as const).map((value) => <button type="button" key={value} aria-pressed={mode === value} onClick={() => setMode(value)} className={`inline-flex min-h-10 items-center gap-2 rounded-full border px-4 text-sm ${mode === value ? "border-sage bg-sage-soft font-semibold text-sage" : "border-sand text-graphite"}`}>{value === "train" ? <TrainFront aria-hidden="true" className="size-4" /> : <Plane aria-hidden="true" className="size-4" />}{modeLabels[value]}</button>)}</div>
+          <ol aria-label="待完善的门到门步骤" className="mt-4 flex flex-wrap gap-1.5 rounded-xl bg-shell/70 p-3">{[direction === "departure" ? "出发点" : "住宿 / 活动点", "前段接驳", "进站 / 办理", "城际交通", "出站 / 取行李", "后段接驳", direction === "departure" ? "住宿 / 活动点" : "最终返回点"].map((step, index) => <li key={index} className="inline-flex items-center gap-1.5 rounded-full border border-sand/60 bg-white px-2.5 py-1.5 text-xs text-graphite"><span className="flex size-4 items-center justify-center rounded-full bg-sage-soft text-[10px] font-semibold text-sage">{index + 1}</span>{step}</li>)}</ol>
+          <p className="mt-3 text-xs leading-5 text-graphite">核对完整站名、日期与行李规定，补齐接驳后再确认出发时间。购票与退改签在官方平台完成。</p>
+        </div> : null}
+      </div>
       {tickets.length > 0 ? <div className="mt-4 space-y-3" aria-label={`${directionLabels[direction]}票据列表`}>{tickets.map((ticket, index) => <article key={ticket.id} data-testid={`ticket-${ticket.id}`} aria-label={`${directionLabels[direction]}票据 ${index + 1} ${ticket.serviceNumber || "班次待补"} ${statusLabels[ticket.status]}`} className="min-w-0 rounded-md border border-sand bg-white p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h5 className="text-sm font-semibold">票据 {index + 1} · {ticket.serviceNumber || "班次待补"}</h5><span className={`rounded px-2 py-1 text-xs font-medium ${ticket.status === "active" ? "bg-sage-soft text-sage" : "bg-shell text-graphite"}`}>{statusLabels[ticket.status]}</span></div>
         <TicketDetails ticket={ticket} />

@@ -8,7 +8,7 @@ describe("mobile HTML snapshot projection", () => {
   it("keeps the previous-day 22:55 redline and its uncertainty without a live verdict", async () => {
     const snapshot = await exportFixture(), html = renderMobileHtml(snapshot, options);
     expect(html).toContain("前一天"); expect(html).toContain("22:55");
-    expect(html).toContain("停止检票"); expect(html).toContain("估算"); expect(html).toContain("静态快照");
+    expect(html).toContain("停止检票"); expect(html).toContain("估算"); expect(html).toContain("静态资料");
     expect(html).not.toMatch(/<script|<link|<img|充裕|距建议行动还有/);
     expect(html).toContain("下一步"); expect(html).toContain("北京时间");
   });

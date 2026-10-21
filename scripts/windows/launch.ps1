@@ -13,24 +13,26 @@ try {
   $config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
   $controller = Join-Path $config.projectRoot 'scripts\desktop-control.mjs'
   $progress = $null
+  $phase = if ($config.autoBuild -eq $false) { '正在启动旅行助手' } else { '正在检查更新' }
+  $elapsed = [Diagnostics.Stopwatch]::StartNew()
   $controllerProcess = [Diagnostics.Process]::new()
   try {
       if (-not $NoUI -and $Action -eq 'start') {
         [System.Windows.Forms.Application]::EnableVisualStyles()
         $progress = [System.Windows.Forms.Form]::new()
         $progress.Text = 'Serendipity · 正在启动'
-        $progress.ClientSize = [Drawing.Size]::new(460, 125)
+        $progress.ClientSize = [Drawing.Size]::new(480, 145)
         $progress.StartPosition = 'CenterScreen'
         $progress.FormBorderStyle = 'FixedDialog'
         $progress.ControlBox = $false
         $label = [System.Windows.Forms.Label]::new()
-        $label.Text = if ($config.autoBuild -eq $false) { '正在启动旅行助手，请稍候。' } else { '正在检查更新；有改动时会自动构建，请稍候。' }
+        $label.Text = "$phase`n已用时 0 秒"
         $label.Location = [Drawing.Point]::new(22, 23)
-        $label.Size = [Drawing.Size]::new(416, 46)
+        $label.Size = [Drawing.Size]::new(436, 68)
         $label.Font = [Drawing.Font]::new('Microsoft YaHei UI', 10)
         $bar = [System.Windows.Forms.ProgressBar]::new()
-        $bar.Location = [Drawing.Point]::new(22, 83)
-        $bar.Size = [Drawing.Size]::new(416, 18)
+        $bar.Location = [Drawing.Point]::new(22, 108)
+        $bar.Size = [Drawing.Size]::new(436, 18)
         $bar.Style = 'Marquee'
         $progress.Controls.Add($label)
         $progress.Controls.Add($bar)
@@ -52,13 +54,28 @@ try {
       # Keep controller output isolated from the caller's console, including in NoUI mode.
       # Drain both streams while keeping the modeless window responsive during a build.
       $outputTask = $controllerProcess.StandardOutput.ReadToEndAsync()
-      $errorTask = $controllerProcess.StandardError.ReadToEndAsync()
+      $progressPrefix = 'SERENDIPITY_PROGRESS '
+      $errorTask = $controllerProcess.StandardError.ReadLineAsync()
       while (-not $controllerProcess.WaitForExit(100)) {
+        while ($null -ne $errorTask -and $errorTask.IsCompleted) {
+          $line = $errorTask.GetAwaiter().GetResult()
+          if ($null -eq $line) { $errorTask = $null; break }
+          if ($line.StartsWith($progressPrefix)) {
+            try {
+              $event = $line.Substring($progressPrefix.Length) | ConvertFrom-Json
+              if ($event.message) { $phase = [string]$event.message }
+            } catch { # Ignore unrelated diagnostic output; the final JSON decides success.
+            }
+          }
+          $errorTask = $controllerProcess.StandardError.ReadLineAsync()
+        }
+        if ($progress) { $label.Text = "$phase`n已用时 $([Math]::Floor($elapsed.Elapsed.TotalSeconds)) 秒" }
         if (-not $NoUI) { [System.Windows.Forms.Application]::DoEvents() }
       }
       $controllerProcess.WaitForExit()
       $resultText = $outputTask.GetAwaiter().GetResult()
-      $null = $errorTask.GetAwaiter().GetResult()
+      if ($null -ne $errorTask) { $null = $errorTask.GetAwaiter().GetResult() }
+      $null = $controllerProcess.StandardError.ReadToEnd()
       if ([string]::IsNullOrWhiteSpace($resultText)) { throw '启动检查未返回结果，请让维护者检查应用文件与运行日志；旅行数据保持原位置。' }
   } finally {
     if ($progress) { $progress.Close(); $progress.Dispose() }

@@ -9,6 +9,7 @@ import type { PlanVersionClient } from "./plan-overview";
 import type { AdvisoryItem } from "@/lib/advisories";
 
 const button = "inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-sand px-3 py-2 text-sm font-semibold text-sage hover:bg-sage-soft disabled:opacity-50";
+const linkAction = "inline-flex min-h-8 items-center rounded text-xs font-medium text-sage underline decoration-sage/40 underline-offset-4 hover:text-focus disabled:cursor-not-allowed disabled:text-graphite/60";
 const input = "mt-1 min-h-11 w-full min-w-0 rounded-md border border-sand bg-white px-3 py-2 text-base text-charcoal";
 const blank: ChecklistFields = { title: "", group: "essentials", note: "", date: null, eventId: null };
 const displayTime = (time: string) => new Date(time).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
@@ -80,20 +81,19 @@ export function ChecklistPanel({ tripId, plan, onEvent, advisories = [], onAdvis
           <p className={`break-words font-semibold ${item.completed ? "text-graphite" : "text-charcoal"}`}>{item.title}</p>
           <p className="mt-1 text-xs leading-5 text-graphite">{item.date ?? "未指定日期"} · {item.custom ? "自建事项" : "行程整理"}{item.completed ? " · 用户已确认" : " · 待准备"}</p>
           {item.note && <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-graphite">{item.note}</p>}
-          <p className="mt-2 text-xs leading-5 text-graphite">{item.sourceLabel}</p>
           {item.completedAt && <p className="mt-1 text-xs text-sage">确认于 {displayTime(item.completedAt)}（北京时间）</p>}
           {item.changeNote && <p className="mt-2 rounded bg-clay-soft p-2 text-sm leading-6 text-clay">{item.changeNote}</p>}
         </div>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {!archivedRow && advisories.some((a) => a.checklistItemId === item.id) && <button type="button" className={button} onClick={onAdvisories}>查看关联提醒</button>}
-        {!archivedRow && linked.map((event) => <button key={event.id} type="button" className={button} onClick={() => onEvent(event.id, "timeline", event.dayNumber)}>查看相关活动{linked.length > 1 ? ` · 第${event.dayNumber}天` : ""}</button>)}
-        {!archivedRow && item.group === "transport" && linked[0] && <button type="button" className={button} onClick={() => onEvent(linked[0].id, "transport", linked[0].dayNumber)}>查看关联票据</button>}
-        {!archivedRow && item.officialUrl && <a href={item.officialUrl} target="_blank" rel="noopener noreferrer" className={button}>前往官方入口<ExternalLink className="size-3" aria-hidden="true" /></a>}
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+        {!archivedRow && advisories.some((a) => a.checklistItemId === item.id) && <button type="button" className={linkAction} onClick={onAdvisories}>关联提醒</button>}
+        {!archivedRow && linked.map((event) => <button key={event.id} type="button" className={linkAction} onClick={() => onEvent(event.id, "timeline", event.dayNumber)}>相关活动{linked.length > 1 ? ` · 第${event.dayNumber}天` : ""}</button>)}
+        {!archivedRow && item.group === "transport" && linked[0] && <button type="button" className={linkAction} onClick={() => onEvent(linked[0].id, "transport", linked[0].dayNumber)}>关联票据</button>}
+        {!archivedRow && item.officialUrl && <a href={item.officialUrl} target="_blank" rel="noopener noreferrer" className={linkAction}>官方入口<ExternalLink className="size-3" aria-hidden="true" /></a>}
         {!archivedRow && !item.officialUrl && (item.group === "reservation" || item.group === "accommodation") && <span className="self-center text-xs text-graphite">暂无已确认的官方办理入口，请向场馆或酒店核对。</span>}
-        {!archivedRow && item.custom && <button type="button" disabled={busy} className={button} onClick={() => setEditing({ id: item.id, customId: "", fields: { title: item.title, group: item.group, note: item.note, date: item.date, eventId: item.eventId } })}>编辑事项</button>}
-        {!item.deleted && <button type="button" disabled={busy} className={button} onClick={() => void save({ action: "delete", id: item.id })}>移出清单</button>}
-        {item.deleted && <button type="button" disabled={busy} className={button} onClick={() => void save({ action: "restore", id: item.id })}>恢复事项</button>}
+        {!archivedRow && item.custom && <button type="button" disabled={busy} className={linkAction} onClick={() => setEditing({ id: item.id, customId: "", fields: { title: item.title, group: item.group, note: item.note, date: item.date, eventId: item.eventId } })}>编辑</button>}
+        {!item.deleted && <button type="button" disabled={busy} className={linkAction} onClick={() => void save({ action: "delete", id: item.id })}>移出</button>}
+        {item.deleted && <button type="button" disabled={busy} className={linkAction} onClick={() => void save({ action: "restore", id: item.id })}>恢复</button>}
       </div>
     </li>;
   }
@@ -103,7 +103,7 @@ export function ChecklistPanel({ tripId, plan, onEvent, advisories = [], onAdvis
       <p className="flex items-center gap-2 text-sm font-semibold text-sage"><CheckCheck className="size-4" aria-hidden="true" />一步步准备，安心出发</p>
       <h3 className="mt-2 text-2xl font-bold text-charcoal">出发前清单</h3>
       <p className="mt-2 text-sm leading-6 text-graphite">勾选仅表示你已自行确认，不代表系统已购票、订房或完成预约。</p>
-      {view && <><p className="mt-4 text-lg font-semibold text-sage">已确认 {completed} / {active.length} 项</p><progress aria-label="准备进度" value={completed} max={Math.max(1, active.length)} className="mt-2 h-2 w-full accent-sage" /><p className="mt-2 text-xs text-graphite">计划 V{view.planVersion} · 清单修订 {view.revision}{view.updatedAt ? ` · 保存于 ${displayTime(view.updatedAt)}（北京时间）` : " · 首次勾选时保存"}</p></>}
+      {view && <><p className="mt-4 text-lg font-semibold text-sage">已确认 {completed} / {active.length} 项</p><progress aria-label="准备进度" value={completed} max={Math.max(1, active.length)} className="mt-2 h-2 w-full accent-sage" /></>}
       <div className="mt-4 flex flex-wrap gap-2">
         <button type="button" disabled={busy || !view} className={button} onClick={() => { setEditing({ id: "", customId: crypto.randomUUID(), fields: { ...blank } }); }}><Plus className="size-4" aria-hidden="true" />添加自建事项</button>
         <button type="button" disabled={busy || !view} className={button} onClick={() => void save({ action: "sync" })}><RotateCcw className="size-4" aria-hidden="true" />按当前计划更新</button>

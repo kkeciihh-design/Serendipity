@@ -49,11 +49,11 @@ test("reminders show dated evidence, remain accessible at three widths and link 
   await expect(item(page, "opening:d1-activity")).toContainText("需处理"); await expect(item(page, "opening:d1-activity")).toContainText("已知事项");
   await page.reload(); await expect(item(page, "opening:d1-activity")).toContainText("已知事项");
   const reopened = await browser.newPage(); await open(reopened, id); await expect(item(reopened, "opening:d1-activity")).toContainText("已知事项"); await reopened.close();
-  await item(page, "opening:d1-activity").getByRole("button", { name: "查看 / 编辑相关活动", exact: true }).click();
+  await item(page, "opening:d1-activity").getByRole("button", { name: "相关活动", exact: true }).click();
   await expect(page.getByRole("tab", { name: "每日时间轴", exact: true })).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator("#timeline-event-d1-activity")).toContainText("开放冲突 · 需调整");
+  await expect(page.locator("#timeline-event-d1-activity")).toContainText("本次开放条件冲突，需调整安排");
   await page.getByRole("tab", { name: "行程提醒", exact: true }).click();
-  await item(page, "reservation:d1-activity").getByRole("button", { name: "查看关联清单", exact: true }).click();
+  await item(page, "reservation:d1-activity").getByRole("button", { name: "关联清单", exact: true }).click();
   await expect(page.getByRole("tab", { name: "出发前清单", exact: true })).toHaveAttribute("aria-selected", "true");
   const checklist = page.locator('[data-checklist-id="reservation:d1-activity"]'); await expect(checklist).toBeVisible();
   await checklist.getByRole("checkbox").click(); await expect(page.getByRole("tabpanel", { name: "出发前清单", exact: true }).getByRole("status")).toContainText("已保存到本机");

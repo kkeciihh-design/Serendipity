@@ -24,6 +24,7 @@
     "verify:ocr-offline": "node scripts/verify-ticket-ocr-offline.mjs",
     "capture:phase05": "node scripts/capture-phase05-screens.mjs",
     "capture:phase06": "node scripts/capture-phase06-screens.mjs",
+    "export:review": "node scripts/export-for-review.mjs",
     "postinstall": "prisma generate",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

@@ -16,7 +16,7 @@ describe("Quanzhou landmark coordinates", () => {
       { ...activity, id: "county", title: "德化陶瓷", locationName: "德化", latitude: 25.49, longitude: 118.24 },
       { ...activity, id: "foreign", title: "西街", locationName: "泉州西街", latitude: 37.57, longitude: 126.98 }], "福建泉州");
     expect(result[0]).toMatchObject(LUOJIA_REFERENCE);
-    expect(result[0].note).toContain("待核实建议标点");
+    expect(result[0].note).toBeNull();
     expect(result[1]).toMatchObject({ latitude: 22.61, longitude: 114.03 });
     expect(result[2]).toMatchObject({ latitude: 25.49, longitude: 118.24 });
     expect(result[3]).toMatchObject({ latitude: null, longitude: null });
@@ -30,8 +30,8 @@ describe("Quanzhou landmark coordinates", () => {
     expect(result[0]).toMatchObject(QUANZHOU_STATION_REFERENCE);
     expect(result[1]).toMatchObject(QUANZHOU_STATION_REFERENCE);
     expect(result[2]).toMatchObject(XUNPU_VILLAGE_REFERENCE);
-    expect(result[0].note).toContain("OSM 1879551038");
-    expect(result[2].note).toContain("区域参考点");
+    expect(result[0].note).toBeNull();
+    expect(result[2].note).toBeNull();
     for (const index of [3, 4, 5, 6, 7]) expect(result[index]).toEqual(input[index]);
   });
   it("shares the confirmed endpoint with incoming transfers but not outgoing, locked or next-day visits", () => {

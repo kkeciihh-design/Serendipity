@@ -1,8 +1,17 @@
+import path from "node:path";
+import { PrismaClient } from "@prisma/client";
 import { expect, test } from "./fixtures";
+import { assertTestDataPath } from "../../scripts/test-data-safety.mjs";
+import { derivePlanCosts } from "../../lib/budget";
+import { preparePlanForStorage, validatePlan } from "../../lib/plan";
 import { openRequirements, useUnavailableAI } from "./workspace-helpers";
-import { requestFixture } from "../helpers/plan-fixtures";
+import { planFixture, requestFixture } from "../helpers/plan-fixtures";
 
 test.beforeEach(async ({ page }) => useUnavailableAI(page));
+
+process.env.SERENDIPITY_DATA_DIR = assertTestDataPath(path.resolve("test-data/e2e"));
+const db = new PrismaClient({ datasources: { db: { url: `file:${path.resolve("test-data/e2e/data/serendipity.db").replaceAll("\\", "/")}` } } });
+test.afterAll(async () => db.$disconnect());
 
 const evidenceDirectory = "test-results/phase10r-responsive";
 
@@ -188,6 +197,30 @@ test("确认删除只删除当前旅行", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "青岛三日海岸线" }),
   ).toBeVisible();
+});
+
+test("详情页顶栏的删除键可删除已生成行程的旅行", async ({ page, request }) => {
+  const created = await request.post("/api/trips", { data: { originalRequest: "想在泉州玩三天，逛西街和开元寺，节奏放慢一些。" } });
+  expect(created.status()).toBe(201);
+  const { trip } = await created.json();
+  const snapshot = requestFixture(3, { destination: "泉州" });
+  expect((await request.patch(`/api/trips/${trip.id}/request`, { data: { expectedRequestRevision: 1, request: snapshot } })).status()).toBe(200);
+  expect((await request.post(`/api/trips/${trip.id}/request/confirm`, { data: { expectedRequestRevision: 2 } })).status()).toBe(200);
+  const content = preparePlanForStorage(planFixture(snapshot));
+  const row = await db.planVersion.create({ data: { tripId: trip.id, versionNumber: 1, requestRevision: 2, requestSnapshot: JSON.stringify(snapshot), events: JSON.stringify(content.events), costs: JSON.stringify(derivePlanCosts(content.events)), pendingItems: JSON.stringify(content.pendingItems), validationResults: JSON.stringify(validatePlan(content, snapshot)) } });
+  await db.trip.update({ where: { id: trip.id }, data: { currentPlanVersionId: row.id, status: "planned" } });
+
+  await page.goto(`/trips/${trip.id}`);
+  const displayTitle = "泉州 · 三日人文漫游";
+  await expect(page.getByRole("heading", { level: 1, name: displayTitle, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: `删除这趟旅行：${displayTitle}`, exact: true }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText(displayTitle);
+  await expect(dialog.getByRole("button", { name: "保留旅行" })).toBeFocused();
+  await dialog.getByRole("button", { name: "确认删除", exact: true }).click();
+  await expect(page).toHaveURL(/\/trips$/);
+  expect((await request.get(`/api/trips/${trip.id}`)).status()).toBe(404);
+  expect(await db.planVersion.count({ where: { tripId: trip.id } })).toBe(0);
 });
 
 test("R30-09 标题保存响应保留等待期间的新输入，后续保存可刷新读取", async ({ page, request }) => {

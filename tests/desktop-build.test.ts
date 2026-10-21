@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import ts from "typescript";
 import { prepareDesktopBuild, type DesktopBuildConfig, type DesktopBuildRequest } from "../scripts/desktop-build.mjs";
 
 const temporaryRoots: string[] = [];
@@ -83,6 +84,21 @@ describe("desktop build preparation", () => {
     expect(executor).toHaveBeenCalledTimes(2);
   });
 
+  it("records launcher ownership when builds are reused across distinct data directories", async () => {
+    const config = fixture();
+    const firstConfigFile = path.join(config.dataDirectory, "runtime/launcher.json");
+    const executor = builder();
+    const first = await prepareDesktopBuild(config, { executor, acquireBuildLock: noLock, configFile: firstConfigFile });
+    const other = { ...first.config, dataDirectory: path.join(config.dataDirectory, "second user"), runtimeDirectory: path.join(config.dataDirectory, "second user/runtime") };
+    const secondConfigFile = path.join(other.runtimeDirectory, "launcher.json");
+    await prepareDesktopBuild(other, { executor, acquireBuildLock: noLock, configFile: secondConfigFile });
+    await prepareDesktopBuild(first.config, { executor, acquireBuildLock: noLock, configFile: firstConfigFile });
+    const metadata = JSON.parse(fs.readFileSync(path.join(config.projectRoot, first.config.buildDirectory, "desktop-build.json"), "utf8"));
+    expect(metadata.owners.sort()).toEqual([firstConfigFile, secondConfigFile].sort());
+    expect(Number.isNaN(Date.parse(metadata.lastUsedAt))).toBe(false);
+    expect(executor).toHaveBeenCalledTimes(1);
+  });
+
   it("detects newly added and deleted source without relying on git", async () => {
     const config = fixture();
     const executor = builder();
@@ -121,6 +137,202 @@ describe("desktop build preparation", () => {
     expect(unchanged.changed).toBe(false);
     expect(unchanged.fingerprint).toBe(first.fingerprint);
     expect(executor).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not rebuild or reject a build when independent review and screenshot tools change", async () => {
+    const config = fixture();
+    const executor = builder((request) => {
+      completeBuild(request);
+      for (const filename of ["scripts/export-for-review.mjs", "scripts/export-review-core.mjs", "scripts/windows/install-review-export.ps1", "scripts/capture-gallery.mjs", "scripts/verify-gallery.mjs"]) {
+        write(config.projectRoot, filename, "independent tooling changed during compilation");
+      }
+      const manifest = JSON.parse(fs.readFileSync(path.join(config.projectRoot, "package.json"), "utf8"));
+      manifest.scripts = { "export:review": "node scripts/export-for-review.mjs" };
+      write(config.projectRoot, "package.json", JSON.stringify(manifest));
+    });
+    const first = await prepareDesktopBuild(config, { executor, acquireBuildLock: noLock });
+    const second = await prepareDesktopBuild(first.config, { executor, acquireBuildLock: noLock });
+    expect(second.changed).toBe(false);
+    expect(executor).toHaveBeenCalledTimes(1);
+    write(config.projectRoot, "package.json", '{"name":"desktop-build-fixture","dependencies":{"next":"new-version"}}');
+    await prepareDesktopBuild(first.config, { executor, acquireBuildLock: noLock });
+    expect(executor).toHaveBeenCalledTimes(2);
+  });
+
+  it("copies only compile caches into a new build without changing the previous artifact", async () => {
+    const config = fixture();
+    const first = await prepareDesktopBuild(config, { acquireBuildLock: noLock, executor: builder((request) => {
+      completeBuild(request);
+      const directory = request.env.SERENDIPITY_BUILD_DIR;
+      write(request.cwd, `${directory}/cache/webpack/client-production/0.pack`, "cached compilation");
+      write(request.cwd, `${directory}/cache/.tsbuildinfo`, "incremental types");
+      write(request.cwd, `${directory}/cache/.rscinfo`, "stable compilation salt");
+      write(request.cwd, `${directory}/cache/fetch-cache/business.json`, "must not inherit");
+      write(request.cwd, `${directory}/server/previous.js`, "old server artifact");
+    }) });
+    write(config.projectRoot, "lib/example.ts", "export const value = 2;");
+    const onProgress = vi.fn();
+    const next = await prepareDesktopBuild(first.config, { acquireBuildLock: noLock, onProgress, executor: builder((request) => {
+      const directory = request.env.SERENDIPITY_BUILD_DIR;
+      const cachedFile = path.join(request.cwd, `${directory}/cache/webpack/client-production/0.pack`);
+      expect(fs.readFileSync(cachedFile, "utf8")).toBe("cached compilation");
+      expect(fs.readFileSync(path.join(request.cwd, `${directory}/cache/.tsbuildinfo`), "utf8")).toBe("incremental types");
+      expect(fs.readFileSync(path.join(request.cwd, `${directory}/cache/.rscinfo`), "utf8")).toBe("stable compilation salt");
+      expect(fs.existsSync(path.join(request.cwd, `${directory}/cache/fetch-cache`))).toBe(false);
+      expect(fs.existsSync(path.join(request.cwd, `${directory}/server`))).toBe(false);
+      fs.writeFileSync(cachedFile, "new compilation cache");
+      completeBuild(request);
+    }) });
+    expect(next.config.buildDirectory).not.toBe(first.config.buildDirectory);
+    expect(fs.readFileSync(path.join(config.projectRoot, first.config.buildDirectory, "cache/webpack/client-production/0.pack"), "utf8")).toBe("cached compilation");
+    expect(onProgress).toHaveBeenCalledWith("已复用编译缓存，正在构建新版");
+  });
+
+  it("ignores an unverified or incompatible cache and still builds", async () => {
+    const config = fixture();
+    const first = await prepareDesktopBuild(config, { executor: builder(), acquireBuildLock: noLock });
+    const metadataPath = path.join(config.projectRoot, first.config.buildDirectory, "desktop-build.json");
+    const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+    write(config.projectRoot, `${first.config.buildDirectory}/cache/.tsbuildinfo`, "incompatible cache");
+    fs.writeFileSync(metadataPath, JSON.stringify({ ...metadata, nodeVersion: "v0.0.0" }));
+    write(config.projectRoot, "lib/example.ts", "export const value = 2;");
+    await prepareDesktopBuild(first.config, { acquireBuildLock: noLock, executor: builder((request) => {
+      expect(fs.existsSync(path.join(request.cwd, `${request.env.SERENDIPITY_BUILD_DIR}/cache/.tsbuildinfo`))).toBe(false);
+      completeBuild(request);
+    }) });
+  });
+
+  it("recovers a failed cached build with one cold build in a new directory", async () => {
+    const config = fixture();
+    const first = await prepareDesktopBuild(config, { acquireBuildLock: noLock, executor: builder((request) => {
+      completeBuild(request);
+      for (const name of ["webpack/client-production/0.pack", "swc/cache.bin", ".tsbuildinfo", ".rscinfo"]) {
+        write(request.cwd, `${request.env.SERENDIPITY_BUILD_DIR}/cache/${name}`, "previous compile state");
+      }
+    }) });
+    write(config.projectRoot, "lib/example.ts", "export const value = 2;");
+    const outputs: string[] = [];
+    const onProgress = vi.fn();
+    const executor = builder((request) => {
+      const directory = request.env.SERENDIPITY_BUILD_DIR!;
+      outputs.push(directory);
+      const cache = path.join(request.cwd, directory, "cache");
+      if (outputs.length === 1) {
+        expect(fs.existsSync(path.join(cache, "webpack/client-production/0.pack"))).toBe(true);
+        write(request.cwd, `${directory}/partial.txt`, "failed output for diagnostics");
+        throw new Error("snapshot hash is undefined");
+      }
+      expect(fs.readdirSync(cache)).toEqual(["tsconfig.json"]);
+      completeBuild(request);
+    });
+    const result = await prepareDesktopBuild(first.config, { executor, acquireBuildLock: noLock, onProgress });
+    expect(executor).toHaveBeenCalledTimes(2);
+    expect(new Set(outputs).size).toBe(2);
+    expect(result.config.buildDirectory).toBe(outputs[1]);
+    expect(fs.existsSync(path.join(config.projectRoot, outputs[0], "desktop-build.json"))).toBe(false);
+    expect(fs.readFileSync(path.join(config.projectRoot, outputs[0], "partial.txt"), "utf8")).toBe("failed output for diagnostics");
+    expect(fs.readFileSync(path.join(config.projectRoot, first.config.buildDirectory, "cache/webpack/client-production/0.pack"), "utf8")).toBe("previous compile state");
+    expect(JSON.parse(fs.readFileSync(path.join(config.projectRoot, outputs[1], "desktop-build.json"), "utf8")).cacheReused).toBe(false);
+    expect(onProgress).toHaveBeenCalledWith("缓存构建未通过，正在使用全新缓存自动重试一次");
+    expect(fs.readFileSync(path.join(config.runtimeDirectory!, "build.log"), "utf8")).toContain("snapshot hash is undefined");
+    const unchanged = await prepareDesktopBuild(result.config, { executor, acquireBuildLock: noLock });
+    expect(unchanged.changed).toBe(false);
+    expect(executor).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops after the cold retry also fails and leaves the verified version intact", async () => {
+    const config = fixture();
+    const first = await prepareDesktopBuild(config, { acquireBuildLock: noLock, executor: builder((request) => {
+      completeBuild(request);
+      write(request.cwd, `${request.env.SERENDIPITY_BUILD_DIR}/cache/webpack/0.pack`, "verified version cache");
+    }) });
+    write(config.projectRoot, "lib/example.ts", "export const value = 2;");
+    const outputs: string[] = [];
+    const release = vi.fn(async () => {});
+    const executor = builder((request) => {
+      outputs.push(request.env.SERENDIPITY_BUILD_DIR!);
+      throw new Error(outputs.length === 1 ? "cached compile failed" : "cold compile failed");
+    });
+    await expect(prepareDesktopBuild(first.config, { executor, acquireBuildLock: async () => release })).rejects.toThrow("cold compile failed");
+    expect(executor).toHaveBeenCalledTimes(2);
+    expect(release).toHaveBeenCalledTimes(1);
+    for (const directory of outputs) expect(fs.existsSync(path.join(config.projectRoot, directory, "desktop-build.json"))).toBe(false);
+    expect(fs.readFileSync(path.join(config.projectRoot, first.config.buildDirectory, "BUILD_ID"), "utf8")).toBe("fixture-build-id\n");
+    expect(fs.readFileSync(path.join(config.projectRoot, first.config.buildDirectory, "cache/webpack/0.pack"), "utf8")).toBe("verified version cache");
+  });
+
+  it("still rechecks source changes after recovering a failed cache", async () => {
+    const config = fixture();
+    const first = await prepareDesktopBuild(config, { acquireBuildLock: noLock, executor: builder((request) => {
+      completeBuild(request);
+      write(request.cwd, `${request.env.SERENDIPITY_BUILD_DIR}/cache/webpack/0.pack`, "compile state");
+    }) });
+    write(config.projectRoot, "lib/example.ts", "export const value = 2;");
+    const outputs: string[] = [];
+    const executor = builder((request) => {
+      outputs.push(request.env.SERENDIPITY_BUILD_DIR!);
+      if (outputs.length === 1) throw new Error("snapshot failed");
+      completeBuild(request);
+      if (outputs.length === 2) write(request.cwd, "lib/example.ts", "export const value = 3;");
+      expect(fs.existsSync(path.join(request.cwd, request.env.SERENDIPITY_BUILD_DIR!, "cache/webpack"))).toBe(false);
+    });
+    const result = await prepareDesktopBuild(first.config, { executor, acquireBuildLock: noLock });
+    expect(executor).toHaveBeenCalledTimes(3);
+    expect(result.config.buildDirectory).toBe(outputs[2]);
+    for (const directory of outputs.slice(0, 2)) expect(fs.existsSync(path.join(config.projectRoot, directory, "desktop-build.json"))).toBe(false);
+  });
+
+  it("accepts a verified build when Next has already removed the pending marker", async () => {
+    const config = fixture();
+    const executor = builder((request) => {
+      fs.unlinkSync(path.join(request.cwd, request.env.SERENDIPITY_BUILD_DIR!, "desktop-build-pending.json"));
+      completeBuild(request);
+    });
+    const result = await prepareDesktopBuild(config, { executor, acquireBuildLock: noLock });
+    expect(result.changed).toBe(true);
+    expect(fs.existsSync(path.join(config.projectRoot, result.config.buildDirectory, "desktop-build.json"))).toBe(true);
+    expect((await prepareDesktopBuild(result.config, { executor, acquireBuildLock: noLock })).changed).toBe(false);
+    expect(executor).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks current route types without accumulating historical build types or rewriting root config", async () => {
+    const config = fixture();
+    write(config.projectRoot, ".next-old/types/validator.ts", "old route validator");
+    const original = fs.readFileSync(path.join(config.projectRoot, "tsconfig.json"), "utf8");
+    await prepareDesktopBuild(config, { acquireBuildLock: noLock, executor: builder((request) => {
+      expect(request.env.SERENDIPITY_DESKTOP_BUILD).toBe("1");
+      const directory = request.env.SERENDIPITY_BUILD_DIR!;
+      write(request.cwd, `${directory}/types/validator.ts`, "current route validator");
+      const filename = path.join(request.cwd, directory, "cache/tsconfig.json");
+      const parsed = ts.readConfigFile(filename, ts.sys.readFile);
+      const resolved = ts.parseJsonConfigFileContent(parsed.config, ts.sys, path.dirname(filename));
+      expect(resolved.errors).toEqual([]);
+      expect(resolved.fileNames).toContain(path.join(request.cwd, directory, "types/validator.ts").replaceAll("\\", "/"));
+      expect(resolved.fileNames.some((name) => name.includes(".next-old"))).toBe(false);
+      expect(resolved.fileNames).toContain(path.join(request.cwd, "app/page.tsx").replaceAll("\\", "/"));
+      expect(resolved.options.strict).toBe(true);
+      completeBuild(request);
+    }) });
+    expect(fs.readFileSync(path.join(config.projectRoot, "tsconfig.json"), "utf8")).toBe(original);
+  });
+
+  it("automatically retries one save during compilation and reports changed filenames without their contents", async () => {
+    const config = fixture();
+    const directories: string[] = [];
+    const onProgress = vi.fn();
+    const executor = builder((request) => {
+      directories.push(request.env.SERENDIPITY_BUILD_DIR!);
+      completeBuild(request);
+      if (directories.length === 1) write(request.cwd, "app/page.tsx", "private new source text");
+    });
+    const result = await prepareDesktopBuild(config, { executor, acquireBuildLock: noLock, onProgress });
+    expect(executor).toHaveBeenCalledTimes(2);
+    expect(result.config.buildDirectory).toBe(directories[1]);
+    expect(fs.existsSync(path.join(config.projectRoot, directories[0], "desktop-build.json"))).toBe(false);
+    const log = fs.readFileSync(path.join(config.runtimeDirectory!, "build.log"), "utf8");
+    expect(log).toContain("Build inputs changed: app/page.tsx");
+    expect(log).not.toContain("private new source text");
+    expect(onProgress).toHaveBeenCalledWith("检测到构建期间保存了修改，正在自动重试一次");
   });
 
   it("normalizes Next's generated tsconfig includes so a successful build does not trigger a loop", async () => {
@@ -231,7 +443,7 @@ describe("desktop build preparation", () => {
       if (failure === "missing BUILD_ID") return;
       if (failure === "empty BUILD_ID") { write(request.cwd, `${candidate}/BUILD_ID`, "  \n"); return; }
       completeBuild(request);
-      write(request.cwd, "app/page.tsx", "changed while compiling");
+      write(request.cwd, "app/page.tsx", `changed during build ${candidate}`);
     });
     await expect(prepareDesktopBuild(config, { executor, acquireBuildLock: async () => release })).rejects.toThrow(path.join(config.runtimeDirectory!, "build.log"));
     expect(config).toEqual(original);

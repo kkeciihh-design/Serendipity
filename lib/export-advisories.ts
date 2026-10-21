@@ -19,14 +19,20 @@ export function projectExportWeather(snapshot: ExportSnapshot, dates: readonly s
 
 /** All formats render the same saved, date-scoped facts through their privacy filter. */
 export function projectExportAdvisories(snapshot: ExportSnapshot, dates: readonly string[]) {
-  return (snapshot.advisories?.items ?? []).filter((item) => dates.includes(item.date)).map((item) => ({
-    title: `${item.date} · ${item.title}`,
-    paragraphs: [
-      `${item.acknowledged ? "已知" : "待关注"} · ${advisorySeverityLabels[item.severity]} · ${item.targetName}；${item.reason}`,
-      item.recommendation,
-      ...(item.aiExplanation ? [`参考解释：${item.aiExplanation}`] : []),
-      `来源：${item.sourceLabel}；获取 ${formatRedlineTime(item.retrievedAt)}；适用 ${formatRedlineTime(item.applicableFrom)} 至 ${formatRedlineTime(item.applicableUntil)}；状态 ${item.validity === "valid" ? "导出时适用" : `${advisoryValidityLabels[item.validity]}，待复核`}`,
-      ...(item.acknowledged && item.acknowledgedAt ? [`用户标记已知于 ${formatRedlineTime(item.acknowledgedAt)}`] : []),
-    ],
-  }));
+  const seen = new Set<string>();
+  return (snapshot.advisories?.items ?? []).filter((item) => dates.includes(item.date)).flatMap((item) => {
+    const key = `${item.date}:${item.targetName.trim().toLowerCase()}:${item.category}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{
+      title: `${item.date} · ${item.title}`,
+      paragraphs: [
+        `${item.acknowledged ? "已知" : "待关注"} · ${advisorySeverityLabels[item.severity]} · ${item.targetName}；${item.reason}`,
+        item.recommendation,
+        ...(item.aiExplanation ? [`参考解释：${item.aiExplanation}`] : []),
+        ...(item.retrievedAt ? [`来源：${item.sourceLabel}；获取 ${formatRedlineTime(item.retrievedAt)}；适用 ${formatRedlineTime(item.applicableFrom)} 至 ${formatRedlineTime(item.applicableUntil)}；状态 ${item.validity === "valid" ? "导出时适用" : `${advisoryValidityLabels[item.validity]}，待复核`}`] : []),
+        ...(item.acknowledged && item.acknowledgedAt ? [`用户标记已知于 ${formatRedlineTime(item.acknowledgedAt)}`] : []),
+      ],
+    }];
+  });
 }

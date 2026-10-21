@@ -20,6 +20,18 @@ function selectStay(p: PlanVersionRecord, morningDepartureTime = "09:00") {
   return p;
 }
 describe("住宿比较与按夜计算", () => {
+  it("estimates distances from suggested coordinates without creating confirmed places", () => {
+    const p = fixture();
+    Object.assign(p.events.find((e) => e.id === "d1-activity")!, { latitude: 24.90, longitude: 118.58 });
+    Object.assign(p.events.find((e) => e.id === "d2-activity")!, { locationName: "次日海边公园", latitude: 24.95, longitude: 118.63 });
+    const result = buildStayRecommendations(p, "d1-hotel");
+    const distance = result.areas.find((area) => area.id === "today")!.distances.find((d) => d.label === "次日活动")!;
+    expect(distance).toMatchObject({ estimated: true });
+    expect(distance.meters).toBeGreaterThan(7000);
+    expect(distance.meters).toBeLessThan(8000);
+    expect(result.areas.every((area) => area.reference === null)).toBe(true);
+    expect(p.places).toEqual([]);
+  });
   it("counts leap-month and year boundaries, rejects invalid dates and zero/overlong stays", () => {
     expect(nightsBetween("2028-02-28", "2028-03-01")).toBe(2); expect(nightsBetween("2026-12-31", "2027-01-02")).toBe(2);
     const base = input(fixture());

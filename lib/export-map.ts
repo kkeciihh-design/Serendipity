@@ -21,42 +21,79 @@ export function exportMapPoints(snapshot: ExportSnapshot, options: MobileExportO
   });
 }
 
+/** Normalizes lodging/area wording so a return to the same place reads once. */
+export function normalizeRouteStopKey(value: string) {
+  return value
+    .replace(/[（(][^（）()]*[）)]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/(?:住宿片区|住宿区域|住宿附近|住宿周边|住宿|片区|区域|附近|周边|一带)$/g, "")
+    .toLowerCase();
+}
+
 /** Public saved/suggested points, drawn as an offline daily route diagram. */
 export function renderGeographicMap(snapshot: ExportSnapshot, options: MobileExportOptions, date: string, city?: string, readableClusters = true) {
-  const { text: t } = exportPrivacy(snapshot, options);
-  const allPoints = exportMapPoints(snapshot, options, date).filter((point) => !city || point.city === city);
-  // A distant train origin must not compress an entire old town into one dot.
-  // Draw the largest local group and retain intercity endpoints in the legend.
-  const nearby = (a: typeof allPoints[number], b: typeof allPoints[number]) =>
-    Math.hypot((a.longitude - b.longitude) * Math.cos((a.latitude + b.latitude) * Math.PI / 360), a.latitude - b.latitude) < 1.5;
-  const localGroup = allPoints.map((center) => allPoints.filter((point) => nearby(center, point))).sort((a, b) => b.length - a.length)[0] ?? [];
-  const points = allPoints.length >= 3 && localGroup.length >= 2 ? localGroup : allPoints;
-  const remote = allPoints.filter((point) => !points.includes(point));
-  if (!points.length) return `<aside class="map map-unavailable"><h3>当日动线示意图</h3><p>这一天尚无可用公开坐标；请按下方行程顺序阅读，补充定位后可重新导出地图。</p></aside>`;
-  const centerLat = points.reduce((sum, point) => sum + point.latitude, 0) / points.length;
-  const xs = points.map((point) => point.longitude * Math.cos(centerLat * Math.PI / 180)), ys = points.map((point) => point.latitude);
-  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-  const scale = Math.min(540 / Math.max(.002, maxX - minX), 240 / Math.max(.002, maxY - minY));
-  const projected = points.map((_, index) => ({ x: 320 + (xs[index] - (minX + maxX) / 2) * scale, y: 150 - (ys[index] - (minY + maxY) / 2) * scale }));
-  const groups = projected.map((point, index) => ({ ...point, indices: [index] }));
-  if (readableClusters) {
-    let merged = true;
-    while (merged) {
-      merged = false;
-      outer: for (let i = 0; i < groups.length; i++) for (let j = i + 1; j < groups.length; j++) {
-        const a = groups[i], b = groups[j];
-        if (Math.hypot(a.x - b.x, a.y - b.y) >= 45) continue;
-        const count = a.indices.length + b.indices.length;
-        a.x = (a.x * a.indices.length + b.x * b.indices.length) / count;
-        a.y = (a.y * a.indices.length + b.y * b.indices.length) / count;
-        a.indices.push(...b.indices); groups.splice(j, 1); merged = true; break outer;
-      }
+  void readableClusters;
+  const { text: t, privateIds } = exportPrivacy(snapshot, options);
+  const dayEvents = sortPlanEvents(snapshot.plan.events).filter((event) => event.date === date);
+  type Stop = { label: string; name: string; shortName: string; latitude: number | null; longitude: number | null; suggested: boolean; area: boolean; provider: string };
+  const points: Stop[] = [];
+  const seenStops = new Set<string>();
+  const shortName = (value: string) => value
+    .replace(/\s+/g, " ")
+    .replace(/[（(][^（）()]*[）)]/g, "")
+    .split(/[·｜|，,。;；:：\-—–与或至/]/)[0]
+    .replace(/^(?:前往|抵达|游览|参观|入住|打卡|漫步|慢逛|逛|走|看|吃|品尝|体验)+/, "")
+    .replace(/(?:游览|参观|漫步|慢逛|打卡|一日游|半日游)+$/, "")
+    .replace(/(?:住宿片区|住宿区域|住宿附近|住宿周边|住宿|附近|周边|片区|区域|一带)$/, "")
+    .trim();
+  for (const [index, event] of dayEvents.entries()) {
+    if (privateIds.has(event.id)) continue;
+    const place = snapshot.plan.places.find((item) => item.id === event.placeId);
+    if (place && place.provider !== "osm") throw new ExportError("此地图来源尚未核验图片导出许可。请使用已确认的 OSM 地点，或选择不含地图的导出。");
+    if (city && place && place.city !== city) continue;
+    const name = place?.name ?? event.locationName ?? event.title;
+    const stopKey = normalizeRouteStopKey(t(name));
+    if (seenStops.has(stopKey)) continue;
+    if (points.length >= 5) continue;
+    seenStops.add(stopKey);
+    let latitude: number | null = null, longitude: number | null = null;
+    const rawLatitude = place?.latitude ?? event.latitude, rawLongitude = place?.longitude ?? event.longitude;
+    if (place && (rawLatitude == null || rawLongitude == null || !Number.isFinite(rawLatitude) || !Number.isFinite(rawLongitude) || Math.abs(rawLatitude) > 90 || Math.abs(rawLongitude) > 180)) {
+      throw new ExportError("地图坐标不可用，请核对地点后重试。");
     }
+    if (rawLatitude != null && rawLongitude != null && Number.isFinite(rawLatitude) && Number.isFinite(rawLongitude) && Math.abs(rawLatitude) <= 90 && Math.abs(rawLongitude) <= 180) {
+      const coordinate = toWgs84({ latitude: rawLatitude, longitude: rawLongitude }, place?.coordinateSystem ?? event.coordinateSystem ?? "WGS84");
+      latitude = coordinate.latitude; longitude = coordinate.longitude;
+    }
+    points.push({ label: `${event.dayNumber}.${index + 1}`, name, shortName: shortName(t(name)) || t(name), latitude, longitude,
+      suggested: !place, area: place?.precision === "area_reference", provider: place?.provider ?? "ai" });
   }
-  const groupLabel = (index: number) => groups[index].indices.length > 1 ? `A${index + 1}` : points[groups[index].indices[0]].label;
-  const edges = groups.length > 1 ? `<polyline class="route-line" points="${projected.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ")}" fill="none" stroke="#7f9b80" stroke-width="4" stroke-linejoin="round" stroke-dasharray="8 5"/>` : "";
-  const markers = groups.map((group, index) => `<circle cx="${group.x.toFixed(2)}" cy="${group.y.toFixed(2)}" r="18" fill="${group.indices.some((i) => points[i].suggested) ? "#9b633d" : "#355b42"}"/><text x="${group.x.toFixed(2)}" y="${(group.y + 5).toFixed(2)}" text-anchor="middle" fill="white" font-size="14">${groupLabel(index)}</text>`).join("");
+  if (!points.length) return `<aside class="map map-unavailable"><h3>当日动线示意图</h3><p>这一天尚无可用公开坐标；请按下方行程顺序阅读，补充定位后可重新导出地图。</p></aside>`;
+  // Alternating heights give long Chinese labels their own horizontal band.
+  const projected = points.map((_, index) => ({
+    x: points.length === 1 ? 320 : 76 + index * (488 / (points.length - 1)),
+    y: index % 2 === 0 ? 115 : 175,
+  }));
+  const height = 280;
+  const contour = Array.from({ length: 4 }, (_, index) => {
+    const y = 54 + index * 62;
+    return `<path d="M-20 ${y} C110 ${y - 24} 205 ${y + 22} 320 ${y - 8} S540 ${y - 28} 660 ${y + 10}" fill="none" stroke="#dce5d2" stroke-width="1.4" stroke-opacity=".72"/>`;
+  }).join("");
+  const routePath = points.length > 1 ? projected.reduce((path, point, index) => {
+    if (index === 0) return `M${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+    const previous = projected[index - 1], dx = (point.x - previous.x) * 0.45;
+    return `${path} C${(previous.x + dx).toFixed(2)} ${previous.y.toFixed(2)} ${(point.x - dx).toFixed(2)} ${point.y.toFixed(2)} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+  }, "") : "";
+  const edges = routePath ? `<path class="route-line" d="${routePath}" fill="none" stroke="#7f9b80" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="8 6"/>` : "";
+  const markers = points.map((point, index) => {
+    const { x, y } = projected[index];
+    const marker = `<circle class="route-stop" cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="17" fill="${point.suggested || point.area ? "#a9703f" : "#355b42"}"/><text x="${x.toFixed(2)}" y="${(y + 5).toFixed(2)}" text-anchor="middle" fill="#fffaf0" font-size="13" font-weight="700">${index + 1}</text>`;
+    const anchor = x < 104 ? "start" : x > 536 ? "end" : "middle";
+    const labelY = index % 2 === 0 ? y - 28 : y + 34;
+    const sequenceMark = index < 20 ? String.fromCodePoint(0x2460 + index) : `${index + 1}.`;
+    return `${marker}<text x="${x.toFixed(2)}" y="${labelY.toFixed(2)}" text-anchor="${anchor}" fill="#2c3831" font-size="12" font-weight="650">${sequenceMark} ${point.shortName}</text>`;
+  }).join("");
   const hasSuggestions = points.some((point) => point.suggested);
   const hasOsm = points.some((point) => point.provider === "osm");
-  return `<aside class="map"><h3>当日动线示意图 · 北 ↑</h3>${remote.length ? `<p class="muted">跨城交通：${remote.map((point) => `${point.label} ${t(point.name)}`).join(" / ")}；下图放大当地行程。</p>` : ""}<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 300" role="img" aria-label="每日公开地点与行程顺序示意图"><rect width="640" height="300" rx="16" fill="#e9eee3"/><path d="M0 75H640M0 150H640M0 225H640M160 0V300M320 0V300M480 0V300" stroke="#d6ddcd"/>${edges}${markers}</svg><p class="muted map-legend">${hasSuggestions ? "棕色：含待核实建议标点；" : ""}绿色：已确认地点。虚线表示行程顺序，无道路底图，不用于导航。相邻点合并为 A 组，编号对应时间轴。</p><ul>${points.map((point, index) => { const group = groups.findIndex((item) => item.indices.includes(index)); return `<li>${groups[group].indices.length > 1 ? `${groupLabel(group)} · ` : ""}${point.label} · ${t(point.name)}${point.suggested ? "（AI 建议）" : point.area ? "（区域参考）" : ""}</li>`; }).join("")}</ul><p class="credit">${hasOsm ? "已确认地点数据 © OpenStreetMap contributors · ODbL 1.0；" : ""}根据已保存公开坐标绘制，建议地点出发前核实。</p></aside>`;
+  return `<aside class="map"><h3>当日动线示意图 · 北 ↑</h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 ${height}" role="img" aria-label="每日公开地点与行程顺序示意图"><rect width="640" height="${height}" rx="16" fill="#f4f6ec"/>${contour}<g fill="none" stroke="#a9b49b" stroke-opacity=".75"><circle cx="574" cy="38" r="17" stroke-width="1.3"/><path d="M574 49V27M574 27l-5 7M574 27l5 7" stroke-width="1.5"/><path d="M549 38h50" stroke-width=".8" stroke-opacity=".55"/></g><text x="574" y="21" text-anchor="middle" fill="#87977a" font-size="10">N</text>${edges}${markers}</svg><p class="muted map-legend">${hasSuggestions || points.some((point) => point.area) ? "棕色：建议地点或方位参考；" : ""}绿色：已确认地点。圆点按当日游览顺序编号，虚线仅表示顺序，不用于导航。</p><p class="credit">${hasOsm ? "已确认地点数据 © OpenStreetMap contributors · ODbL 1.0；" : ""}根据已保存公开地点绘制，建议地点出发前核实。</p></aside>`;
 }

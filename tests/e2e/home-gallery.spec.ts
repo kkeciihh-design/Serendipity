@@ -11,6 +11,9 @@ const destinations = [
   { id: "li-river", name: "漓江" },
   { id: "hongcun", name: "宏村" },
   { id: "xiapu", name: "霞浦" },
+  { id: "sayram-lake", name: "赛里木湖" },
+  { id: "shaxi", name: "沙溪古镇" },
+  { id: "dunhuang", name: "敦煌月牙泉" },
 ];
 
 function collectDraftPosts(page: Page) {
@@ -133,7 +136,7 @@ test("双生模式同步替换首屏、样本与规划弹窗画境，并保留�
   expect(errors).toEqual([]);
 });
 
-test("五处风物志循环轮换，各自的旅行想法清错、聚焦且不会自动提交", async ({ page }) => {
+test("八处风物志循环轮换，各自的旅行想法清错、聚焦且不会自动提交", async ({ page }) => {
   const posts = collectDraftPosts(page);
   await page.goto("/");
   const input = page.getByTestId("trip-request-input");

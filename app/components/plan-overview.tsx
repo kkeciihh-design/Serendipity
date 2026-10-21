@@ -3,7 +3,6 @@ import { businessFetch } from "@/lib/business-fetch";
 import { createTripWithPlan, generatePlanWithRetry } from "@/lib/trip-auto-planning";
 
 import {
-  CalendarRange,
   ChevronDown,
   Download,
   ListChecks,
@@ -116,6 +115,7 @@ export function PlanOverview({
   const [previewPlan, setPreviewPlan] = useState<PlanVersionClient | null>(
     selectedPlan,
   );
+  const [snapshotOpen, setSnapshotOpen] = useState(false);
   const [selectedDayNumber, setSelectedDayNumber] = useState(1);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
@@ -133,6 +133,34 @@ export function PlanOverview({
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const generatedCallbackRef = useRef(onPlanGenerated);
+  const workspaceRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const menus = () => workspaceRef.current?.querySelectorAll<HTMLDetailsElement>("details[data-toolbar-menu]") ?? [];
+    const click = (event: MouseEvent) => {
+      if (!(event.target instanceof Element)) return;
+      for (const menu of menus()) {
+        if (!menu.contains(event.target) || event.target.closest("a,button")) menu.open = false;
+      }
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      for (const menu of menus()) {
+        if (menu.open && menu.contains(document.activeElement)) menu.querySelector("summary")?.focus();
+        menu.open = false;
+      }
+    };
+    document.addEventListener("click", click);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("click", click);
+      document.removeEventListener("keydown", escape);
+    };
+  }, []);
+
+  useEffect(() => {
+    workspaceRef.current?.querySelectorAll<HTMLDetailsElement>("details[data-toolbar-menu]").forEach((menu) => { menu.open = false; });
+  }, [activeTab, selectedVersionNumber]);
 
   useEffect(() => {
     if (!feedback || feedback.tone === "error" || isGenerating) return;
@@ -383,125 +411,15 @@ export function PlanOverview({
 
   return (
     <section
-      aria-labelledby="plan-overview-title"
+      ref={workspaceRef}
+      aria-label="行程总览"
       className={styles.workspace}
     >
-      <div className={styles.workspaceHeading}>
-        <div><p className={styles.eyebrow}>YOUR TRAVEL JOURNAL</p><h2 id="plan-overview-title" className={styles.overviewTitle}><CalendarRange size={22} aria-hidden="true" />行程总览</h2></div>
-        <div className={styles.versionTools}>
-          {displayPlan && <details className={styles.versionMenu}>
-            <summary data-testid="plan-version-select" aria-label={`版本 V${displayPlan.versionNumber}`}>版本 V{displayPlan.versionNumber}<ChevronDown size={14} aria-hidden="true" /></summary>
-            <div className={styles.versionOptions}>{(plans.some((plan) => plan.versionNumber === displayPlan.versionNumber) ? plans : [displayPlan, ...plans]).map((plan) => <a key={plan.id} href={`/trips/${tripId}?planVersion=${plan.versionNumber}`} aria-current={plan.versionNumber === displayPlan.versionNumber ? "true" : undefined}>V{plan.versionNumber}<span>{plan.isCurrent ? "当前版本" : "历史版本"}</span></a>)}</div>
-          </details>}
-          {displayPlan && (!displayPlan.isCurrent || requiresUpdate) ? <span className={styles.statusNote}>{statusLabel}</span> : null}
-          {requestState.hasUnsavedEdits ? <span className={styles.statusNote}>需求修改未保存</span> : null}
-        </div>
-      </div>
-
-      {displayPlan ? (
-        <details className={styles.snapshot}>
-          <summary>查看本版需求快照<ChevronDown aria-hidden="true" className="size-4" /></summary>
-        <dl className="mt-5 grid gap-x-5 gap-y-4 border-y border-sand/80 py-4 sm:grid-cols-2 lg:grid-cols-3">
-          <div>
-            <dt className="text-sm text-graphite">旅行标题</dt>
-            <dd className="mt-1 break-words text-base font-semibold text-charcoal">
-              {tripTitle}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-sm text-graphite">目的地</dt>
-            <dd className="mt-1 break-words text-base font-semibold text-charcoal">
-              {displayPlan.requestSnapshot.destination ?? "未确认"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-sm text-graphite">日期</dt>
-            <dd className="mt-1 text-base font-semibold text-charcoal">
-              {formatRequestDateRange(displayPlan.requestSnapshot)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-sm text-graphite">人数</dt>
-            <dd className="mt-1 text-base font-semibold text-charcoal">
-              {formatTravelerCount(displayPlan.requestSnapshot)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-sm text-graphite">节奏</dt>
-            <dd className="mt-1 text-base font-semibold text-charcoal">
-              {formatPlanPace(displayPlan.requestSnapshot)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-sm text-graphite">费用</dt>
-            <dd className="mt-1 text-base font-semibold text-charcoal">
-              {budgetSummary
-                ? `${formatBudgetTarget(displayPlan.requestSnapshot)}｜预计 ${formatMoneyRange(
-                    budgetSummary.totalMinCents,
-                    budgetSummary.totalMaxCents,
-                  )}｜${overspendStatusLabels[budgetSummary.overspendStatus]}`
-                : "费用待核算"}
-            </dd>
-          </div>
-        </dl>
-        </details>
-      ) : null}
-
       {displayPlan && requiresUpdate ? (
         <p className="mt-4 rounded-md bg-clay-soft px-4 py-3 text-base leading-7 text-clay">
           最新需求已经变化；本页仍完整展示这个计划自己的确认快照。请回到需求确认区核对、确认新修订，再生成新计划版本。
         </p>
       ) : null}
-
-      <div className={styles.toolbar} hidden={!displayPlan}>
-        {displayPlan?.isCurrent && <Link href={`/trips/${tripId}/execute`} className={styles.primaryAction}>进入旅行执行模式</Link>}
-        <details name="trip-plan-actions" className={styles.actionMenu} open={displayPlan ? undefined : true}>
-          <summary hidden={!displayPlan}><SlidersHorizontal aria-hidden="true" className="size-4" />调整 / 重排行程<ChevronDown aria-hidden="true" className="size-4" /></summary>
-          <div className={displayPlan ? styles.actionMenuPanel : styles.initialActions}>
-            {displayPlan ? <button type="button" onClick={() => { setActiveTab("replan"); document.getElementById("plan-views")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className={styles.menuItem}>AI 重新规划</button> : null}
-        <button
-          type="button"
-          onClick={generatePlan}
-          disabled={!canGenerate}
-          className={displayPlan ? styles.menuItem : styles.primaryAction}
-        >
-          <Sparkles aria-hidden="true" className="size-5" />
-          {isGenerating
-            ? `正在生成... ${elapsedSeconds} 秒`
-            : currentPlan
-              ? `生成新计划版本 V${(currentPlan.versionNumber ?? 0) + 1}`
-              : "生成基础行程"}
-        </button>
-        <a
-          href="#request-workspace"
-          onClick={(event) => { event.preventDefault(); openRequirements(); }}
-          className={displayPlan ? styles.menuItem : styles.secondaryAction}
-        >
-          <PencilLine aria-hidden="true" className="size-5" />
-          修改需求
-        </a>
-          </div>
-        </details>
-        {displayPlan?.isCurrent ? <details name="trip-plan-actions" className={styles.actionMenu}>
-          <summary><Download aria-hidden="true" className="size-4" />导出随身资料<ChevronDown aria-hidden="true" className="size-4" /></summary>
-          <div className={styles.actionMenuPanel}>
-            <Link href={`/trips/${tripId}/mobile`} className={styles.menuItem}>手机一页版 · 离线保存</Link>
-            <Link href={`/trips/${tripId}/text`} className={styles.menuItem}>文字导出 · 复制与下载</Link>
-            <Link href={`/trips/${tripId}/pdf`} className={styles.menuItem}>PDF旅行手册 · 保存与打印</Link>
-            <Link href={`/trips/${tripId}/image`} className={styles.menuItem}>旅行长图 · 保存图片</Link>
-          </div>
-        </details> : null}
-        {isGenerating ? (
-          <button
-            type="button"
-            onClick={cancelGeneration}
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md border border-clay px-5 py-3 text-base font-semibold text-clay transition-colors hover:bg-clay-soft"
-          >
-            <XCircle aria-hidden="true" className="size-5" />
-            取消生成
-          </button>
-        ) : null}
-      </div>
 
       {feedback && displayPlan ? <div
         role="status"
@@ -533,6 +451,74 @@ export function PlanOverview({
             </div>
           ) : null}
 
+          <div className={styles.overviewToolbar}>
+            <div className={styles.versionTools}>
+              <details name="trip-plan-actions" data-toolbar-menu className={styles.versionMenu}>
+                <summary data-testid="plan-version-select" aria-label={`版本 V${displayPlan.versionNumber}`}>版本 V{displayPlan.versionNumber}<ChevronDown size={14} aria-hidden="true" /></summary>
+                <div className={styles.versionOptions}>{(plans.some((plan) => plan.versionNumber === displayPlan.versionNumber) ? plans : [displayPlan, ...plans]).map((plan) => <a key={plan.id} href={`/trips/${tripId}?planVersion=${plan.versionNumber}`} aria-current={plan.versionNumber === displayPlan.versionNumber ? "true" : undefined}>V{plan.versionNumber}<span>{plan.isCurrent ? "当前版本" : "历史版本"}</span></a>)}</div>
+              </details>
+              {(!displayPlan.isCurrent || requiresUpdate) ? <span className={styles.statusNote}>{statusLabel}</span> : null}
+              {requestState.hasUnsavedEdits ? <span className={styles.statusNote}>需求修改未保存</span> : null}
+            </div>
+            <button type="button" className={styles.snapshotToggle} aria-expanded={snapshotOpen} aria-controls="plan-request-snapshot" onClick={() => setSnapshotOpen(!snapshotOpen)}>
+              查看本版需求快照<ChevronDown aria-hidden="true" className="size-4" />
+            </button>
+            <div className={styles.toolbar}>
+              {displayPlan.isCurrent && <Link href={`/trips/${tripId}/execute`} className={styles.primaryAction}>进入旅行执行模式</Link>}
+              <details name="trip-plan-actions" data-toolbar-menu className={styles.actionMenu}>
+                <summary><SlidersHorizontal aria-hidden="true" className="size-4" />调整 / 重排行程<ChevronDown aria-hidden="true" className="size-4" /></summary>
+                <div className={styles.actionMenuPanel}>
+                  <button type="button" onClick={() => { setActiveTab("replan"); document.getElementById("plan-views")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className={styles.menuItem}>AI 重新规划</button>
+                  <button type="button" onClick={generatePlan} disabled={!canGenerate} className={styles.menuItem}><Sparkles aria-hidden="true" className="size-5" />{isGenerating ? `正在生成... ${elapsedSeconds} 秒` : `生成新计划版本 V${(currentPlan?.versionNumber ?? 0) + 1}`}</button>
+                  <a href="#request-workspace" onClick={(event) => { event.preventDefault(); openRequirements(); }} className={styles.menuItem}><PencilLine aria-hidden="true" className="size-5" />修改需求</a>
+                </div>
+              </details>
+              {displayPlan.isCurrent ? <details name="trip-plan-actions" data-toolbar-menu className={styles.actionMenu}>
+                <summary><Download aria-hidden="true" className="size-4" />导出随身资料<ChevronDown aria-hidden="true" className="size-4" /></summary>
+                <div className={styles.actionMenuPanel}>
+                  <Link href={`/trips/${tripId}/mobile`} className={styles.menuItem}>手机一页版 · 离线保存</Link>
+                  <Link href={`/trips/${tripId}/text`} className={styles.menuItem}>文字导出 · 复制与下载</Link>
+                  <Link href={`/trips/${tripId}/pdf`} className={styles.menuItem}>PDF旅行手册 · 保存与打印</Link>
+                  <Link href={`/trips/${tripId}/image`} className={styles.menuItem}>旅行长图 · 保存图片</Link>
+                </div>
+              </details> : null}
+              {isGenerating ? (
+                <button type="button" onClick={cancelGeneration} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md border border-clay px-5 py-3 text-base font-semibold text-clay transition-colors hover:bg-clay-soft"><XCircle aria-hidden="true" className="size-5" />取消生成</button>
+              ) : null}
+            </div>
+
+          </div>
+
+          <div id="plan-request-snapshot" className={styles.snapshotPanel} hidden={!snapshotOpen}>
+              <dl className="grid gap-x-5 gap-y-4 rounded-2xl border border-[#18221D]/10 bg-white p-5 shadow-sm sm:grid-cols-2 lg:grid-cols-3">
+                <div>
+                  <dt className="text-sm text-graphite">旅行标题</dt>
+                  <dd className="mt-1 break-words text-base font-semibold text-charcoal">{tripTitle}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-graphite">目的地</dt>
+                  <dd className="mt-1 break-words text-base font-semibold text-charcoal">{displayPlan.requestSnapshot.destination ?? "未确认"}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-graphite">日期</dt>
+                  <dd className="mt-1 text-base font-semibold text-charcoal">{formatRequestDateRange(displayPlan.requestSnapshot)}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-graphite">人数</dt>
+                  <dd className="mt-1 text-base font-semibold text-charcoal">{formatTravelerCount(displayPlan.requestSnapshot)}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-graphite">节奏</dt>
+                  <dd className="mt-1 text-base font-semibold text-charcoal">{formatPlanPace(displayPlan.requestSnapshot)}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-graphite">费用</dt>
+                  <dd className="mt-1 text-base font-semibold text-charcoal">{budgetSummary ? `${formatBudgetTarget(displayPlan.requestSnapshot)}｜预计 ${formatMoneyRange(budgetSummary.totalMinCents, budgetSummary.totalMaxCents)}｜${overspendStatusLabels[budgetSummary.overspendStatus]}` : "费用待核算"}</dd>
+                </div>
+              </dl>
+
+          </div>
+
           <div id="plan-views" className="mt-5 scroll-mt-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div
@@ -545,10 +531,10 @@ export function PlanOverview({
                   role="tab"
                   aria-selected={activeTab === "timeline"}
                   onClick={() => setActiveTab("timeline")}
-                  className={`min-h-11 rounded px-4 text-sm font-semibold transition-colors ${
+                  className={`min-h-11 rounded-lg px-4 py-2 text-[14px] font-medium transition-all ${
                     activeTab === "timeline"
-                      ? "bg-sage text-white"
-                      : "text-graphite hover:text-sage"
+                      ? "bg-[#1B362A] text-white shadow-sm"
+                      : "text-[#4A5850] hover:bg-white/70 hover:text-[#141E19]"
                   }`}
                 >
                   每日时间轴
@@ -558,10 +544,10 @@ export function PlanOverview({
                   role="tab"
                   aria-selected={activeTab === "budget"}
                   onClick={() => setActiveTab("budget")}
-                  className={`min-h-11 rounded px-4 text-sm font-semibold transition-colors ${
+                  className={`min-h-11 rounded-lg px-4 py-2 text-[14px] font-medium transition-all ${
                     activeTab === "budget"
-                      ? "bg-sage text-white"
-                      : "text-graphite hover:text-sage"
+                      ? "bg-[#1B362A] text-white shadow-sm"
+                      : "text-[#4A5850] hover:bg-white/70 hover:text-[#141E19]"
                   }`}
                 >
                   预算
@@ -571,22 +557,22 @@ export function PlanOverview({
                   role="tab"
                   aria-selected={activeTab === "transport"}
                   onClick={() => setActiveTab("transport")}
-                  className={`min-h-11 rounded px-4 text-sm font-semibold transition-colors ${
+                  className={`min-h-11 rounded-lg px-4 py-2 text-[14px] font-medium transition-all ${
                     activeTab === "transport"
-                      ? "bg-sage text-white"
-                      : "text-graphite hover:text-sage"
+                      ? "bg-[#1B362A] text-white shadow-sm"
+                      : "text-[#4A5850] hover:bg-white/70 hover:text-[#141E19]"
                   }`}
                 >
                   门到门交通
                 </button>
                 <button type="button" role="tab" aria-selected={activeTab === "accommodation"} onClick={() => setActiveTab("accommodation")}
-                  className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "accommodation" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>住宿推荐</button>
+                  className={`min-h-11 rounded-lg px-4 py-2 text-[14px] font-medium transition-all ${activeTab === "accommodation" ? "bg-[#1B362A] text-white shadow-sm" : "text-[#4A5850] hover:bg-white/70 hover:text-[#141E19]"}`}>住宿推荐</button>
                 <button type="button" role="tab" aria-selected={activeTab === "map"} onClick={() => setActiveTab("map")}
-                  className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "map" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>地图</button>
+                  className={`min-h-11 rounded-lg px-4 py-2 text-[14px] font-medium transition-all ${activeTab === "map" ? "bg-[#1B362A] text-white shadow-sm" : "text-[#4A5850] hover:bg-white/70 hover:text-[#141E19]"}`}>地图</button>
                 <button type="button" role="tab" aria-selected={activeTab === "checklist"} onClick={() => setActiveTab("checklist")}
-                  className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "checklist" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>出发前清单</button>
-                <button type="button" role="tab" aria-selected={activeTab === "advisories"} onClick={() => setActiveTab("advisories")} className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "advisories" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>行程提醒</button>
-                <button type="button" role="tab" aria-selected={activeTab === "replan"} onClick={() => setActiveTab("replan")} className={`min-h-11 rounded px-4 text-sm font-semibold ${activeTab === "replan" ? "bg-sage text-white" : "text-graphite hover:text-sage"}`}>AI 重新规划</button>
+                  className={`min-h-11 rounded-lg px-4 py-2 text-[14px] font-medium transition-all ${activeTab === "checklist" ? "bg-[#1B362A] text-white shadow-sm" : "text-[#4A5850] hover:bg-white/70 hover:text-[#141E19]"}`}>出发前清单</button>
+                <button type="button" role="tab" aria-selected={activeTab === "advisories"} onClick={() => setActiveTab("advisories")} className={`min-h-11 rounded-lg px-4 py-2 text-[14px] font-medium transition-all ${activeTab === "advisories" ? "bg-[#1B362A] text-white shadow-sm" : "text-[#4A5850] hover:bg-white/70 hover:text-[#141E19]"}`}>行程提醒</button>
+                <button type="button" role="tab" aria-selected={activeTab === "replan"} onClick={() => setActiveTab("replan")} className={`min-h-11 rounded-lg px-4 py-2 text-[14px] font-medium transition-all ${activeTab === "replan" ? "bg-[#1B362A] text-white shadow-sm" : "text-[#4A5850] hover:bg-white/70 hover:text-[#141E19]"}`}>AI 重新规划</button>
               </div>
               <p className="text-sm text-graphite">
                 共 {days.length} 天｜{displayPlan.events.length} 个日程｜

@@ -1,0 +1,319 @@
+/* ── Editorial cover header ─────────────────────────────────────────────────
+   One shared full-bleed photograph band for /trips, /trips/[id], /runtime and
+   /settings. The band is a single continuous cover: the masthead row and the
+   page heading live *inside* it, so there is no second white bar between them,
+   and its bottom edge is dead straight where the warm-white work surface
+   begins. Every page keeps its own reading gutter by overriding --cover-max.
+
+   Layering: .editorial-cover-media and .editorial-cover-scrim sit on z-index
+   -1, and .editorial-cover-inner on z-index 1. `isolation: isolate` keeps that
+   -1 inside the band instead of letting it slide under the page background. */
+
+.editorial-cover {
+  position: relative;
+  z-index: 0;
+  /* The band is a fixed 220-260px window, not a box that grows with its copy.
+     `height` (not just min-height) is what enforces that: with only a
+     min-height, the /trips variant -- the one that carries a nav row, a kicker,
+     a title, a note *and* four tag pills -- pushed past the ceiling to 289px.
+     The inner padding below is tuned so that fullest variant still fits. */
+  height: clamp(220px, 24vw, 260px);
+  min-height: clamp(220px, 24vw, 260px);
+  display: flex;
+  align-items: flex-end;
+  isolation: isolate;
+  overflow: hidden;
+  background: #0E1713;
+  color: #fff;
+  /* Square bottom edge: the work surface below must meet the band flat. */
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+}
+/* The band owns the whole area, so nothing inside it may add a stray margin
+   between the masthead row and the heading. */
+.editorial-cover :where(p, h1, ul, li) { margin-block: 0; }
+.editorial-cover :where(h1) { font-weight: 500; }
+.editorial-cover :where(ul) { padding-inline-start: 0; list-style: none; }
+
+.editorial-cover-media { position: absolute; inset: 0; z-index: -1; }
+.editorial-cover-photo { object-fit: cover; filter: saturate(.86); }
+
+/* Frosted dark vignette: dark enough at the left for white text to stay
+   legible, light enough at the right to keep the landscape readable.
+   The 2px blur is carried by Tailwind's `backdrop-blur-[2px]` utility on the
+   element (see editorial-cover.tsx) rather than declared here: this host's CSS
+   minifier emits only the -webkit- alias for `backdrop-filter` in these global
+   sheets, which would leave Chrome/Edge without the blur. */
+.editorial-cover-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(to right, rgb(14 23 19 / 85%), rgb(14 23 19 / 70%), rgb(14 23 19 / 55%));
+}
+
+.editorial-cover-inner {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: var(--cover-max, 1260px);
+  margin-inline: auto;
+  /* Tuned to hold the fullest variant (/trips: nav + kicker + title + note +
+     tags) inside the band's 260px ceiling. */
+  padding: 16px 40px 20px;
+}
+
+/* The masthead row inside the band. /trips passes its own CSS-module classes
+   (trips_albumBand__LFDRE, trips_brand__KCPen, ...), so a bare `.albumBand`
+   selector would match nothing here -- the hashed name is what lands in the
+   DOM. These rules therefore match on the [class*=] substring, which is
+   stable across builds and keeps the re-pointing in this one global sheet. */
+.editorial-cover [class*="albumBand"],
+.editorial-cover [class*="runtime-container"],
+.editorial-cover [class*="settings-container"] { background: transparent; }
+.editorial-cover [class*="albumBand"] {
+  width: 100%;
+  max-width: none;
+  margin: 0 0 10px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid rgb(255 255 255 / 14%);
+  background: transparent;
+  color: #fff;
+  backdrop-filter: none;
+}
+.editorial-cover [class*="albumBandInner"] {
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+  padding-inline: 0;
+}
+.editorial-cover [class*="brand"],
+.editorial-cover [class*="wordmark"],
+.editorial-cover [class*="detailNavigation"] > a,
+.editorial-cover [class*="detailNavigation"] [class*="wordmark"] { color: #fff; }
+.editorial-cover [class*="brand"] > span + span { color: rgb(232 226 213 / 78%); }
+.editorial-cover [class*="navigationActions"] { gap: 6px; }
+/* The frosted-glass pills. Their 12px blur is applied with Tailwind's
+   `backdrop-blur-md` utility on the elements themselves (see
+   editorial-cover.tsx and the .editorial-cover-scrim note above): declaring
+   `backdrop-filter` here would be reduced to the -webkit- alias alone by this
+   host's minifier, leaving Chrome/Edge without the frost. */
+.editorial-cover :is([class*="navigationLink"], [class*="newTrip"], [class*="settingsLink"], [class*="detailDeleteButton"]) {
+  border-color: rgb(255 255 255 / 26%);
+  background: rgb(255 255 255 / 12%);
+  color: #fff;
+}
+.editorial-cover :is([class*="navigationLink"], [class*="newTrip"], [class*="settingsLink"], [class*="detailDeleteButton"]):hover {
+  border-color: rgb(255 255 255 / 42%);
+  background: rgb(255 255 255 / 20%);
+  color: #fff;
+}
+/* The one filled pill in the row keeps its pine green, lightened for the dark
+   photograph so it still reads as the primary action. */
+.editorial-cover [class*="newTrip"] {
+  border-color: rgb(255 255 255 / 34%);
+  background: rgb(255 255 255 / 88%);
+  color: #16261E;
+}
+.editorial-cover [class*="newTrip"]:hover {
+  border-color: #fff;
+  background: #fff;
+  color: #0E1713;
+}
+/* A link on a white bar is dark ink; on the photograph it must invert, and the
+   focus ring has to stay visible against the image. Declared before the
+   specific button colours above so those keep precedence (equal specificity
+   would otherwise let this ink win). */
+.editorial-cover :is(a, button):focus-visible { outline-color: #f3efe6; }
+
+.editorial-cover-heading { max-width: 760px; }
+.editorial-cover-kicker {
+  color: rgb(232 226 213 / 85%);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.7;
+  letter-spacing: .14em;
+}
+.editorial-cover-title {
+  margin-top: 10px;
+  font-family: var(--font-serif);
+  font-size: clamp(27px, 3.1vw, 40px);
+  line-height: 1.42;
+  letter-spacing: .03em;
+  color: #fff;
+  filter: drop-shadow(0 4px 24px rgb(6 12 9 / 55%));
+}
+.editorial-cover-note {
+  margin-top: 9px;
+  max-width: 620px;
+  color: rgb(238 234 224 / 86%);
+  font-size: 12.5px;
+  line-height: 1.85;
+}
+.editorial-cover-quote {
+  margin-top: 11px;
+  max-width: 760px;
+  overflow: hidden;
+  color: rgb(255 255 255 / 88%);
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editorial-cover-quote-label { margin-left: 8px; color: rgb(232 226 213 / 62%); font-family: var(--font-sans); font-size: 10px; }
+.editorial-cover-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+/* Frosted-glass pills, written here rather than borrowed from Tailwind so the
+   cover never depends on a utility class surviving a purge. */
+.editorial-cover-tags > li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 31px;
+  padding: 5px 11px;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 12%);
+  color: #fff;
+  font-size: 11px;
+}
+.editorial-cover-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 15px; }
+
+/* /runtime and /settings pass --bleed for their nav-row layout. It no longer
+   overrides the band height: the base .editorial-cover rule above pins the
+   220-260px window for every variant, and app/gallery-workspace.css only
+   tightens the inner spacing for this modifier. A second height here would be a
+   competing source of truth for the same box. */
+
+/* /trips/[id] does not use <EditorialCover>: its masthead is rendered by
+   TripEditor (the `compact-trip-header` test id and its copy are load-bearing
+   for the editor's own tests, so the heading cannot be moved into a wrapper).
+   The page therefore paints the same photographic band itself and lets the
+   editor's `onCover` variant supply the light-on-dark foreground. Layout: the
+   photograph is pinned to a fixed 260px at the top of the page, the editor
+   starts at the very top of the document and is lifted above it, and the
+   warm-white work surface begins under the editable header.
+
+   These names are deliberately GLOBAL rather than CSS-module names: the page
+   imports `app/trips/trips.module.css` for its own layout classes, so a
+   `styles.detailCover` lookup would resolve against that module and come back
+   undefined. Global class names keep the band styled wherever it is rendered. */
+.detail-page { position: relative; }
+.detail-cover {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 0;
+  height: clamp(220px, 26vw, 260px);
+  overflow: hidden;
+  background: #0E1713;
+  pointer-events: none;
+}
+.detail-cover-media { position: absolute; inset: 0; }
+.detail-cover-photo { object-fit: cover; filter: saturate(.86); }
+.detail-cover-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to right, rgb(14 23 19 / 85%), rgb(14 23 19 / 70%), rgb(14 23 19 / 55%));
+  /* The blur is applied by a Tailwind utility on the element itself, for the
+     same minifier reason documented on .editorial-cover-scrim. */
+}
+/* The detail page's own masthead row rides on the photograph, so its ink has to
+   invert too. This is the /trips/[id] equivalent of the .editorial-cover
+   re-pointing above; it is scoped to .detail-page because that page paints the
+   band itself instead of using <EditorialCover>. Without it the wordmark and
+   the back link would paint dark ink straight onto the dark image. */
+.detail-page [class*="detailNavigation"] { border-bottom-color: rgb(255 255 255 / 16%); }
+/* The back link also carries Tailwind's `text-graphite`, and the utility is
+   emitted after these sheets, so match on the link's own element with an
+   attribute selector to outrank a bare utility class. */
+.detail-page [class*="detailNavigation"] a[href],
+.detail-page [class*="detailNavigation"] [class*="wordmark"] { color: #fff; }
+.detail-page [class*="detailNavigation"] a[href]:hover { color: rgb(255 255 255 / 80%); }
+.detail-page [class*="detailNavigation"] a[href] svg { color: #fff; }
+/* The delete pill is a frosted chip on the band, not a white slab. */
+.detail-page [class*="detailDeleteButton"] {
+  border-color: rgb(255 255 255 / 26%);
+  background: rgb(255 255 255 / 12%);
+  color: #fff;
+}
+.detail-page [class*="detailDeleteButton"]:hover {
+  border-color: rgb(255 255 255 / 42%);
+  background: rgb(255 255 255 / 20%);
+  color: #fff;
+}
+.detail-page [class*="detailNavigation"] :is(a, button):focus-visible { outline-color: #f3efe6; }
+/* The editor is stacked above the photograph so its transparent on-cover
+   header reads as the foreground of the band. Its own shell keeps the ink. */
+.detail-page .detail-content { position: relative; z-index: 1; }
+@media (max-width: 680px) {
+  .detail-cover { height: 200px; }
+}
+
+/* The warm-white work surface begins immediately under the band. Any radius a
+   page may have carried on its shell is removed so the seam stays flat. */
+.editorial-cover + *,
+.editorial-cover + * > * {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+/* A page that puts the band straight on its shell needs no top gap, and the
+   shell's own warm-white fill continues the cover's straight bottom edge. */
+.editorial-cover + .settings-container,
+.editorial-cover + .runtime-container,
+.editorial-cover + .settings-layout { padding-top: 0; }
+
+/* The shared inner-page banner now carries its layout with the same Tailwind
+   classes as the page JSX. These resets keep the earlier legacy declarations in
+   this file from pinning it back to the old fixed-height cover. */
+.editorial-cover {
+  height: auto;
+  min-height: 0;
+  display: block;
+  align-items: initial;
+  background: #14231C;
+}
+.editorial-cover-inner {
+  position: static;
+  z-index: auto;
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+  padding: 0;
+}
+
+@media (max-width: 680px) {
+  /* A phone gets a slightly shorter band, but it stays a fixed window so the
+     copy can never stretch it away from the design. */
+  .editorial-cover { height: 200px; min-height: 200px; }
+  .editorial-cover-inner { padding: 14px 21px 16px; }
+  .editorial-cover-scrim { background: linear-gradient(to bottom, rgb(14 23 19 / 62%), rgb(14 23 19 / 88%)); }
+  .editorial-cover-heading { max-width: none; }
+  .editorial-cover-note { font-size: 12px; }
+  .editorial-cover-quote { font-size: 13px; }
+  .editorial-cover [class*="albumBandInner"] { flex-wrap: wrap; gap: 10px; }
+}
+@media (max-width: 1000px) and (min-width: 681px) {
+  .editorial-cover-inner { padding: 20px 32px 24px; }
+}
+
+/* Keep the Tailwind layout classes authoritative on every breakpoint. */
+@media screen {
+  .editorial-cover {
+    height: auto;
+    min-height: 0;
+    display: block;
+    align-items: initial;
+    background: #14231C;
+  }
+  .editorial-cover-inner {
+    position: static;
+    z-index: auto;
+    width: 100%;
+    max-width: none;
+    margin-inline: 0;
+    padding: 0;
+  }
+  .editorial-cover h1 {
+    font-weight: 600;
+  }
+}

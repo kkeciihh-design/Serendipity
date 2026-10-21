@@ -1,8 +1,29 @@
 @import "tailwindcss";
+@import "./gallery-workspace.css";
+@import "./cover-header.css";
+
+/* ── Craftsmanship polish: dialog chrome and primary actions ────────────────
+   Windows paints a wide grey scrollbar with arrow buttons inside every scroll
+   container, which breaks the editorial surface. These rules live in the
+   app-wide sheet so dialogs rendered through portals are covered too. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(24 32 28 / 18%) transparent;
+}
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { border-radius: 999px; background: rgb(24 32 28 / 18%); }
+::-webkit-scrollbar-thumb:hover { background: rgb(24 32 28 / 32%); }
+/* Hide the legacy arrow buttons Windows still draws. */
+::-webkit-scrollbar-button,
+::-webkit-scrollbar-button:single-button,
+::-webkit-scrollbar-button:double-button { display: none; width: 0; height: 0; }
 
 .map-frame-root { position: fixed; inset: 0; background: #f2efe8; }
 .map-frame-canvas { width: 100%; height: 100%; }
 .map-frame-message { position: absolute; left: 52px; right: 12px; top: 12px; z-index: 1000; padding: 10px 12px; border-radius: 6px; background: rgba(255,255,255,.96); color: #37463c; font-size: 14px; box-shadow: 0 1px 5px #0002; }
+.map-frame-arrival { position: absolute; right: 12px; bottom: 12px; z-index: 1000; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid #ffffff59; border-radius: 999px; background: #183026f2; color: #f4f1e8; font-size: 12px; line-height: 1.5; white-space: nowrap; box-shadow: 0 4px 16px #00000038; backdrop-filter: blur(6px); }
+.map-frame-arrival span { font-size: 13px; }
 .serendipity-map-pin { border: 2px solid white; border-radius: 50%; background: #466855; color: white; text-align: center; font-size: 19px; line-height: 26px; box-shadow: 0 1px 5px #0005; width: 30px; height: 30px; }
 .serendipity-map-pin-area { background: #f7f3ea; color: #466855; }
 .serendipity-map-pin[data-selected="true"], .serendipity-map-pin[data-highlighted="true"] { background: #294e38; color: #fff; border-color: #e9d79e; box-shadow: 0 0 0 4px #658e6959, 0 2px 8px #0005; }
@@ -19,15 +40,15 @@
   --font-sans: "Plus Jakarta Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", Georgia, serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  --color-cream: #faf7f0;
-  --color-shell: #f2ede2;
+  --color-cream: #f6f7f5;
+  --color-shell: #eff2ef;
   --color-charcoal: #232a26;
   --color-graphite: #4f5b53;
   --color-sage: #57765a;
   --color-sage-soft: #e5ece2;
   --color-clay: #a85439;
   --color-clay-soft: #f4e6dd;
-  --color-sand: #ded2c0;
+  --color-sand: #d8dfda;
   --color-focus: #1f5f45;
   --text-sm: 0.9375rem;
   --text-sm--line-height: 1.6;
@@ -49,7 +70,9 @@ body {
 /* The landscape dissolves into the same paper tone as the lookbook. */
 .editorial-home {
   --home-paper: #fcfbf8;
-  --home-parchment: #f2ede2;
+  /* The lower half of the page is one clean warm-white sheet: no engineering
+     paper grid, no dot texture, no crosshatch. */
+  --home-parchment: #f7f6f2;
   --home-fir: #1b3228;
   --home-ink: #18201c;
   --home-secondary: #667164;
@@ -57,8 +80,6 @@ body {
   --home-rule: rgb(24 32 28 / 9%);
   min-height: 100dvh;
   background-color: var(--home-parchment);
-  background-image: radial-gradient(rgb(111 102 77 / 4%) .5px, transparent .5px);
-  background-size: 4px 4px;
   color: var(--home-ink);
   -webkit-font-smoothing: antialiased;
 }
@@ -71,11 +92,13 @@ body {
   background: radial-gradient(ellipse 68% 52% at 50% 32%, rgb(10 18 14 / 52%) 0%, rgb(10 18 14 / 30%) 58%, rgb(10 18 14 / 12%) 100%), linear-gradient(180deg, rgb(9 24 17 / 16%), transparent 35%);
   pointer-events: none;
 }
+/* The landscape never gets a white wash. Only a soft dark vignette protects
+   the white type at the bottom of the cover. */
 .home-cover-shade::after {
   position: absolute;
   inset: auto 0 0;
   height: 200px;
-  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--home-parchment) 8%, transparent) 18%, color-mix(in srgb, var(--home-parchment) 32%, transparent) 42%, color-mix(in srgb, var(--home-parchment) 68%, transparent) 66%, color-mix(in srgb, var(--home-parchment) 93%, transparent) 86%, var(--home-parchment));
+  background: linear-gradient(to bottom, transparent, rgb(6 14 10 / 14%) 34%, rgb(6 14 10 / 32%) 68%, rgb(6 14 10 / 52%));
   content: "";
 }
 .home-cover-content { position: relative; z-index: 1; display: flex; flex-direction: column; width: 100%; }
@@ -103,7 +126,17 @@ body {
 
 .home-showcase {
   position: relative;
-  padding-block: 8px 34px;
+  /* The lookbook meets the landscape on a straight edge. A negative top margin
+     plus a large top radius is what exposed two dark triangular notches where
+     the rounded corners pulled away from the cover, so the seam is now flat and
+     the only separation is a hairline. */
+  z-index: 3;
+  margin-top: 0;
+  border-radius: 0;
+  border-top: 1px solid rgb(24 32 28 / 8%);
+  padding-block: 42px 34px;
+  background-color: var(--home-parchment);
+  box-shadow: none;
   scroll-margin-top: 24px;
 }
 .home-section-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 32px; }
@@ -117,7 +150,7 @@ body {
 .home-sample-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; gap: 22px; margin-top: 29px; }
 .home-sample-footnote { margin-top: 17px; color: #8b8c80; font-size: 10px; line-height: 1.8; text-align: right; }
 
-.home-footer { position: relative; z-index: 10; padding: 2px 0 21px; background-color: var(--home-parchment); background-image: radial-gradient(rgb(111 102 77 / 4%) .5px, transparent .5px); background-size: 4px 4px; }
+.home-footer { position: relative; z-index: 10; padding: 2px 0 21px; background-color: var(--home-parchment); }
 .home-footer-signature { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-block: 22px; border-top: 1px solid var(--home-rule); color: #526251; }
 .home-footer-signature > span:first-child { font-family: Georgia, var(--font-serif); font-size: 24px; letter-spacing: -.7px; }
 .home-footer-signature > span:last-child { font-family: var(--font-serif); font-size: 12px; letter-spacing: .12em; color: #7b8476; }
@@ -129,20 +162,20 @@ body {
 .home-landscape { position: absolute; inset: 0; overflow: hidden; }
 .home-cover-sketch { display: block; width: 100%; height: 100%; }
 .home-gallery-colophon { display: grid; grid-template-columns: minmax(0, 390px) 1fr auto; align-items: end; gap: 24px; padding-block: 14px 144px; }
+.home-gallery-dock { justify-self: end; }
+.home-nameplate, .home-browse-link, .home-gallery-dock { align-self: end; }
 .home-nameplate { min-width: 0; padding: 16px 20px 10px; border: 1px solid rgb(249 245 231 / 27%); border-radius: 14px; background: rgb(13 29 23 / 48%); backdrop-filter: blur(18px); box-shadow: 0 5px 30px rgb(0 0 0 / 5%); }
 .home-fieldnote-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #ddc499; font-size: 9px; letter-spacing: .2em; }
 .home-fieldnote-label > span + span { font-family: var(--font-mono); letter-spacing: .08em; }
-.home-place-heading h2 { display: flex; align-items: center; gap: 8px; margin-top: 9px; font-family: var(--font-serif); font-size: 23px; line-height: 1.4; }
+.home-place-heading h2 { display: flex; align-items: center; gap: 8px; margin-top: 9px; font-family: var(--font-serif); font-size: 20px; line-height: 1.4; }
 .home-place-heading h2 > span { margin-left: auto; font-family: var(--font-sans); font-size: 10px; color: #dedecb; text-align: right; }
-.home-place-note { margin-top: 7px; color: #e5e6db; font-size: 11px; line-height: 1.85; text-wrap: pretty; }
+.home-place-note { margin-top: 7px; color: #e5e6db; font-size: 14px; line-height: 1.625; text-wrap: pretty; }
 .home-place-bottom { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 5px; }
-.home-place-bottom button { display: inline-flex; align-items: center; gap: 9px; min-height: 36px; font-size: 11px; color: #e6d0aa; cursor: pointer; }
+.home-place-bottom button { display: inline-flex; align-items: center; gap: 9px; min-height: 36px; font-size: 13px; color: #e6d0aa; cursor: pointer; }
 .home-place-bottom button:hover { color: #fff; }
 .home-place-coordinates { font-family: var(--font-mono); font-size: 8px; color: #bccbbe; white-space: nowrap; }
 .home-browse-link { display: inline-flex; align-items: center; justify-self: center; gap: 9px; min-height: 44px; font-size: 10px; letter-spacing: .07em; color: #e6e6d9; white-space: nowrap; }
 .home-browse-link:hover { color: #fff; }
-.home-gallery-controls { display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-width: 210px; }
-.home-gallery-caption { margin-bottom: 2px; font-size: 10px; letter-spacing: .18em; color: #e0ddca; text-align: center; }
 .home-aesthetic-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 4px; border: 1px solid rgb(255 255 255 / 30%); border-radius: 999px; background: rgb(11 26 19 / 38%); backdrop-filter: blur(16px); }
 .home-aesthetic-switch button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; padding: 6px 19px; border-radius: 999px; color: #e8e8dc; font-size: 11px; cursor: pointer; transition: background .2s, color .2s; }
 .home-aesthetic-switch button[aria-pressed="true"] { color: #294533; background: #f4efe2; box-shadow: 0 2px 9px rgb(0 0 0 / 8%); }
@@ -152,13 +185,16 @@ body {
 .home-gallery-credits { max-width: 850px; margin-top: 2px; color: #667060; font-size: 10px; line-height: 1.9; }
 .home-gallery-credits summary { width: fit-content; padding-block: 8px; cursor: pointer; }
 .home-gallery-credits > p { margin: 8px 0; }
-.home-gallery-credits ul { list-style: none; }
+.home-gallery-credits ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(250px, 100%), 1fr)); gap: 8px 20px; margin-top: 10px; padding: 14px 18px; border-radius: 12px; background: rgb(24 34 29 / 4%); list-style: none; }
 .home-gallery-credits li { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .home-gallery-credits a { text-decoration: underline; text-underline-offset: 3px; }
 
 .editorial-home[data-aesthetic="sketch"] { --home-parchment: #f4f0e5; }
 [data-aesthetic="sketch"] .home-cover { color: #30483e; background: #f3efdf; }
+/* In sketch mode the ink-wash painting must meet the canvas below on a clean,
+   unmasked edge: no dark wash band at the bottom of the first screen. */
 [data-aesthetic="sketch"] .home-cover-shade { background: radial-gradient(ellipse 45% 44% at 50% 40%, rgb(249 246 233 / 42%), rgb(249 246 233 / 8%) 95%); }
+[data-aesthetic="sketch"] .home-cover-shade::after { display: none; }
 [data-aesthetic="sketch"] .home-cover-title { filter: none; color: #284438; text-shadow: 0 2px 18px #f9f6e9; }
 [data-aesthetic="sketch"] .home-cover-description { color: #4d5d4f; filter: none; }
 [data-aesthetic="sketch"] .home-cover-kicker { color: #788069; }
@@ -168,13 +204,16 @@ body {
 [data-aesthetic="sketch"] .home-navigation-link, [data-aesthetic="sketch"] .home-settings-link { color: #3d5444; }
 [data-aesthetic="sketch"] .home-navigation-link:hover, [data-aesthetic="sketch"] .home-settings-link:hover { background: rgb(96 121 89 / 12%); }
 [data-aesthetic="sketch"] .home-cover :focus-visible { outline-color: #435e44; }
-[data-aesthetic="sketch"] .home-nameplate { border-color: rgb(90 105 78 / 27%); background: rgb(249 246 233 / 81%); box-shadow: 0 4px 22px rgb(81 79 51 / 7%); }
+/* In sketch mode the nameplate reads as a sheet of rice paper laid on the
+   drawing: translucent warm white with a hairline pale-green rule and no
+   heavy dark drop shadow. */
+[data-aesthetic="sketch"] .home-nameplate { border-color: rgb(140 168 130 / 38%); background: rgb(252 251 246 / 72%); backdrop-filter: blur(9px); box-shadow: none; }
 [data-aesthetic="sketch"] .home-fieldnote-label { color: #8b634c; }
 [data-aesthetic="sketch"] .home-place-heading h2 > span, [data-aesthetic="sketch"] .home-place-note { color: #52604d; }
 [data-aesthetic="sketch"] .home-place-bottom button { color: #765940; }
 [data-aesthetic="sketch"] .home-place-bottom button:hover { color: #284438; }
 [data-aesthetic="sketch"] .home-place-coordinates { color: #687763; }
-[data-aesthetic="sketch"] .home-browse-link, [data-aesthetic="sketch"] .home-gallery-caption { color: #52694f; }
+[data-aesthetic="sketch"] .home-browse-link { color: #2C3831; }
 [data-aesthetic="sketch"] .home-aesthetic-switch { background: rgb(245 242 226 / 76%); border-color: rgb(69 87 63 / 24%); }
 [data-aesthetic="sketch"] .home-aesthetic-switch button { color: #5c6a50; }
 [data-aesthetic="sketch"] .home-aesthetic-switch button[aria-pressed="true"] { background: #3e5643; color: #f7f3e5; }
@@ -201,19 +240,18 @@ body {
   .home-cover-sketch { position: absolute; bottom: 0; height: 420px; mask-image: linear-gradient(to bottom, transparent, #000 24%); }
   .home-gallery-colophon { grid-template-columns: 1fr; gap: 12px; padding-block: 6px 100px; }
   .home-cover-shade::after { height: 144px; }
+  /* The sketch cover keeps a clean edge on small screens too. */
+  [data-aesthetic="sketch"] .home-cover-shade::after { display: none; }
   .home-nameplate { padding: 12px 15px 7px; border-radius: 12px; }
   .home-fieldnote-label { font-size: 8px; }
-  .home-place-heading h2 { margin-top: 6px; font-size: 21px; }
+  .home-place-heading h2 { margin-top: 6px; font-size: 20px; }
   .home-place-heading h2 > span { font-size: 9px; }
-  .home-place-note { margin-top: 5px; font-size: 10px; line-height: 1.75; }
+  .home-place-note { margin-top: 5px; font-size: 14px; line-height: 1.625; }
   .home-place-bottom { margin-top: 1px; }
-  .home-place-bottom button { font-size: 10px; }
+  .home-place-bottom button { font-size: 13px; }
   .home-place-coordinates { font-size: 8px; }
-  .home-gallery-controls { display: grid; grid-template-columns: 1fr 1fr; min-width: 0; gap: 10px; align-items: center; }
-  .home-gallery-caption { display: none; }
   .home-aesthetic-switch { padding: 3px; }
   .home-aesthetic-switch button { min-height: 36px; padding-inline: 9px; font-size: 10px; gap: 6px; }
-  .home-next-landscape { min-height: 44px; gap: 6px; font-size: 9px; }
   .home-cover-image { object-position: 57% center; }
   .home-navigation { gap: 12px; padding-block: 20px; }
   .home-wordmark { font-size: 24px; letter-spacing: -.7px; }
@@ -232,7 +270,7 @@ body {
   .home-cover-colophon > a { font-size: 9px; gap: 8px; }
   .home-colophon-divider { padding-inline: 5px; }
   .home-coordinate { display: none; }
-  .home-showcase { padding-block: 8px 28px; scroll-margin-top: 16px; }
+  .home-showcase { margin-top: 0; border-radius: 0; padding-block: 32px 28px; scroll-margin-top: 16px; }
   .home-section-kicker { font-size: 8px; gap: 10px; }
   .home-section-kicker > span + span { padding-left: 10px; }
   .home-section-title { margin-top: 12px; font-size: clamp(21px, 5.65vw, 28px); letter-spacing: -.045em; }
@@ -254,4 +292,26 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .editorial-home *, .editorial-home *::before, .editorial-home *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}
+
+/* A primary action keeps the brand colour in every state: a disabled button
+   should read as quiet, never as flat grey-green cement. Declared last so it
+   wins over utility classes on the same element. */
+.app-primary-cta {
+  border: 1px solid rgb(255 255 255 / 12%);
+  background-color: #1B362A;
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 14%);
+  transition: background-color .22s ease, box-shadow .22s ease;
+}
+.app-primary-cta:hover:not(:disabled) {
+  background-color: #12261d;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 18%), 0 5px 18px rgb(16 34 26 / 26%);
+}
+/* Disabled keeps the solid pine green with soft white text; the button must
+   never read as pale cement grey. */
+.app-primary-cta:disabled, .app-primary-cta[aria-disabled="true"] {
+  background-color: #1B362A;
+  color: rgb(255 255 255 / 75%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 10%);
 }

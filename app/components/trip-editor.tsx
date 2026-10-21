@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import { businessFetch } from "@/lib/business-fetch";
 
 import {
@@ -16,11 +17,12 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { formatTripDateTime } from "@/lib/trip-format";
 import { tripSummaryBudget, tripSummaryDates, tripSummaryDays, tripSummaryTravelers } from "@/lib/trip-summary";
 import { tripDisplayTitle } from "@/lib/trip-title";
 import { getTripHardTimeConstraints } from "@/lib/trip-hard-constraints";
+import type { GalleryPhoto } from "@/lib/destination-gallery";
 import styles from "./trip-editor.module.css";
 import {
   PlanOverview,
@@ -64,12 +66,16 @@ export function TripEditor({
   plans,
   selectedVersionNumber,
   planningNotice = null,
+  navigation,
+  coverPhoto,
 }: {
   trip: TripEditorTrip;
   request: TripRequestClient;
   plans: PlanVersionClient[];
   selectedVersionNumber: number | null;
   planningNotice?: string | null;
+  navigation?: ReactNode;
+  coverPhoto?: GalleryPhoto;
 }) {
   const router = useRouter();
   // Entry URLs and incomplete AI runs must never open the detailed editor.
@@ -198,33 +204,45 @@ export function TripEditor({
 
   return (
     <div className={styles.editor}>
-      <header className={styles.tripHeader} data-testid="compact-trip-header">
-        <div className={styles.headingRow}>
-          <div className={styles.headingCopy}>
-            <p className={styles.eyebrow}><span>SERENDIPITY / TRAVEL JOURNAL</span><span>旅行详情</span></p>
-            <h1 className={styles.tripTitle} aria-label={displayTitle}>
-              <button type="button" className={styles.titleButton} onClick={() => setIsEditingTitle(true)} aria-label={`修改旅行标题：${displayTitle}`}>
-                {displayTitle}<PencilLine aria-hidden="true" className={styles.titleEditIcon} />
+      <header className="relative min-h-[230px] w-full overflow-hidden bg-[#14231C] text-white" data-testid="compact-trip-header">
+        {coverPhoto ? (
+          <div className="absolute inset-0" aria-hidden="true">
+            <Image fill preload sizes="100vw" src={coverPhoto.src} alt="" className="h-full w-full object-cover" style={{ objectPosition: coverPhoto.position }} />
+          </div>
+        ) : null}
+        <div className="absolute inset-0 bg-gradient-to-r from-[#14231C]/88 via-[#14231C]/72 to-[#14231C]/55" aria-hidden="true" />
+
+        <div className="relative z-10 mx-auto w-full max-w-[1260px] px-5 py-7 sm:px-10">
+        {navigation}
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+          <div className="flex-1 min-w-0 w-full whitespace-normal break-words">
+            <h1 className="font-serif text-3xl font-semibold tracking-tight whitespace-normal break-words text-white md:text-4xl" aria-label={displayTitle}>
+              <button type="button" className="inline-flex min-w-0 w-full items-center gap-2 text-left" onClick={() => setIsEditingTitle(true)} aria-label={`修改旅行标题：${displayTitle}`}>
+                {displayTitle}<PencilLine aria-hidden="true" className="size-4 text-white/70" />
               </button>
             </h1>
-            {originalQuote && originalQuote !== displayTitle ? <blockquote className={styles.originalQuote} title={originalQuote} aria-label="出发灵感" data-testid="trip-original-quote">“{originalQuote}”</blockquote> : null}
+            {originalQuote && originalQuote !== displayTitle ? <blockquote className="mt-1 max-w-xl line-clamp-1 whitespace-normal break-words text-[15px] leading-6 text-white/85" title={originalQuote} aria-label="出发灵感" data-testid="trip-original-quote">“{originalQuote}”</blockquote> : null}
+            <span aria-label="当前生效的旅行要素" className="mt-3 flex flex-wrap items-center gap-2.5">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/15 px-3.5 py-1.5 text-sm text-white"><MapPin aria-hidden="true" size={14} />{summarySnapshot?.destination ?? "目的地待补充"}</span>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/15 px-3.5 py-1.5 text-sm text-white"><CalendarDays aria-hidden="true" size={14} />{tripSummaryDates(summarySnapshot)}{summaryDays ? ` · ${summaryDays} 天` : ""}</span>
+              {summaryTravelers ? <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/15 px-3.5 py-1.5 text-sm text-white"><Users aria-hidden="true" size={14} />{summaryTravelers}</span> : null}
+              {summaryBudget ? <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/15 px-3.5 py-1.5 text-sm text-white"><Wallet aria-hidden="true" size={14} />{summaryBudget}</span> : null}
+              {getTripHardTimeConstraints(summarySnapshot).map((constraint) => <span className="inline-flex items-center gap-1.5 rounded-full border border-[#E5C5B0] bg-[#FDF3EB] px-3.5 py-1.5 text-sm font-semibold text-[#8A3F1E] shadow-sm" key={`${constraint.kind}-${constraint.date}-${constraint.time}`}><Clock3 aria-hidden="true" size={14} />{constraint.label}</span>)}
+            </span>
           </div>
-          <button ref={requirementsToggleRef} type="button" onClick={() => setRequirementsOpen((open) => !open)} aria-expanded={requirementsOpen} aria-controls="trip-requirements-panel" className={styles.requirementsToggle}>
-            <SlidersHorizontal aria-hidden="true" size={15} />修改需求 / 重新生成
-            <ChevronDown aria-hidden="true" size={14} className={requirementsOpen ? styles.chevronOpen : undefined} />
-          </button>
+
+          <div className="flex min-w-0 items-center justify-end md:pt-1">
+            <button ref={requirementsToggleRef} type="button" onClick={() => setRequirementsOpen((open) => !open)} aria-expanded={requirementsOpen} aria-controls="trip-requirements-panel" className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/15 px-3.5 py-1.5 text-sm text-white transition hover:bg-white/25">
+              <SlidersHorizontal aria-hidden="true" size={14} />修改需求 / 重新生成
+              <ChevronDown aria-hidden="true" size={14} className={requirementsOpen ? "rotate-180" : undefined} />
+            </button>
+          </div>
         </div>
-        <div className={styles.summaryTags} aria-label="当前生效的旅行要素">
-          <span className={styles.destinationTag}><MapPin aria-hidden="true" size={14} />{summarySnapshot?.destination ?? "目的地待补充"}</span>
-          <span><CalendarDays aria-hidden="true" size={14} />{tripSummaryDates(summarySnapshot)}{summaryDays ? ` · ${summaryDays} 天` : ""}</span>
-          {summaryTravelers ? <span><Users aria-hidden="true" size={14} />{summaryTravelers}</span> : null}
-          {summaryBudget ? <span><Wallet aria-hidden="true" size={14} />{summaryBudget}</span> : null}
-          {getTripHardTimeConstraints(summarySnapshot).map((constraint) => <span className={styles.hardTimeTag} key={`${constraint.kind}-${constraint.date}-${constraint.time}`}><Clock3 aria-hidden="true" size={14} />{constraint.label}</span>)}
-          {summarySnapshot?.interests.slice(0, 3).map((interest) => <span className={styles.interestTag} key={interest}>{interest}</span>)}
+        {isDirty || requestState.hasUnsavedEdits ? <p className="mt-3 text-right text-[13px] text-[#F6C9A8]" role="status">{isDirty ? "标题未保存" : "需求有未保存修改"}{isDirty && requestState.hasUnsavedEdits ? " · 需求有未保存修改" : ""}</p> : null}
         </div>
-        {isDirty || requestState.hasUnsavedEdits ? <p className={styles.unsavedNote} role="status">{isDirty ? "标题未保存" : "需求有未保存修改"}{isDirty && requestState.hasUnsavedEdits ? " · 需求有未保存修改" : ""}</p> : null}
       </header>
 
+      <div className={styles.editorShell}>
       <div hidden={!isEditingTitle}>
       <form
         onSubmit={saveTitle}
@@ -363,6 +381,7 @@ export function TripEditor({
           </div>
         </section>
       ) : null}
+      </div>
     </div>
   );
 }

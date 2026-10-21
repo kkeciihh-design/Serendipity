@@ -1,0 +1,299 @@
+[
+  {
+    "id": "sayram-lake",
+    "name": "赛里木湖",
+    "latin": "SAYRAM LAKE",
+    "region": "新疆 · 博尔塔拉",
+    "coordinates": "44.60° N · 81.17° E",
+    "season": "冬春 · 蓝冰与雪山",
+    "note": "雪山把最后一抹蓝留在湖心，冰面收藏着冬日的呼吸。等风吹过旷野，沿着湖岸慢慢走向天光。",
+    "visual": {
+      "terrain": "alpine",
+      "palette": "ice",
+      "motif": "snowpeak",
+      "texture": "water",
+      "celestial": "sun",
+      "sunX": 1240,
+      "ridge": 26
+    },
+    "prompt": "想去新疆 · 博尔塔拉的赛里木湖旅行 3 天，喜欢自然风光、当地文化和清晨摄影。请帮我规划舒缓的每日路线、交通与住宿，留足休息时间，并提醒天气和景区开放安排。",
+    "photo": {
+      "src": "/images/gallery/sayram-lake.webp",
+      "alt": "赛里木湖 · Sunset upon the Lake Sayram 实景摄影",
+      "author": "Y Chen",
+      "source": "https://commons.wikimedia.org/wiki/File:Sunset_upon_the_Lake_Sayram.png",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "modification": "原图等比缩小至宽度 2560px 并转换为 WebP；页面裁切及叠加渐变，修改版沿用原许可。"
+    },
+    "photoKind": "commons"
+  },
+  {
+    "id": "shaxi",
+    "name": "沙溪古镇",
+    "latin": "SHAXI",
+    "region": "云南 · 大理",
+    "coordinates": "26.32° N · 99.85° E",
+    "season": "春秋 · 玉津桥晨雾",
+    "note": "玉津桥横过薄雾，马蹄声已在旧时光里远去。在黑潓江畔等一个清晨，看古镇随炊烟慢慢醒来。",
+    "visual": {
+      "terrain": "village",
+      "palette": "jade",
+      "motif": "bridge",
+      "texture": "cloud",
+      "celestial": "sun",
+      "sunX": 1150,
+      "ridge": 54
+    },
+    "prompt": "想去云南 · 大理的沙溪古镇旅行 3 天，喜欢自然风光、当地文化和清晨摄影。请帮我规划舒缓的每日路线、交通与住宿，留足休息时间，并提醒天气和景区开放安排。",
+    "photo": {
+      "src": "/images/gallery/shaxi.webp",
+      "alt": "沙溪古镇 · 沙溪玉津桥 实景摄影",
+      "author": "Rod Waddington",
+      "source": "https://commons.wikimedia.org/wiki/File:%E6%B2%99%E6%BA%AA%E7%8E%89%E6%B4%A5%E6%A1%A5.jpg",
+      "license": "CC BY-SA 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/2.0",
+      "modification": "原图等比缩小至宽度 2560px 并转换为 WebP；页面裁切及叠加渐变，修改版沿用原许可。"
+    },
+    "photoKind": "commons"
+  },
+  {
+    "id": "dunhuang",
+    "name": "敦煌月牙泉",
+    "latin": "DUNHUANG",
+    "region": "甘肃 · 敦煌",
+    "coordinates": "40.09° N · 94.67° E",
+    "season": "春秋 · 鸣沙流金",
+    "note": "沙山把风叠成金色的褶皱，一弯清泉安静地盛着月光。等日落将驼铃拉长，再沿沙脊读一页大漠。",
+    "visual": {
+      "terrain": "desert",
+      "palette": "ochre",
+      "motif": "pavilion",
+      "texture": "dunes",
+      "celestial": "moon",
+      "sunX": 1320,
+      "ridge": 78
+    },
+    "prompt": "想去甘肃 · 敦煌的敦煌月牙泉旅行 3 天，喜欢自然风光、当地文化和清晨摄影。请帮我规划舒缓的每日路线、交通与住宿，留足休息时间，并提醒天气和景区开放安排。",
+    "photo": {
+      "src": "/images/gallery/dunhuang.webp",
+      "alt": "敦煌月牙泉 · Crescent Lake from the Singing Sand Dunes (20230918101214) 实景摄影",
+      "author": "N509FZ",
+      "source": "https://commons.wikimedia.org/wiki/File:Crescent_Lake_from_the_Singing_Sand_Dunes_(20230918101214).jpg",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "modification": "原图等比缩小至宽度 2560px 并转换为 WebP；页面裁切及叠加渐变，修改版沿用原许可。"
+    },
+    "photoKind": "commons"
+  },
+  {
+    "id": "changbai-lake",
+    "name": "长白山天池",
+    "latin": "CHANGBAI TIANCHI",
+    "region": "吉林 · 延边",
+    "coordinates": "42.01° N · 128.06° E",
+    "season": "夏秋 · 云开天池",
+    "note": "火山的环壁托住一池深蓝，云影从山脊缓缓掠过。等风吹开雾帘，在长白之巅看见天地相映。",
+    "visual": {
+      "terrain": "alpine",
+      "palette": "ice",
+      "motif": "snowpeak",
+      "texture": "water",
+      "celestial": "cloud",
+      "sunX": 1200,
+      "ridge": 70,
+      "scene": "tianchi"
+    },
+    "prompt": "想去吉林 · 延边的长白山天池旅行 3 天，喜欢自然风光、当地文化和清晨摄影。请帮我规划舒缓的每日路线、交通与住宿，留足休息时间，并提醒天气和景区开放安排。",
+    "photoKind": "commons",
+    "photo": {
+      "src": "/images/gallery/changbai-lake.webp",
+      "alt": "长白山天池 · Tianchi Lake of Changbai 20130714 实景摄影",
+      "author": "颐园新居",
+      "source": "https://commons.wikimedia.org/wiki/File:Tianchi_Lake_of_Changbai_20130714.jpeg",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+      "modification": "原图等比缩小至宽度 2560px 并转换为 WebP；页面裁切及叠加渐变，修改版沿用原许可。"
+    }
+  },
+  {
+    "id": "humble-garden",
+    "name": "拙政园",
+    "latin": "ZHUOZHENG GARDEN",
+    "region": "江苏 · 苏州",
+    "coordinates": "31.32° N · 120.63° E",
+    "season": "春秋 · 借景入园",
+    "note": "一池碧水把远香堂与荷风收进江南，花窗借来四时的天光。沿回廊慢走，让竹影替时光落款。",
+    "visual": {
+      "terrain": "garden",
+      "palette": "jade",
+      "motif": "pavilion",
+      "texture": "water",
+      "celestial": "sun",
+      "sunX": 1100,
+      "ridge": 36,
+      "scene": "jiangnan"
+    },
+    "prompt": "想去江苏 · 苏州的拙政园旅行 3 天，喜欢自然风光、当地文化和清晨摄影。请帮我规划舒缓的每日路线、交通与住宿，留足休息时间，并提醒天气和景区开放安排。",
+    "photoKind": "commons",
+    "photo": {
+      "src": "/images/gallery/humble-garden.webp",
+      "alt": "拙政园 · Humble Administrator's Garden Suzhou November 2017 001 实景摄影",
+      "author": "King of Hearts",
+      "source": "https://commons.wikimedia.org/wiki/File:Humble_Administrator%27s_Garden_Suzhou_November_2017_001.jpg",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "modification": "原图等比缩小至宽度 2560px 并转换为 WebP；页面裁切及叠加渐变，修改版沿用原许可。"
+    }
+  },
+  {
+    "id": "mingsha-dunes",
+    "name": "敦煌沙山",
+    "latin": "MINGSHA DUNES",
+    "region": "甘肃 · 敦煌",
+    "coordinates": "40.09° N · 94.67° E",
+    "season": "春秋 · 大漠流金",
+    "note": "风把鸣沙山雕成金色的波浪，沙脊一路伸向天边。等夕阳落在驼铃之后，听大漠把余音藏进沙中。",
+    "visual": {
+      "terrain": "desert",
+      "palette": "ochre",
+      "motif": "pavilion",
+      "texture": "dunes",
+      "celestial": "sun",
+      "sunX": 1250,
+      "ridge": 72,
+      "scene": "desert"
+    },
+    "prompt": "想去甘肃 · 敦煌的敦煌沙山旅行 3 天，喜欢自然风光、当地文化和清晨摄影。请帮我规划舒缓的每日路线、交通与住宿，留足休息时间，并提醒天气和景区开放安排。",
+    "photoKind": "commons",
+    "photo": {
+      "src": "/images/gallery/mingsha-dunes.webp",
+      "alt": "敦煌沙山 · 山河实景摄影",
+      "author": "xiquinhosilva",
+      "source": "https://commons.wikimedia.org/wiki/File:Dunhuang_(54531617402).jpg",
+      "license": "CC BY 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/2.0",
+      "modification": "原图等比缩小并转换为 WebP；页面裁切及叠加渐变，修改版沿用原许可。"
+    }
+  },
+  {
+    "id": "huashan",
+    "name": "华山",
+    "latin": "MOUNT HUA",
+    "region": "陕西 · 渭南",
+    "coordinates": "34.48° N · 110.08° E",
+    "season": "春秋 · 险峰云起",
+    "note": "苍龙岭劈开云海，花岗岩的锋芒直指苍穹。下棋亭悬在山风里，把一局未尽的棋留给群峰。",
+    "visual": {
+      "terrain": "alpine",
+      "palette": "ink",
+      "motif": "pine",
+      "texture": "cloud",
+      "celestial": "cloud",
+      "sunX": 1180,
+      "ridge": 85,
+      "scene": "cliff"
+    },
+    "prompt": "想去陕西 · 渭南的华山旅行 3 天，喜欢自然风光、当地文化和清晨摄影。请帮我规划舒缓的每日路线、交通与住宿，留足休息时间，并提醒天气和景区开放安排。",
+    "photoKind": "commons",
+    "photo": {
+      "src": "/images/gallery/huashan.webp",
+      "alt": "华山 · Chinese Chess Pavilion In Mount Hua 实景摄影",
+      "author": "Liuboyoupeter",
+      "source": "https://commons.wikimedia.org/wiki/File:Chinese_Chess_Pavilion_In_Mount_Hua.jpg",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "modification": "原图等比缩小至宽度 2560px 并转换为 WebP；页面裁切及叠加渐变，修改版沿用原许可。"
+    }
+  },
+  {
+    "id": "huangshan",
+    "name": "黄山",
+    "latin": "HUANGSHAN",
+    "region": "安徽 · 黄山",
+    "coordinates": "30.13° N · 118.17° E",
+    "season": "四季 · 松石云海",
+    "note": "奇松从石缝里探出枝条，群峰在云海中若隐若现。等一束晨光越过始信峰，把山间的清凉慢慢收藏。",
+    "visual": {
+      "terrain": "alpine",
+      "palette": "jade",
+      "motif": "pine",
+      "texture": "cloud",
+      "celestial": "sun",
+      "sunX": 1300,
+      "ridge": 78,
+      "scene": "peaks"
+    },
+    "prompt": "想去安徽 · 黄山的黄山旅行 3 天，喜欢自然风光、当地文化和清晨摄影。请帮我规划舒缓的每日路线、交通与住宿，留足休息时间，并提醒天气和景区开放安排。",
+    "photoKind": "commons",
+    "photo": {
+      "src": "/images/gallery/huangshan.webp",
+      "alt": "黄山 · Anhui Huangshan 实景摄影",
+      "author": "Miaulian",
+      "source": "https://commons.wikimedia.org/wiki/File:Anhui_Huangshan.jpg",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+      "modification": "原图等比缩小至宽度 2560px 并转换为 WebP；页面裁切及叠加渐变，修改版沿用原许可。"
+    }
+  },
+  {
+    "id": "sanqingshan",
+    "name": "三清山",
+    "latin": "MOUNT SANQING",
+    "region": "江西 · 上饶",
+    "coordinates": "28.91° N · 118.06° E",
+    "season": "春秋 · 峰林云廊",
+    "note": "巨蟒出山守望着云海，女神峰把暮色留在岩壁。沿高空栈道缓缓走过，看三清山在松影间展开。",
+    "visual": {
+      "terrain": "alpine",
+      "palette": "jade",
+      "motif": "pine",
+      "texture": "cloud",
+      "celestial": "cloud",
+      "sunX": 1050,
+      "ridge": 88,
+      "scene": "peaks"
+    },
+    "prompt": "想去江西 · 上饶的三清山旅行 3 天，喜欢自然风光、当地文化和清晨摄影。请帮我规划舒缓的每日路线、交通与住宿，留足休息时间，并提醒天气和景区开放安排。",
+    "photoKind": "commons",
+    "photo": {
+      "src": "/images/gallery/sanqingshan.webp",
+      "alt": "三清山 · 山河实景摄影",
+      "author": "xiquinhosilva",
+      "source": "https://commons.wikimedia.org/wiki/File:19253-SanQingShan_(46297080292).jpg",
+      "license": "CC BY 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/2.0",
+      "modification": "原图等比缩小并转换为 WebP；页面裁切及叠加渐变，修改版沿用原许可。"
+    }
+  },
+  {
+    "id": "taishan",
+    "name": "泰山",
+    "latin": "MOUNT TAI",
+    "region": "山东 · 泰安",
+    "coordinates": "36.25° N · 117.10° E",
+    "season": "春秋 · 岱顶观云",
+    "note": "十八盘沿石阶拾级而上，南天门外云海铺向齐鲁。登临岱顶看日色初生，把辽阔留在回望的山风里。",
+    "visual": {
+      "terrain": "alpine",
+      "palette": "gold",
+      "motif": "pagoda",
+      "texture": "cloud",
+      "celestial": "sun",
+      "sunX": 1280,
+      "ridge": 65,
+      "scene": "cliff"
+    },
+    "prompt": "想去山东 · 泰安的泰山旅行 3 天，喜欢自然风光、当地文化和清晨摄影。请帮我规划舒缓的每日路线、交通与住宿，留足休息时间，并提醒天气和景区开放安排。",
+    "photoKind": "commons",
+    "photo": {
+      "src": "/images/gallery/taishan.webp",
+      "alt": "泰山 · 山河实景摄影",
+      "author": "xiquinhosilva",
+      "source": "https://commons.wikimedia.org/wiki/File:50304-Taishan_(49055660366).jpg",
+      "license": "CC BY 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/2.0",
+      "modification": "原图等比缩小并转换为 WebP；页面裁切及叠加渐变，修改版沿用原许可。"
+    }
+  }
+]

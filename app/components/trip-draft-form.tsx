@@ -134,12 +134,15 @@ export function TripDraftForm({ ref }: { ref?: Ref<TripDraftFormHandle> }) {
             placeholder="想去哪里走走？比如：和伴侣去成都三天，预算 3000 元，吃地道小馆，慢慢逛。"
           />
           <div className={styles.actions}>
-            <p id="trip-request-hint" className={styles.keyboardHint}>
+            <p id="trip-request-hint" className={`${styles.keyboardHint} sr-only`}>
               <span>Enter 开启规划 · Shift + Enter 换行</span><span> · 100% 本机私密存储</span>
             </p>
-            <span className={`${styles.counter} ${isOverLength ? styles.overLength : ""}`} data-testid="trip-character-count" aria-label={`已输入 ${characterCount} 字，最多 ${MAX_DRAFT_LENGTH} 字`}>
+            <span className={`${styles.counter} sr-only ${isOverLength ? styles.overLength : ""}`} data-testid="trip-character-count" aria-label={`已输入 ${characterCount} 字，最多 ${MAX_DRAFT_LENGTH} 字`}>
               {characterCount} / {MAX_DRAFT_LENGTH}
             </span>
+            <p className={`${styles.composerHint} min-w-0 flex-1 text-[13px] leading-6`}>
+              ✦ 输入一句旅行想法，即刻生成每日路线、交通与预算
+            </p>
             <button type="submit" disabled={isSaving} className={styles.saveButton} data-testid="create-trip-submit">
               {isSaving ? <><LoaderCircle aria-hidden="true" size={16} className={styles.spinner} />正在规划…</> : <>{savedTripId && savedOriginalRef.current === requestText ? "继续生成行程" : "开启旅程规划"}<ArrowRight aria-hidden="true" size={16} /></>}
             </button>

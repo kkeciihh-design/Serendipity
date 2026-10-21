@@ -83,10 +83,12 @@ export function SettingsLoginForm() {
         required
         className="mt-3 min-h-12 w-full rounded-md border border-sand bg-cream px-4 py-3 text-base leading-7 text-charcoal focus:border-sage focus:outline-none"
       />
+      {/* .app-primary-cta (app/globals.css, declared last) keeps every state in
+          the pine-green family, including the empty-password state. */}
       <button
         type="submit"
         disabled={isSubmitting || password.length === 0}
-        className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-sage px-5 py-3 text-base font-semibold text-white transition-colors hover:bg-focus disabled:cursor-not-allowed disabled:bg-graphite/70 sm:w-auto"
+        className="app-primary-cta mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md px-5 py-3 text-base font-semibold disabled:cursor-not-allowed disabled:bg-[#1B362A] disabled:text-white/75 sm:w-auto"
       >
         <LogIn aria-hidden="true" className="size-5" />
         {isSubmitting ? "正在验证..." : "进入设置"}

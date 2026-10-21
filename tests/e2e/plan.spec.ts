@@ -882,7 +882,7 @@ test("budget tab shows totals from the plan snapshot and persists confirmed amou
     await expect(
       page.getByText(/人均 643 元｜2 人｜1 间房（默认）｜1 晚/),
     ).toBeVisible();
-    await expect(page.getByText("未知金额 9 项不计入合计")).toBeVisible();
+    await expect(page.getByText("待确认项 9").first()).toBeVisible();
 
     await page.getByRole("button", { name: /可选城市展览/ }).click();
     await page
@@ -899,7 +899,7 @@ test("budget tab shows totals from the plan snapshot and persists confirmed amou
     await openSnapshot(page);
     await page.getByRole("tab", { name: "预算" }).click();
     await expect(page.getByText("1356 元").first()).toBeVisible();
-    await expect(page.getByText("已支付 70 元").first()).toBeVisible();
+    await expect(page.getByText("已支付金额 70 元").first()).toBeVisible();
     await expect(
       page.getByText(/预算目标 1500 元（全程总预算）/),
     ).toBeVisible();

@@ -53,6 +53,8 @@ export type TripListEntry = Trip & {
     versionNumber: number;
     requestRevision: number;
     requirementUpToDate: boolean;
+    /** Raw plan events, used only for the collection card stop preview. */
+    events: string;
   } | null;
 };
 
@@ -127,7 +129,8 @@ export const listTrips = businessOperation(async function listTrips(): Promise<T
     include: {
       request: true,
       currentPlanVersion: {
-        select: { requestSnapshot: true, versionNumber: true, requestRevision: true, requirementUpToDate: true },
+        // `events` feeds the three stop preview tags on each collection card.
+        select: { requestSnapshot: true, versionNumber: true, requestRevision: true, requirementUpToDate: true, events: true },
       },
     },
     orderBy: {
@@ -243,6 +246,99 @@ export const deleteTrip = businessOperation(async function deleteTrip(id: string
     }
     throw error;
   }
+});
+
+type CleanupTripRow = Prisma.TripGetPayload<{
+  include: {
+    request: true;
+    currentPlanVersion: { select: { id: true } };
+    planVersions: { select: { id: true } };
+  };
+}>;
+
+const normalizeCleanupIdentity = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+
+export const cleanupDuplicateTrips = businessOperation(async function cleanupDuplicateTrips() {
+  return businessTransaction(prisma, async (tx) => {
+    const trips = await tx.trip.findMany({
+      include: {
+        request: true,
+        currentPlanVersion: { select: { id: true } },
+        planVersions: { select: { id: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    const parent = new Map<string, string>();
+    const find = (id: string): string => {
+      const root = parent.get(id) ?? id;
+      if (root !== id) {
+        const compressed = find(root);
+        parent.set(id, compressed);
+        return compressed;
+      }
+      return id;
+    };
+    const union = (left: string, right: string) => {
+      const leftRoot = find(left), rightRoot = find(right);
+      if (leftRoot !== rightRoot) parent.set(leftRoot, rightRoot);
+    };
+
+    const identities = new Map<string, string>();
+    for (const trip of trips) {
+      parent.set(trip.id, trip.id);
+      const keys = [
+        `title:${normalizeCleanupIdentity(trip.title)}`,
+        `request:${normalizeCleanupIdentity(trip.request?.originalRequest ?? trip.originalRequest)}`,
+      ];
+      for (const key of keys) {
+        const existing = identities.get(key);
+        if (existing) union(existing, trip.id);
+        else identities.set(key, trip.id);
+      }
+    }
+
+    const groups = new Map<string, CleanupTripRow[]>();
+    for (const trip of trips) {
+      const root = find(trip.id);
+      groups.set(root, [...groups.get(root) ?? [], trip]);
+    }
+
+    const deleteIds = new Set<string>();
+    const keptTripIds: string[] = [];
+    for (const trip of trips) {
+      if (!trip.currentPlanVersion) deleteIds.add(trip.id);
+    }
+    for (const group of groups.values()) {
+      if (group.length < 2) {
+        const only = group[0];
+        if (only?.currentPlanVersion) keptTripIds.push(only.id);
+        continue;
+      }
+      const generated = group
+        .filter((trip) => trip.currentPlanVersion)
+        .sort((left, right) =>
+          right.updatedAt.getTime() - left.updatedAt.getTime() ||
+          right.planVersions.length - left.planVersions.length
+        );
+      const keeper = generated[0];
+      if (!keeper) continue;
+      keptTripIds.push(keeper.id);
+      for (const trip of group) {
+        if (trip.id !== keeper.id) deleteIds.add(trip.id);
+      }
+    }
+
+    if (!deleteIds.size) {
+      return { deletedCount: 0, deletedTripIds: [] as string[], keptTripIds };
+    }
+    const deleted = await tx.trip.deleteMany({ where: { id: { in: [...deleteIds] } } });
+    return {
+      deletedCount: deleted.count,
+      deletedTripIds: [...deleteIds],
+      keptTripIds: keptTripIds.filter((id) => !deleteIds.has(id)),
+    };
+  });
 });
 
 export async function closeTripStore() {

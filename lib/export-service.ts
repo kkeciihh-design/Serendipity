@@ -8,6 +8,7 @@ import { checklistBasis, projectChecklist } from "./checklist-store";
 import { parseExecution } from "./execution";
 import { effectiveEvidenceStatus, evidenceFieldSchema } from "./evidence";
 import { buildPlanRedlines } from "./redline-service";
+import { tripDisplayTitle } from "./trip-title";
 import { ExportError, exportFormatSchema, exportWriteSchema, mobileExportOptionsSchema, mobileExportWriteSchema, type ExportSnapshot, type ExportFileSummary } from "./export-snapshot";
 import { renderMobileHtml } from "./mobile-export";
 import { renderTextExport } from "./text-export";
@@ -36,6 +37,11 @@ export async function captureExportSnapshot(tx: Prisma.TransactionClient, tripId
   const plan = serializePlan({ ...trip.currentPlanVersion, trip: { currentPlanVersionId: trip.currentPlanVersionId } });
   if (plan.versionNumber !== expectedPlanVersion) throw new ExportError("计划已更新，请重新读取后选择导出日期。", 409);
   const generatedAt = new Date().toISOString();
+  const tripTitle = tripDisplayTitle({
+    title: trip.title,
+    originalRequest: trip.originalRequest,
+    snapshot: plan.requestSnapshot,
+  });
   const items = await projectChecklist(tx, trip.checklist ? parseChecklistItems(trip.checklist.items) : [], plan);
   const facts = await tx.evidenceFact.findMany({ where: { planVersionId: plan.id } });
   const advisory = await tx.advisoryState.findUnique({ where: { tripId } });
@@ -47,7 +53,7 @@ export async function captureExportSnapshot(tx: Prisma.TransactionClient, tripId
     const status = effectiveEvidenceStatus({ ...f, field, status: f.status === "verified" ? "verified" : f.status === "conflict" ? "conflict" : "unverified", applicableFrom, applicableUntil }, new Date(generatedAt));
     return { eventId: f.targetId, field, status, value: f.extractedValue, source: `${f.sourceTitle} · ${f.sourcePublisher}`, retrievedAt: f.retrievedAt.toISOString(), applicableFrom, applicableUntil };
   });
-  return { schemaVersion: 1, id: randomUUID(), generatedAt, plan,
+  return { schemaVersion: 1, id: randomUUID(), generatedAt, tripTitle, plan,
     weather: advisory ? parseAdvisoryWeatherState(advisory.weather).records : [],
     advisories: { revision: advisory?.revision ?? 0, items: advisoryItems },
     latestRequestRevision: trip.request?.requestRevision ?? null,

@@ -95,11 +95,14 @@
 }
 .keyboardHint > span { white-space: nowrap; }
 .counter {
-  color: var(--composer-muted);
+  color: rgb(255 255 255 / 80%);
   font-family: var(--font-mono);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+.composerHint {
+  color: rgb(255 255 255 / 80%);
 }
 .overLength { color: #ffc7a7; }
 .saveButton {
@@ -174,6 +177,8 @@
 :global([data-aesthetic="sketch"]) .label > span { color: #8b764f; }
 :global([data-aesthetic="sketch"]) .exampleButton:hover:not(:disabled) { background: rgb(220 228 205 / 45%); }
 :global([data-aesthetic="sketch"]) .overLength { color: #9b482d; }
+:global([data-aesthetic="sketch"]) .composerHint,
+:global([data-aesthetic="sketch"]) .counter { color: #4A5850; }
 :global([data-aesthetic="sketch"]) .saveButton { color: #faf8f0; background: #304f3b; }
 :global([data-aesthetic="sketch"]) .saveButton:hover:not(:disabled) { background: #3d6048; }
 :global([data-aesthetic="sketch"]) .prompt { border-color: rgb(92 114 73 / 18%); background: rgb(248 246 230 / 48%); color: #526747; }

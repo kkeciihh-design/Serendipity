@@ -5,12 +5,20 @@ import { renderMobileHtml } from "../lib/mobile-export";
 import { renderTextExport } from "../lib/text-export";
 import { renderLongImageHtml } from "../lib/long-image-html";
 import { renderPdfHtml } from "../lib/pdf-html";
+import { sanitizeTravelerText } from "../lib/content-sanitizer";
 import { unknownWeatherRecord } from "../lib/weather";
 import { exportFixture } from "./helpers/export-fixtures";
 
 const options = mobileExportOptionsSchema.parse({});
 
 describe("Quanzhou offline export regression", () => {
+  it("removes map calibration tails without eating the preceding sentence period", () => {
+    expect(sanitizeTravelerText("1.2 已按站区指引安排接驳。；泉州站标点按公共铁路站区基准校准，仍为待核实建议标点。"))
+      .toBe("1.2 已按站区指引安排接驳。");
+    expect(sanitizeTravelerText("2.2 已按站区指引安排接驳；泉州站标点按公共铁路站区基准校准，仍为待核实建议标点"))
+      .toBe("2.2 已按站区指引安排接驳。");
+  });
+
   it.each(["深圳北站", "泉州站", "虹桥火车站", "首都机场", "厦门第一码头"])("preserves the public hub %s across five formats next to home directions", async (hub) => {
     const snapshot = await exportFixture();
     const departure = snapshot.plan.events.find((event) => event.id === "d1-preparation")!;
@@ -42,14 +50,42 @@ describe("Quanzhou offline export regression", () => {
     for (const document of [renderMobileHtml(snapshot, options), await renderLongImageHtml(snapshot, options, { includeMap: true, includePhotos: false }), await renderPdfHtml(snapshot, options, { mode: "complete", includePhotos: false })]) {
       expect(document).toContain("<svg");
       expect(document).toContain('class="route-line"');
-      expect(document).toContain("含待核实建议标点");
-      expect(document).toContain("开元寺（AI 建议）");
-      expect(document).toContain("西街（AI 建议）");
+      expect(document).toContain("棕色：建议地点或方位参考");
+      expect(document).toContain("③ 开元寺");
+      expect(document).toContain("④ 西街");
       expect(document).toContain("19–26℃");
       expect(document).toContain("Open-Meteo");
       expect(document).toContain("住宿：");
       expect(document).toContain("16:00 返程发车 · 硬时间");
       expect(document).not.toContain("118.585");
+    }
+  });
+
+  it("presents a travel-book cover and strips internal map IDs from every export", async () => {
+    const snapshot = await exportFixture();
+    snapshot.tripTitle = "福建泉州 · 三日轻松漫游";
+    const activity = snapshot.plan.events.find((event) => event.id === "d1-activity")!;
+    activity.note = "从西街（OSM 1878551036）步行前往开元寺，再沿 (OSM 1879551038) 的路牌确认入口。";
+    const documents = [
+      renderMobileHtml(snapshot, options),
+      renderTextExport(snapshot, options, "plain-text"),
+      renderTextExport(snapshot, options, "markdown"),
+      await renderLongImageHtml(snapshot, options, { includeMap: false, includePhotos: false }),
+      await renderPdfHtml(snapshot, options, { mode: "complete", includePhotos: false }),
+    ];
+    for (const document of documents) {
+      expect(document).toContain("福建泉州 · 三日轻松漫游");
+      expect(document).not.toContain("OSM 1878551036");
+      expect(document).not.toContain("OSM 1879551038");
+      expect(document).not.toContain("计划 V");
+      expect(document).not.toContain("需求修订");
+      expect(document).not.toContain("版本快照哈希");
+    }
+    for (const document of [documents[0], documents[3], documents[4]]) {
+      expect(document).toContain("当日动线");
+      expect(document).toContain('<span class="route-arrow" aria-hidden="true">→</span>');
+      expect(document).not.toContain("➡️");
+      expect(document).toContain("已知费用");
     }
   });
 });

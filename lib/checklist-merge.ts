@@ -9,7 +9,13 @@ export type ReservationFact = { eventId: string; required: boolean | null; text:
 
 export function deriveChecklist(plan: PlanVersionRecord, facts: ReservationFact[] = []): ChecklistItem[] {
   const items: ChecklistItem[] = [];
+  const dedupeKeys = new Set<string>();
   function add(input: Pick<ChecklistItem, "id" | "title" | "group" | "source" | "sourceLabel"> & Partial<ChecklistItem>) {
+    const linkedEvent = input.eventId ? events.find((event) => event.id === input.eventId) : null;
+    const location = linkedEvent?.locationName || linkedEvent?.title || input.title;
+    const dedupeKey = `${input.group}:${input.date ?? plan.requestSnapshot.startDate}:${normalize(location)}`;
+    if (input.eventId && dedupeKeys.has(dedupeKey)) return;
+    if (input.eventId) dedupeKeys.add(dedupeKey);
     items.push({ note: "", date: plan.requestSnapshot.startDate, eventId: null, eventIds: [], ticketIds: [],
       sourceKey: input.id, signature: input.id, officialUrl: null, custom: false, completed: false,
       completedAt: null, deleted: false, orphaned: false, changeNote: null, ...input });
@@ -25,7 +31,7 @@ export function deriveChecklist(plan: PlanVersionRecord, facts: ReservationFact[
       add({ ...base, id: `transport:${event.id}`, title: `${event.type === "departure_transport" ? "去程" : "返程"}票：核对日期、站点与同行人数`,
         group: "transport", source: tickets.length ? "ticket" : "event", ticketIds: tickets.map((t) => t.id).sort(),
         sourceLabel: tickets.length ? `已关联 ${tickets.length} 张有效票据；仍需自行核对` : "来自行程交通；尚无有效票据",
-        note: tickets.length ? tickets.map((t) => `${t.serviceNumber ?? "班次待补"} · ${t.date ?? "日期待补"} ${t.departureTime ?? "时刻待补"} · ${t.fromName ?? "站点待补"} → ${t.toName ?? "站点待补"} · ${t.passengerCount}人`).join("；").slice(0, 500) : "请先在购票平台办理，再在门到门交通中确认票面。",
+        note: tickets.length ? tickets.map((t) => `${t.serviceNumber ?? "班次待补"} · ${t.date ?? "日期待补"} ${t.departureTime ?? "时刻待补"} · ${t.fromName ?? "站点待补"} → ${t.toName ?? "站点待补"} · ${t.passengerCount}人`).join("；").slice(0, 500) : "建议提前在 12306 或购票平台预订车票，并核对票面信息。",
         officialUrl: train ? "https://www.12306.cn/" : null,
         signature: JSON.stringify([base.signature, tickets.map((t) => [t.id, t.mode, t.serviceNumber, t.date, t.departureTime, t.arrivalDate, t.arrivalTime, t.fromName, t.toName, t.passengerCount]).sort()]) });
     }
@@ -45,12 +51,13 @@ export function deriveChecklist(plan: PlanVersionRecord, facts: ReservationFact[
       const relevantPending = plan.pendingItems.filter((p) => p.category === "reservation" &&
         [event.locationName, event.title].some((name) => name && normalize(`${p.title} ${p.reason}`).includes(normalize(name))));
       const explicit = /预约|预订/.test(event.note ?? "");
+      const noReservation = /无需预约|免预约|不需要预约|不用预约/.test(`${event.note ?? ""} ${fact?.text ?? ""} ${entry?.reservation.text ?? ""}`);
       // A small check only for a venue with reservation information or a concrete request.
-      if (required !== false && (entry || fact || relevantPending.length || explicit)) {
+      if (required !== false && !noReservation && (entry || fact || relevantPending.length || explicit)) {
         const official = entry?.sources.find((s) => s.kind === "official" && entry.reservation.sourceIds.includes(s.id) && s.url.startsWith("https://"));
         add({ ...base, id: `reservation:${event.id}`, group: "reservation", source: "reservation",
           title: `${required ? "办理并核对预约" : "确认是否需要预约"}：${(event.locationName || event.title).slice(0, 100)}`,
-          sourceLabel: fact?.sourceLabel ?? (official ? `参考 ${official.publisher}（${official.retrievedAt.slice(0, 10)}）；出行前复核` : "来自行程预约说明；要求待确认"),
+          sourceLabel: fact?.sourceLabel ?? (official ? `参考 ${official.publisher}（${official.retrievedAt.slice(0, 10)}）；出行前复核` : "来自行程预约说明"),
           signature: JSON.stringify([base.signature, required ?? null, fact?.text ?? entry?.reservation.text ?? relevantPending.map((p) => p.reason).join("；"), event.note ?? null]),
           note: ((fact?.text ?? entry?.reservation.text ?? relevantPending.map((p) => p.reason).join("；")) || event.note || "请向场馆确认预约要求。").slice(0, 500),
           officialUrl: official?.url ?? null });

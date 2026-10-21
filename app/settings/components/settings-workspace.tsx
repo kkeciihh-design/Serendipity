@@ -18,6 +18,8 @@ import {
 import type { SafeSettings } from "@/lib/settings";
 import { MapSettings } from "./map-settings";
 import { WeatherSettings } from "./weather-settings";
+import { BackupManager } from "./backup-manager";
+import { SettingsGallery } from "@/app/components/gallery-studio";
 import {
   DEFAULT_BASE_PROMPT,
   DEFAULT_SYSTEM_PROMPT,
@@ -479,10 +481,8 @@ export function SettingsWorkspace({
     systemPrompt !== settings.prompts.systemPrompt;
 
   return (
-    <div className="space-y-6">
-      <MapSettings csrfToken={csrfToken} />
-      <WeatherSettings csrfToken={csrfToken} initial={initialSettings.weather} />
-      <section className="rounded-lg border border-sand/80 bg-white p-5 shadow-[0_1px_2px_rgba(35,42,38,0.06)] sm:p-6">
+    <div className="settings-modules">
+      <section id="ai-service" className="settings-ai dashboard-card rounded-lg border border-sand/80 bg-white p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-semibold text-charcoal">AI 基本连接</h2>
           <span
@@ -647,7 +647,7 @@ export function SettingsWorkspace({
             type="button"
             onClick={saveConnection}
             disabled={isSavingConnection || !connectionTested}
-            className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-md bg-sage px-5 py-3 text-base font-semibold text-white transition-colors hover:bg-focus disabled:cursor-not-allowed disabled:bg-graphite/70"
+            className="app-primary-cta inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-md px-5 py-3 text-base font-semibold disabled:cursor-not-allowed"
           >
             <Save aria-hidden="true" className="size-5" />
             {isSavingConnection ? "正在保存..." : "保存配置"}
@@ -669,7 +669,10 @@ export function SettingsWorkspace({
         ) : null}
       </section>
 
-      <section className="rounded-lg border border-sand/80 bg-white p-5 shadow-[0_1px_2px_rgba(35,42,38,0.06)] sm:p-6">
+      <div id="sources" className="settings-sources"><MapSettings csrfToken={csrfToken} /><WeatherSettings csrfToken={csrfToken} initial={initialSettings.weather} /></div>
+      <SettingsGallery />
+      <div className="settings-backup"><BackupManager csrfToken={csrfToken} /></div>
+      <section className="settings-search dashboard-card rounded-lg border border-sand/80 bg-white p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-semibold text-charcoal">来源搜索</h2>
           <span
@@ -735,7 +738,7 @@ export function SettingsWorkspace({
               JSON.stringify(testedSearchSnapshot) !==
                 JSON.stringify(currentSearchSnapshot)
             }
-            className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-md bg-sage px-5 py-3 text-base font-semibold text-white transition-colors hover:bg-focus disabled:cursor-not-allowed disabled:bg-graphite/70"
+            className="app-primary-cta inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-md px-5 py-3 text-base font-semibold disabled:cursor-not-allowed"
           >
             <Save aria-hidden="true" className="size-5" />
             {isSavingSearch ? "正在保存..." : "保存搜索配置"}
@@ -757,7 +760,7 @@ export function SettingsWorkspace({
         ) : null}
       </section>
 
-      <section className="rounded-lg border border-sand/80 bg-white p-5 shadow-[0_1px_2px_rgba(35,42,38,0.06)] sm:p-6">
+      <section className="settings-prompts dashboard-card rounded-lg border border-sand/80 bg-white p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-semibold text-charcoal">Prompt 高级选项</h2>
           <span className="inline-flex min-h-11 items-center rounded-md bg-shell px-3 py-2 text-sm font-medium text-graphite">
@@ -799,7 +802,7 @@ export function SettingsWorkspace({
             type="button"
             onClick={savePrompts}
             disabled={isSavingPrompt || !promptDirty}
-            className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-md bg-sage px-5 py-3 text-base font-semibold text-white transition-colors hover:bg-focus disabled:cursor-not-allowed disabled:bg-graphite/70"
+            className="app-primary-cta inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-md px-5 py-3 text-base font-semibold disabled:cursor-not-allowed"
           >
             <Save aria-hidden="true" className="size-5" />
             {isSavingPrompt ? "正在保存..." : "保存 Prompt"}
@@ -847,7 +850,7 @@ export function SettingsWorkspace({
         ) : null}
       </section>
 
-      <section className="flex flex-col gap-3 rounded-lg border border-sand/80 bg-white p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+      <section className="settings-session dashboard-card flex flex-col gap-3 rounded-lg border border-sand/80 bg-white p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div>
           <h2 className="text-xl font-semibold text-charcoal">会话</h2>
           <p className="mt-2 text-sm leading-6 text-graphite">

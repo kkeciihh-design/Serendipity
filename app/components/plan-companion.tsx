@@ -59,7 +59,7 @@ export function PlanCompanion({ plan, day, selectedEventId, highlightedEventId, 
 
     <section className={`${styles.companionCard} ${styles.notesCard}`} aria-label="行程关键提醒">
       <div className={styles.companionHeading}><h3><Bell size={16} aria-hidden="true" />出发前，留意一下</h3><button type="button" onClick={onAdvisories} className={styles.textAction}>查看行程提醒 <ArrowUpRight size={14} /></button></div>
-      {active.length ? <ul className={styles.conciseNotes}>{active.slice(0, 2).map((item) => <li key={item.id}><span className={styles.noteDot} /><button type="button" onClick={onAdvisories}>{item.title}</button></li>)}</ul> : null}
+      {active.length ? <ul className={styles.conciseNotes}>{active.slice(0, 2).map((item) => <li key={item.id}><span className={styles.noteDot} /><button type="button" onClick={onAdvisories}>{item.targetName}：{item.title}</button></li>)}</ul> : null}
       {advisories.error ? <button type="button" className={styles.textAction} onClick={onAdvisories}>提醒暂未读到，点击重试</button> : null}
       {plan.pendingItems.length ? <>
         <ul className={styles.conciseNotes}>{plan.pendingItems.slice(0, 3).map((item) => <li key={item.id}><span className={styles.noteCircle} /><details className={styles.noteItem}><summary>{item.title}</summary><p>{item.reason}</p>{item.requiredBefore ? <span>建议在 {item.requiredBefore} 前确认</span> : null}</details></li>)}</ul>

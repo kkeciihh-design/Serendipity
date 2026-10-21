@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 import { mapMarkerSchema, mapRouteSchema, markerLabel, routeArrowRotation, type MapMarker, type MapRoute } from "@/lib/map-link";
+import { FOCUSED_MAX_ZOOM, focusedMaxZoom, markerSpreadOffsets, remoteOriginLabel, splitDailyFocus } from "@/lib/daily-focus";
 import { toGcj02, toWgs84 } from "@/lib/places";
 import { z } from "zod";
 
@@ -50,6 +51,7 @@ function routeColor(route: MapRoute) {
 export function MapFrame() {
   const container = useRef<HTMLDivElement>(null);
   const [message, setMessage] = useState("正在加载地图…");
+  const [arrivalNote, setArrivalNote] = useState<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     let disposeMap: (() => void) | undefined;
@@ -93,6 +95,9 @@ export function MapFrame() {
       if (!result.success) return;
       pending = { markers: result.data.markers, routes: result.data.routes, focusEventId: result.data.focusEventId };
       highlightedEventId = result.data.highlightedEventId ?? null;
+      // The excluded origin is still worth naming above the focused city view.
+      const { remote } = splitDailyFocus(result.data.markers);
+      setArrivalNote(remote.length ? remoteOriginLabel(remote) : null);
       updateMarkers?.(pending.markers, pending.routes, pending.focusEventId);
     };
     window.addEventListener("message", receive);
@@ -200,12 +205,23 @@ export function MapFrame() {
           updateHighlight();
           if (coordinates.length) {
             if (compact || !focusEventId) {
-              const bounds = L.latLngBounds(createdMarkers.map((marker) => marker.getLatLng()));
-              if (createdMarkers.length === 1) {
+              // The far cross-city origin keeps its pin but not the camera.
+              const { focus: focusMarkers } = splitDailyFocus(mapMarkers);
+              const focusIndexes = focusMarkers.map((marker) => mapMarkers.indexOf(marker));
+              const focusPoints = focusIndexes.map((index) => createdMarkers[index]);
+              const bounds = L.latLngBounds(focusPoints.map((marker) => marker.getLatLng()));
+              if (focusPoints.length === 1) {
                 map.setView(bounds.getCenter(), 15, { animate: false });
               } else {
-                map.fitBounds(bounds, { padding: [35, 35], maxZoom: 15, animate: false });
+                map.fitBounds(bounds, { padding: [35, 35], maxZoom: focusedMaxZoom(bounds), animate: false });
               }
+              // Overlapping numbers hide each other. Fan out only the collisions so
+              // every numbered stop stays readable; geography is never changed.
+              const offsets = markerSpreadOffsets(focusPoints.map((marker) => map.project(marker.getLatLng(), map.getZoom())));
+              focusPoints.forEach((marker, index) => {
+                const pin = marker.getElement();
+                if (pin) pin.style.translate = offsets[index].x || offsets[index].y ? `${offsets[index].x}px ${offsets[index].y}px` : "";
+              });
             }
             if (focusEventId) {
               const focusIndex = mapMarkers.findIndex((item) => item.events.some((event) => event.id === focusEventId));
@@ -258,13 +274,12 @@ export function MapFrame() {
             pin.innerHTML = `<span style="transform: rotate(${routeArrowRotation(route.polyline)}deg)">➤</span>`;
             markers.push(new sdk.Marker({ position: [arrow.longitude, arrow.latitude], content: pin }));
           }
-          const pins: { element: HTMLElement; marker: MapMarker }[] = [];
-          markers = [...markers, ...mapMarkers.map((markerData) => {
+          const pins: { element: HTMLElement; marker: MapMarker; instance: unknown }[] = [];
+          const markerInstances = mapMarkers.map((markerData) => {
             const coordinate = toGcj02(markerData, markerData.coordinateSystem);
             const pin = document.createElement("div");
             pin.className = `serendipity-map-pin${markerData.precision === "area_reference" ? " serendipity-map-pin-area" : ""}`;
             pin.textContent = markerLabel(markerData);
-            pins.push({ element: pin, marker: markerData });
             pin.addEventListener("mouseenter", () => hoverEvent(markerData.events[0].id));
             pin.addEventListener("mouseleave", () => hoverEvent(null));
             pin.addEventListener("focus", () => hoverEvent(markerData.events[0].id));
@@ -290,15 +305,31 @@ export function MapFrame() {
               button.addEventListener("mouseleave", () => hoverEvent(null));
               pin.append(button);
             }
-            return new sdk.Marker({ position: [coordinate.longitude, coordinate.latitude], title: markerData.name, content: pin });
-          })];
+            const instance = new sdk.Marker({ position: [coordinate.longitude, coordinate.latitude], title: markerData.name, content: pin });
+            pins.push({ element: pin, marker: markerData, instance });
+            return instance;
+          });
+          markers = [...markers, ...markerInstances];
           map.add(markers);
           updateHighlight = () => pins.forEach(({ element, marker }) => {
             element.dataset.selected = String(marker.events.some((event) => event.id === focusEventId));
             element.dataset.highlighted = String(marker.events.some((event) => event.id === highlightedEventId));
           });
           updateHighlight();
-          if (markers.length && !focusEventId) map.setFitView(markers, true, [35, 35, 35, 35], 15);
+          if (markers.length && !focusEventId) {
+            // Same camera rule as the OSM branch: the far origin is drawn but
+            // never lengthens the fitted bounds.
+            const { focus: focusMarkers } = splitDailyFocus(mapMarkers);
+            const focusPins = pins.filter((pin) => focusMarkers.includes(pin.marker));
+            const camera = focusPins.map((pin) => pin.instance);
+            const lats = focusMarkers.map((marker) => marker.latitude);
+            const lons = focusMarkers.map((marker) => marker.longitude);
+            const span = focusMarkers.length > 1
+              ? Math.max(Math.max(...lats) - Math.min(...lats), Math.max(...lons) - Math.min(...lons))
+              : 0;
+            const maxZoom = span > 0 && span < 0.12 ? FOCUSED_MAX_ZOOM : 15;
+            map.setFitView(camera.length ? camera : markers, true, [35, 35, 35, 35], maxZoom);
+          }
         };
         updateMarkers(pending.markers, pending.routes, pending.focusEventId);
         window.parent.postMessage({ type: "serendipity-map", state: "initialized", preview }, window.location.origin);
@@ -309,6 +340,7 @@ export function MapFrame() {
   }, []);
   return <main className="map-frame-root">
     <div ref={container} className="map-frame-canvas" aria-label="可缩放和拖动的行程地图" />
+    {arrivalNote ? <p className="map-frame-arrival" data-testid="map-arrival-note"><span aria-hidden="true">🚄</span>{arrivalNote}</p> : null}
     {message ? <p className="map-frame-message" role="status">{message}</p> : null}
   </main>;
 }

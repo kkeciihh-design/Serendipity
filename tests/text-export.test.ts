@@ -18,8 +18,12 @@ describe.each<TextExportFormat>(["plain-text", "markdown"])("%s snapshot export"
     const before = JSON.stringify(s), raw = renderTextExport(s, options, format), text = readable(raw);
     const budget = calculateBudgetSummary(s.plan.costs, s.plan.requestSnapshot), money = formatMoneyRange(budget.totalMinCents, budget.totalMaxCents);
     expect(text).toContain(money); expect(renderMobileHtml(s, options)).toContain(money);
-    expect(text).toContain("1 项金额待确认，未知不等于零"); expect(text).toContain("1 项退款待处理");
-    for (const field of ["4 人", "1500 元", "计划待更新", "前一天", "22:55", "停止检票", "合成场馆公告", "周一闭馆", "获取", "适用", "车票待确认", "下一步", "清单修订 3", "执行修订 4"]) expect(text).toContain(field);
+    expect(text).toContain("1 项金额待确认，未知不等于零");
+    for (const field of ["4 人", "1500 元", "计划待更新", "前一天", "22:55", "停止检票", "合成场馆公告", "周一闭馆", "获取", "适用", "车票待确认", "下一步"]) expect(text).toContain(field);
+    expect(text).not.toContain("计划 V");
+    expect(text).not.toContain("需求修订");
+    expect(text).not.toContain("清单修订");
+    expect(text).not.toContain("执行修订");
     expect(text).not.toContain("充裕");
     for (let d = 1; d <= days; d++) expect(text).toContain(`第 ${d} 天`);
     expect(JSON.stringify(s)).toBe(before); expect(renderTextExport(s, options, format)).toBe(raw);
@@ -30,10 +34,10 @@ describe.each<TextExportFormat>(["plain-text", "markdown"])("%s snapshot export"
     const activity = s.plan.events.find((e) => e.id === "d1-activity")!; activity.startTime = "23:30"; activity.endTime = "00:30"; activity.endDate = nextPlanDate(first);
     s.checklist.items.push(checklistItemSchema.parse({ id: "packing", title: "证件 & 充电器 🧳", group: "essentials", note: "提醒", date: "2026-10-20", eventId: null, eventIds: [], ticketIds: [], source: "custom", sourceLabel: "用户自建", sourceKey: "packing", signature: "custom", officialUrl: null, custom: true, completed: true, completedAt: s.generatedAt, deleted: false, orphaned: false, changeNote: "请重新核对" }));
     const raw = renderTextExport(s, { ...options, dates: [first] }, format), text = readable(raw);
-    expect(text).toContain("已确认 · 随身物品 · 证件 & 充电器 🧳"); expect(text).toContain("请重新核对");
+    expect(text).toContain("☑ 已确认 · 随身物品 · 证件 & 充电器 🧳"); expect(text).toContain("请重新核对");
     expect(text).toContain("不是所选日期小计"); expect(text).not.toContain("第 2 天");
     expect(text).toMatch(/23:30–\d{4}-\d{2}-\d{2} 00:30/);
-    if (format === "markdown") expect(raw).toContain("- [x] 已确认");
+    if (format === "markdown") expect(raw).toContain("- ☑ 已确认");
     expect(() => renderTextExport(s, { ...options, dates: ["1999-01-01"] }, format)).toThrow("不属于");
   });
   it("privacy applies to every free-text section; opt-in never changes redline or exposes location payloads", async () => {

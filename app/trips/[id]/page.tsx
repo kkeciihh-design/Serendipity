@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { requirePageAppAccess } from "@/lib/page-access";
 import { TripEditor } from "@/app/components/trip-editor";
 import { getTrip } from "@/lib/trips";
 import { getTripRequestRecord } from "@/lib/trip-request-service";
 import { listPlanVersions } from "@/lib/plan-service";
 import { listEvidenceFacts } from "@/lib/evidence-service";
+import { tripDisplayTitle } from "@/lib/trip-title";
+import { resolveDestination } from "@/lib/destination-inference";
+import { coverPhotoForDestination } from "@/lib/cover-destination";
+import { TripDeleteButton } from "../trip-delete-button";
 import styles from "../trips.module.css";
 
 export const dynamic = "force-dynamic";
@@ -46,21 +49,51 @@ export default async function TripDetailPage({
     plans.some((plan) => plan.versionNumber === parsedPlanVersion)
       ? parsedPlanVersion
       : null;
+  const currentPlan = plans.find((plan) => plan.isCurrent) ?? plans[0];
+  const confirmedSnapshot =
+    request.confirmedRevision === request.requestRevision
+      ? request.confirmedRequest
+      : null;
+  const summarySnapshot =
+    confirmedSnapshot ?? currentPlan?.requestSnapshot ?? request.extractedRequest;
+  const displayTitle = tripDisplayTitle({
+    title: trip.title,
+    originalRequest: request.originalRequest,
+    snapshot: summarySnapshot,
+    // Keep the detail title in step with the list card.
+    destination: resolveDestination(summarySnapshot?.destination, request.originalRequest),
+  });
+  // The cover shows the landscape the traveller's own words point at, matched
+  // against the built-in gallery (Hangzhou -> West Lake, Guilin -> Li River,
+  // Fujian/Hongcun -> Xiapu or Hongcun, and so on). Never null.
+  const coverPhoto = coverPhotoForDestination(
+    summarySnapshot?.destination ?? resolveDestination(null, request.originalRequest, ""),
+    request.originalRequest,
+  );
 
   return (
-    <main className={styles.detailPage}>
-      <div className={styles.detailContent}>
-        <nav className={styles.detailNavigation} aria-label="旅行导航">
-        <Link
-          href="/trips"
-          className="inline-flex min-h-11 items-center gap-2 rounded-md px-1 text-sm font-medium text-graphite transition-colors hover:text-sage"
-        >
-          <ArrowLeft aria-hidden="true" className="size-4" />
-          返回我的旅行
-        </Link>
-        <Link href="/" className={styles.wordmark}>Serendipity</Link>
-        </nav>
+    // The cover-width contract shared with the editorial cover header: the nav
+    // band and the editor header line up on the same 1260px column.
+    <main className={`${styles.detailPage} detail-page`}>
+      <div className={`${styles.detailContent} detail-content`}>
         <TripEditor
+          coverPhoto={coverPhoto}
+          navigation={
+            <nav className="mb-4 flex items-center justify-between gap-4 border-b border-white/15 pb-4" aria-label="旅行导航">
+              <div className="flex min-w-0 items-center gap-4">
+                <Link className="inline-flex items-center gap-2 rounded-full bg-white/12 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-white/20" href="/trips">
+                  ← 返回列表
+                </Link>
+                <span className="font-serif text-sm tracking-wide text-white/75">Serendipity · 个人旅行规划工作室</span>
+              </div>
+              <div className="flex shrink-0 items-center gap-2.5">
+                <Link className="inline-flex items-center gap-2 rounded-full bg-white/12 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-white/20" href="/">
+                  返回首页
+                </Link>
+                <TripDeleteButton tripId={trip.id} tripTitle={displayTitle} />
+              </div>
+            </nav>
+          }
           key={trip.id}
           trip={{
             ...trip,

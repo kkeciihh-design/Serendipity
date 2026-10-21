@@ -41,7 +41,7 @@ test("checklist supports responsive creation, edit, deletion, regeneration and r
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true); await page.screenshot({ path: path.join(evidence, "custom-form-390.png") });
   await page.getByRole("button", { name: "保存事项", exact: true }).click(); await saved(page);
   const custom = panel(page).getByRole("listitem").filter({ has: page.getByRole("checkbox", { name: "带相机", exact: true }) });
-  await custom.getByRole("button", { name: "编辑事项", exact: true }).click(); await page.getByLabel("事项名称", { exact: true }).fill("带相机和备用电池"); await page.getByRole("button", { name: "保存事项", exact: true }).click(); await saved(page);
+  await custom.getByRole("button", { name: "编辑", exact: true }).click(); await page.getByLabel("事项名称", { exact: true }).fill("带相机和备用电池"); await page.getByRole("button", { name: "保存事项", exact: true }).click(); await saved(page);
   await panel(page).getByRole("checkbox", { name: "带相机和备用电池", exact: true }).click(); await saved(page);
   await panel(page).getByRole("button", { name: "按当前计划更新", exact: true }).click(); await expect(panel(page).getByRole("status")).toContainText("仍相关的勾选");
   for (const width of [390, 768, 1440]) {
@@ -51,9 +51,9 @@ test("checklist supports responsive creation, edit, deletion, regeneration and r
   }
   await page.reload(); await expect(phone(page)).toBeChecked(); await expect(panel(page).getByRole("checkbox", { name: "带相机和备用电池", exact: true })).toBeChecked();
   const updated = panel(page).getByRole("listitem").filter({ has: page.getByRole("checkbox", { name: "带相机和备用电池", exact: true }) });
-  await updated.getByRole("button", { name: "移出清单", exact: true }).click(); await saved(page);
+  await updated.getByRole("button", { name: "移出", exact: true }).click(); await saved(page);
   await panel(page).getByRole("button", { name: "按当前计划更新", exact: true }).click(); await expect(panel(page).getByRole("status")).toContainText("仍相关的勾选");
-  await panel(page).getByText(/已移出或关联已变化（1）/).click(); await panel(page).getByRole("button", { name: "恢复事项", exact: true }).click(); await saved(page);
+  await panel(page).getByText(/已移出或关联已变化（1）/).click(); await panel(page).getByRole("button", { name: "恢复", exact: true }).click(); await saved(page);
   const fresh = await browser.newPage(); await open(fresh, id); await expect(phone(fresh)).toBeChecked(); await expect(panel(fresh).getByRole("checkbox", { name: "带相机和备用电池", exact: true })).toBeChecked(); await fresh.close();
   const row = await db.checklistState.findUniqueOrThrow({ where: { tripId: id } }); await fs.writeFile(path.join(evidence, "persisted.json"), JSON.stringify({ ...row, items: JSON.parse(row.items) }, null, 2));
   expect(await db.planVersion.count({ where: { tripId: id } })).toBe(1);
@@ -86,10 +86,10 @@ test("failed loading and form save preserve input; two-page conflicts require re
 test("links navigate to the correct event and ticket; history and cross-origin mutations are protected", async ({ page, request }) => {
   const id = await seed(request); await open(page, id);
   const reservation = panel(page).getByRole("region", { name: "预约清单", exact: true });
-  await expect(reservation.getByRole("link", { name: "前往官方入口", exact: true })).toHaveAttribute("href", /^https:\/\/www.hnmuseum.com\//);
-  await reservation.getByRole("button", { name: "查看相关活动", exact: true }).click(); await expect(page.getByRole("tab", { name: "每日时间轴", exact: true })).toHaveAttribute("aria-selected", "true"); await expect(page.locator("#timeline-event-d1-activity")).toBeInViewport();
+  await expect(reservation.getByRole("link", { name: "官方入口", exact: true })).toHaveAttribute("href", /^https:\/\/www.hnmuseum.com\//);
+  await reservation.getByRole("button", { name: "相关活动", exact: true }).click(); await expect(page.getByRole("tab", { name: "每日时间轴", exact: true })).toHaveAttribute("aria-selected", "true"); await expect(page.locator("#timeline-event-d1-activity")).toBeInViewport();
   await page.setViewportSize({ width: 390, height: 900 }); await page.getByRole("button", { name: "打开出发前清单", exact: true }).click();
-  await panel(page).getByRole("button", { name: "查看关联票据", exact: true }).first().click(); await expect(page.getByRole("tab", { name: "门到门交通", exact: true })).toHaveAttribute("aria-selected", "true");
+  await panel(page).getByRole("button", { name: "关联票据", exact: true }).first().click(); await expect(page.getByRole("tab", { name: "门到门交通", exact: true })).toHaveAttribute("aria-selected", "true");
   const before = await request.get(`/api/trips/${id}/checklist?planVersion=1`); const view = (await before.json()).checklist;
   expect((await request.post(`/api/trips/${id}/checklist`, { headers: { Origin: "https://outside.example" }, data: {} })).status()).toBe(403);
   expect((await request.post(`/api/trips/${id}/checklist`, { data: { expectedPlanVersion: 1, expectedRevision: view.revision, expectedBasis: view.basis, change: { action: "complete", id: "essential:phone", completed: true, ticketStatus: "active" } } })).status()).toBe(400);

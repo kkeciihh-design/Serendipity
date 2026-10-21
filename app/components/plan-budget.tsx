@@ -28,6 +28,8 @@ import {
   type PlanCostItem,
 } from "@/lib/budget";
 import type { PlanVersionClient } from "./plan-overview";
+import { travelBudgetCategories } from "@/lib/budget-presentation";
+import styles from "./plan-workspace.module.css";
 import { useVersionedDraft } from "./use-versioned-draft";
 
 type CostDraft = {
@@ -57,6 +59,9 @@ const paymentStatuses: readonly CostPaymentStatus[] = [
   "paid",
   "refund_pending",
 ];
+
+const categoryColors = { transport: "#839468", accommodation: "#a1a988", meal: "#c3a068", ticket: "#657f71", local_transport: "#c1c2a3", other: "#aba28f" };
+const pendingBadge = "inline-flex items-center rounded-full bg-[#FDF3EB] px-2.5 py-0.5 text-xs font-medium text-[#9A4B26]";
 
 function centsToYuanInput(cents: number | null) {
   return cents === null ? "" : `${formatMoneyValue(cents)}`;
@@ -132,6 +137,7 @@ export function PlanBudget({
     () => calculateBudgetSummary(plan.costs, plan.requestSnapshot),
     [plan.costs, plan.requestSnapshot],
   );
+  const chartCategories = travelBudgetCategories(summary).filter((category) => category.maxTotalCents > 0);
   const eventsById = useMemo(
     () => new Map(plan.events.map((event) => [event.id, event])),
     [plan.events],
@@ -226,191 +232,10 @@ export function PlanBudget({
     summary.perPersonMinCents === null
       ? null
       : formatMoneyRange(summary.perPersonMinCents, summary.perPersonMaxCents);
-
-  return (
-    <div className="mt-3 space-y-5">
-      <section
-        aria-labelledby="plan-budget-summary-title"
-        className="rounded-md border border-sand/80 bg-cream p-4"
-      >
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3
-              id="plan-budget-summary-title"
-              className="flex items-center gap-2 text-lg font-semibold text-charcoal"
-            >
-              <Coins aria-hidden="true" className="size-5 shrink-0 text-sage" />
-              预计费用
-            </h3>
-            <p className="mt-2 break-words text-2xl font-bold leading-9 text-charcoal">
-              {totalRange}
-              {summary.totalMinCents !== summary.totalMaxCents ? "（区间）" : ""}
-            </p>
-            <p className="mt-1 text-sm leading-6 text-graphite">
-              人均 {perPersonRange ?? "待确认"}｜
-              {summary.factors.travelerCount} 人｜
-              {plan.costs.some((cost) => cost.roomCount !== undefined) ? "房数按各笔住宿" : `${summary.factors.roomCount} 间房（默认）`}｜
-              {summary.factors.nightCount} 晚
-            </p>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-2">
-            <span
-              className={`inline-flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
-                summary.overspendStatus === "confirmed"
-                  ? "bg-clay text-white"
-                  : summary.overspendStatus === "possible"
-                    ? "bg-clay-soft text-clay"
-                    : "bg-sage-soft text-sage"
-              }`}
-            >
-              {summary.overspendStatus === "confirmed" ? (
-                <CircleAlert aria-hidden="true" className="size-4" />
-              ) : (
-                <BadgeCheck aria-hidden="true" className="size-4" />
-              )}
-              {overspendStatusLabels[summary.overspendStatus]}
-            </span>
-            <span className="text-sm text-graphite">
-              {summary.budgetTargetCents === null
-                ? "预算目标未确认"
-                : `预算目标 ${formatMoneyRange(summary.budgetTargetCents, summary.budgetTargetCents)}${
-                    summary.budgetScope === "per_person" ? "（人均）" : "（全程）"
-                  }`}
-            </span>
-          </div>
-        </div>
-        <p className="mt-3 text-sm leading-6 text-graphite">
-          已确认 {summary.confirmedItemCount} 项｜待确认{" "}
-          {summary.pendingItemCount} 项｜估算 {summary.estimatedItemCount} 项｜
-          浮动区间 {summary.rangeItemCount} 项｜
-          已支付 {formatMoneyRange(summary.paidMinCents, summary.paidMinCents)}｜
-          退款待处理 {summary.refundPendingItemCount} 项
-          {summary.unknownItemCount > 0
-            ? `｜未知金额 ${summary.unknownItemCount} 项不计入合计`
-            : ""}
-        </p>
-        <p className="mt-2 text-sm leading-6 text-graphite">
-          点击任意费用可修改金额与支付状态。住宿按实际房数和晚数计费。
-        </p>
-      </section>
-
-      <section aria-labelledby="plan-budget-categories-title">
-        <h3
-          id="plan-budget-categories-title"
-          className="text-lg font-semibold text-charcoal"
-        >
-          分类汇总
-        </h3>
-        <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {summary.categories.map((category) => (
-            <div
-              key={category.category}
-              className="rounded-md border border-sand/80 bg-white p-4"
-            >
-              <dt className="text-sm font-semibold text-charcoal">
-                {costCategoryLabels[category.category]}
-                <span className="ml-2 font-normal text-graphite">
-                  {category.itemCount} 项
-                </span>
-              </dt>
-              <dd className="mt-2 text-base font-semibold text-charcoal">
-                {formatMoneyRange(
-                  category.minTotalCents,
-                  category.maxTotalCents,
-                )}
-              </dd>
-              {category.unknownItemCount > 0 ? (
-                <dd className="mt-1 text-sm text-clay">
-                  {category.unknownItemCount} 项金额未知
-                </dd>
-              ) : null}
-            </div>
-          ))}
-        </dl>
-      </section>
-
-      <section aria-labelledby="plan-budget-items-title">
-        <h3
-          id="plan-budget-items-title"
-          className="text-lg font-semibold text-charcoal"
-        >
-          费用明细
-        </h3>
-        <div className="mt-3 space-y-4">
-          {costCategoryOrder
-            .map((category) => ({
-              category,
-              costs: plan.costs.filter((cost) => cost.category === category),
-            }))
-            .filter((group) => group.costs.length > 0)
-            .map((group) => (
-              <div key={group.category}>
-                <h4 className="text-sm font-semibold text-sage">
-                  {costCategoryLabels[group.category]}
-                </h4>
-                <ul className="mt-2 space-y-2">
-                  {group.costs.map((cost) => {
-                    const linkedEvent = eventsById.get(cost.linkedEventId);
-                    const line = costItemLineTotals(
-                      cost,
-                      summary.factors,
-                    );
-                    return (
-                      <li key={cost.id}>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedCostId(cost.id)}
-                          aria-expanded={selectedCostId === cost.id}
-                          className={`grid w-full gap-2 rounded-md border p-4 text-left transition-colors sm:grid-cols-[1fr_auto] sm:items-center ${
-                            selectedCostId === cost.id
-                              ? "border-sage bg-sage-soft"
-                              : "border-sand/80 bg-white hover:border-sage"
-                          }`}
-                        >
-                          <span className="min-w-0">
-                            <span className="block break-words text-base font-semibold text-charcoal">
-                              {linkedEvent?.title ?? "已移除的安排"}
-                              {cost.eventRemoved ? "（安排已移除，费用保留）" : ""}
-                            </span>
-                            <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-graphite">
-                              {cost.unit === "one_time" ? <span className="font-medium text-charcoal">{formatMoneyRange(line.minCents, line.maxCents)}</span> : <>
-                              <span>
-                                {cost.unitAmountCents === null
-                                  ? "金额未知"
-                                  : `${formatMoneyRange(
-                                      cost.unitAmountCents,
-                                      cost.unitAmountMaxCents,
-                                    )}/${costUnitLabels[cost.unit]}`}
-                              </span>
-                              <span>
-                                × {costItemQuantityDescription(cost, summary.factors)}
-                              </span>
-                              <span>
-                                ={" "}
-                                {formatMoneyRange(line.minCents, line.maxCents)}
-                              </span>
-                              </>}
-                            </span>
-                            {cost.note ? <span className="mt-2 block whitespace-pre-wrap text-sm leading-6 text-clay">{cost.note}</span> : null}
-                          </span>
-                          <span className="inline-flex min-h-9 items-center gap-2 rounded-md bg-cream px-3 text-sm text-graphite sm:justify-self-end">
-                            {costCertaintyLabels[cost.certainty]}｜
-                            {costPaymentLabels[cost.paymentStatus]}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))}
-        </div>
-      </section>
-
-      {selectedCost && draft ? (
-        <section
+  const costEditor = selectedCost && draft ? (
+    <section
           aria-labelledby="plan-cost-edit-title"
-          className="rounded-md border border-sand/80 bg-cream p-4"
+          className="mt-3 rounded-md border border-sand/80 bg-cream p-4"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3
@@ -420,6 +245,17 @@ export function PlanBudget({
               <PencilLine aria-hidden="true" className="size-5 shrink-0 text-sage" />
               确认费用：{eventsById.get(selectedCost.linkedEventId)?.title ?? "已移除的安排"}
             </h3>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedCostId(null);
+                setFeedback(null);
+              }}
+              className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-sm font-medium text-sage hover:bg-white/70"
+            >
+              <X aria-hidden="true" className="size-4" />
+              收起
+            </button>
           </div>
 
           {conflicts.length > 0 ? <div role="alert" className="mt-4 rounded-md bg-clay-soft px-4 py-3 text-sm leading-6 text-clay">
@@ -589,13 +425,194 @@ export function PlanBudget({
                 : "历史版本只读。")}
           </p>
         </section>
-      ) : (
-        <p className="mt-3 min-h-11 rounded-md bg-shell px-4 py-3 text-sm leading-6 text-graphite">
-          {plan.costs.length > 0
-            ? "尚未选择费用项目。"
-            : "当前计划没有可核算的费用项目。"}
+  ) : null;
+
+
+  return (
+    <div className="mt-3 space-y-5">
+      <section
+        aria-labelledby="plan-budget-summary-title"
+        className="rounded-2xl border border-[#18221D]/10 bg-white p-5 shadow-sm"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3
+              id="plan-budget-summary-title"
+              className="flex items-center gap-2 text-lg font-semibold text-charcoal"
+            >
+              <Coins aria-hidden="true" className="size-5 shrink-0 text-sage" />
+              预计费用
+            </h3>
+            <p className="mt-2 break-words text-2xl font-bold leading-9 text-charcoal">
+              {totalRange}
+              {summary.totalMinCents !== summary.totalMaxCents ? "（区间）" : ""}
+            </p>
+            <p className="mt-1 text-sm leading-6 text-graphite">
+              人均 {perPersonRange ?? "待确认"}｜
+              {summary.factors.travelerCount} 人｜
+              {plan.costs.some((cost) => cost.roomCount !== undefined) ? "房数按各笔住宿" : `${summary.factors.roomCount} 间房（默认）`}｜
+              {summary.factors.nightCount} 晚
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <span
+              className={`inline-flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
+                summary.overspendStatus === "confirmed"
+                  ? "bg-clay text-white"
+                  : summary.overspendStatus === "possible"
+                    ? "bg-clay-soft text-clay"
+                    : "bg-sage-soft text-sage"
+              }`}
+            >
+              {summary.overspendStatus === "confirmed" ? (
+                <CircleAlert aria-hidden="true" className="size-4" />
+              ) : (
+                <BadgeCheck aria-hidden="true" className="size-4" />
+              )}
+              {overspendStatusLabels[summary.overspendStatus]}
+            </span>
+            <span className="text-sm text-graphite">
+              {summary.budgetTargetCents === null
+                ? "预算目标未确认"
+                : `预算目标 ${formatMoneyRange(summary.budgetTargetCents, summary.budgetTargetCents)}${
+                    summary.budgetScope === "per_person" ? "（人均）" : "（全程）"
+                  }`}
+            </span>
+          </div>
+        </div>
+        {chartCategories.length ? <div className={styles.budgetBar} aria-hidden="true" data-testid="budget-category-bar">{chartCategories.map((category) => <span key={category.category} data-category={category.category} style={{ flex: category.maxTotalCents }} />)}</div> : null}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <span className="rounded-full bg-white px-3 py-2 text-sm text-charcoal">
+            已知合计 {totalRange}
+          </span>
+          <span className="rounded-full bg-white px-3 py-2 text-sm text-charcoal">
+            已支付金额 {formatMoneyRange(summary.paidMinCents, summary.paidMinCents)}
+          </span>
+          <span className="rounded-full bg-white px-3 py-2 text-sm text-charcoal">
+            待确认项 {summary.pendingItemCount}
+          </span>
+        </div>
+        <p className="mt-2 text-sm leading-6 text-graphite">
+          点击任意费用可修改金额与支付状态。住宿按实际房数和晚数计费。
         </p>
-      )}
+      </section>
+
+      <section aria-labelledby="plan-budget-categories-title" className="rounded-2xl border border-[#18221D]/10 bg-white p-5 shadow-sm">
+        <h3
+          id="plan-budget-categories-title"
+          className="text-lg font-semibold text-charcoal"
+        >
+          分类汇总
+        </h3>
+        <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {summary.categories.map((category) => (
+            <div
+              key={category.category}
+              className="rounded-2xl border border-[#18221D]/10 bg-white p-5 shadow-sm"
+            >
+              <dt className="flex items-center gap-2 text-sm font-semibold text-charcoal">
+                <span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ backgroundColor: categoryColors[category.category] }} />
+                {costCategoryLabels[category.category]}
+                <span className="ml-2 font-normal text-graphite">
+                  {category.itemCount} 项
+                </span>
+              </dt>
+              <dd className="mt-2 text-base font-semibold text-charcoal">
+                {formatMoneyRange(
+                  category.minTotalCents,
+                  category.maxTotalCents,
+                )}
+              </dd>
+              {category.unknownItemCount > 0 ? (
+                <dd className={`mt-2 ${pendingBadge}`}>
+                  {category.unknownItemCount} 项金额待确认
+                </dd>
+              ) : null}
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      <section aria-labelledby="plan-budget-items-title" className="rounded-2xl border border-[#18221D]/10 bg-white p-5 shadow-sm">
+        <h3
+          id="plan-budget-items-title"
+          className="text-lg font-semibold text-charcoal"
+        >
+          费用明细
+        </h3>
+        <div className="mt-3 space-y-4">
+          {costCategoryOrder
+            .map((category) => ({
+              category,
+              costs: plan.costs.filter((cost) => cost.category === category),
+              subtotal: summary.categories.find((item) => item.category === category)!,
+            }))
+            .filter((group) => group.costs.length > 0)
+            .map((group) => (
+              <div key={group.category}>
+                <h4 className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#F9F8F3] px-3 py-2.5 text-sm font-semibold text-sage">
+                  <span className="flex items-center gap-2"><span aria-hidden="true" className="h-5 w-1 rounded-full" style={{ backgroundColor: categoryColors[group.category] }} />{costCategoryLabels[group.category]}</span>
+                  <span className="ml-auto text-right">{formatMoneyRange(group.subtotal.minTotalCents, group.subtotal.maxTotalCents)}{group.subtotal.unknownItemCount > 0 && <span className={`ml-2 ${pendingBadge}`}>{group.subtotal.unknownItemCount} 项金额待确认</span>}</span>
+                </h4>
+                <ul className="mt-2 grid gap-3 md:grid-cols-2" data-testid="budget-cost-list">
+                  {group.costs.map((cost) => {
+                    const linkedEvent = eventsById.get(cost.linkedEventId);
+                    const line = costItemLineTotals(
+                      cost,
+                      summary.factors,
+                    );
+                    return (
+                      <li key={cost.id} className={selectedCostId === cost.id ? "md:col-span-2" : ""}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCostId(selectedCostId === cost.id ? null : cost.id)}
+                          aria-expanded={selectedCostId === cost.id}
+                          className={`grid w-full gap-2 rounded-2xl border p-5 text-left shadow-sm transition sm:grid-cols-[1fr_auto] sm:items-center ${
+                            selectedCostId === cost.id
+                              ? "border-sage bg-sage-soft"
+                              : "border-sand/80 bg-white hover:border-sage"
+                          }`}
+                        >
+                          <span className="min-w-0">
+                            <span className="block break-words text-base font-semibold text-charcoal">
+                              {linkedEvent?.title ?? "已移除的安排"}
+                              {cost.eventRemoved ? "（安排已移除，费用保留）" : ""}
+                            </span>
+                            <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-graphite">
+                              {cost.unit === "one_time" ? <span className="font-medium text-charcoal">{formatMoneyRange(line.minCents, line.maxCents)}</span> : <>
+                              <span>
+                                {cost.unitAmountCents === null
+                                  ? <span className={pendingBadge}>金额待确认</span>
+                                  : `${formatMoneyRange(
+                                      cost.unitAmountCents,
+                                      cost.unitAmountMaxCents,
+                                    )}/${costUnitLabels[cost.unit]}`}
+                              </span>
+                              <span>
+                                × {costItemQuantityDescription(cost, summary.factors)}
+                              </span>
+                              <span>
+                                ={" "}
+                                {formatMoneyRange(line.minCents, line.maxCents)}
+                              </span>
+                              </>}
+                            </span>
+                            {cost.note ? <span className={`mt-2 block whitespace-pre-wrap text-xs leading-6 ${cost.eventRemoved ? "text-clay" : "text-graphite"}`}>{cost.note}</span> : null}
+                          </span>
+                          <span className={cost.certainty === "pending_confirmation" ? `${pendingBadge} sm:justify-self-end` : "inline-flex min-h-9 items-center gap-2 rounded-md bg-cream px-3 text-sm text-graphite sm:justify-self-end"}>
+                            {costCertaintyLabels[cost.certainty]}｜
+                            {costPaymentLabels[cost.paymentStatus]}
+                          </span>
+                        </button>
+                        {selectedCostId === cost.id ? costEditor : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+        </div>
+      </section>
 
       {!canEdit ? (
         <p className="inline-flex min-h-9 items-center gap-2 rounded-md bg-clay-soft px-3 text-sm text-clay">

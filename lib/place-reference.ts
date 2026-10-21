@@ -16,9 +16,8 @@ const luojia = /洛[伽迦]寺/;
 function locationText(event: PlanEvent) { return `${event.locationName ?? ""} ${event.title}`; }
 function withReferenceNote(event: PlanEvent, note: string): PlanEvent {
   const previous = event.note?.trim() ?? "";
-  const separator = previous && !/[。！？；.!?;]$/.test(previous) ? "；" : "";
-  const combined = previous.includes(note) ? previous : `${previous}${separator}${note}`;
-  return { ...event, note: combined.replace(/。\s*；/g, "。").slice(0, 6000) };
+  void note;
+  return { ...event, note: previous || null };
 }
 
 export function calibrateSuggestedCoordinates(events: PlanEvent[], destination: string | null | undefined): PlanEvent[] {

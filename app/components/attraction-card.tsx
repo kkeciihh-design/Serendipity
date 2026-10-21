@@ -9,6 +9,7 @@ import type { PlanEvent } from "@/lib/plan";
 import { dateLabel, Photo, SourceLink, FactBox, Gallery } from "./recommendation-ui";
 import type { PlanVersionClient } from "./plan-overview";
 import { RouteSummary } from "./route-summary";
+import { ItineraryArrangementCard } from "./itinerary-arrangement-card";
 import styles from "./plan-timeline.module.css";
 
 type Feedback = { error: boolean; message: string };
@@ -107,6 +108,7 @@ function AttractionDrawer({ event, visitLabel, data, loading, feedback, busy, pr
       </header>
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6">
         {loading ? <p role="status" className="rounded-md bg-shell p-4 text-sm text-graphite">正在读取这一天的景点资料…</p> : null}
+        {!selectedCard ? <ItineraryArrangementCard event={event} kind="attraction" /> : null}
         {feedback ? <div role={feedback.error ? "alert" : "status"} className={`rounded-md p-4 text-sm leading-6 ${feedback.error ? "bg-clay-soft text-clay" : "bg-sage-soft text-sage"}`}><p>{feedback.message}</p>{feedback.error && !data ? <button type="button" onClick={onRetry} disabled={loading} className="mt-2 inline-flex min-h-11 items-center gap-2 rounded-md border border-clay px-3 font-semibold disabled:opacity-50"><RefreshCw aria-hidden="true" className="size-4" />重试读取</button> : null}</div> : null}
         {data?.protectionReasons.length ? <div className="rounded-md bg-shell p-4 text-sm leading-6 text-graphite">{data.protectionReasons.map((reason, index) => <p key={index}>{reason}</p>)}</div> : null}
         {data?.notices.length ? <div className="rounded-md border border-sand p-4 text-sm leading-6 text-graphite">{data.notices.map((notice, index) => <p key={index}>{notice}</p>)}</div> : null}
@@ -119,7 +121,7 @@ function AttractionDrawer({ event, visitLabel, data, loading, feedback, busy, pr
           {data.excluded.length ? <details className="rounded-md bg-shell px-3 text-sm leading-6 text-graphite"><summary className="flex min-h-11 cursor-pointer items-center">为什么有 {data.excluded.length} 项未入选</summary><ul className="space-y-2 pb-3">{data.excluded.map((item) => <li key={item.id}><span className="font-semibold">{item.name}</span>：{item.reasons.join("；")}</li>)}</ul></details> : null}
         </section> : null}
         {preview ? <ReplacementPreview preview={preview} /> : null}
-        {selectedCard ? <CardDetails key={selectedCard.id} card={preview?.card ?? selectedCard} /> : data ? <div className="space-y-4"><Photo photo={null} /><p className="rounded-md bg-white p-4 text-sm leading-6 text-graphite">还没有与“{data.eventName}”准确对应的景点资料。图片、门票和预约保持待确认；可展开候选查看已整理的地点。</p><p className="text-sm leading-6 text-graphite">当前安排：{event.startTime}–{event.endTime} · {event.locationName ?? "地点待确认"}{event.note ? ` · ${event.note}` : ""}</p></div> : null}
+        {selectedCard ? <CardDetails key={selectedCard.id} card={preview?.card ?? selectedCard} /> : null}
       </div>
       <footer className="shrink-0 space-y-2 border-t border-sand/80 bg-cream px-4 py-3 sm:px-6">
         {data?.readOnly ? <p className="py-2 text-sm text-graphite">历史版本只读，切换到当前计划后可保留或替换。</p> : preview ? <div className="grid grid-cols-[1fr_auto] gap-3"><button type="button" onClick={() => onAction("apply", preview.candidateId)} disabled={busy !== null || !canReplace || !preview.canApply} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-sage px-3 py-3 font-semibold text-white hover:bg-focus disabled:cursor-not-allowed disabled:bg-graphite/50"><Check aria-hidden="true" className="size-5" />{saving ? "正在保存新版本…" : "应用这项替换"}</button><button type="button" onClick={onCancelPreview} disabled={busy !== null} className="min-h-12 rounded-md border border-sand bg-white px-3 py-3 font-medium text-graphite hover:border-sage disabled:opacity-50">取消预览</button></div> : isAlternative ? <button type="button" onClick={() => onAction("preview", selectedId!)} disabled={!canReplace || busy !== null || selectedCard?.eligibility === "excluded"} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-sage px-4 py-3 font-semibold text-white hover:bg-focus disabled:cursor-not-allowed disabled:bg-graphite/50"><RefreshCw aria-hidden="true" className={`size-5 ${busy === "preview" ? "animate-spin" : ""}`} />{busy === "preview" ? "正在检查时间、路线和费用…" : "预览替换这项安排"}</button> : <button type="button" onClick={() => onAction("keep")} disabled={!data || busy !== null || currentConflict} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md border border-sage bg-white px-4 py-3 font-semibold text-sage hover:bg-sage-soft disabled:cursor-not-allowed disabled:opacity-50"><Check aria-hidden="true" className="size-5" />{busy === "keep" ? "正在保留…" : "保留当前景点"}</button>}
@@ -129,8 +131,8 @@ function AttractionDrawer({ event, visitLabel, data, loading, feedback, busy, pr
   </dialog>;
 }
 
-export function AttractionTimelineCard({ tripId, plan, event, visitLabel, onSaved, onMap, compact = false }: {
-  tripId: string; plan: PlanVersionClient; event: PlanEvent; visitLabel: string; onSaved: (plan: PlanVersionClient) => void; onMap: () => void; compact?: boolean;
+export function AttractionTimelineCard({ tripId, plan, event, visitLabel, onSaved, onMap, compact = false, actionsOnly = false }: {
+  tripId: string; plan: PlanVersionClient; event: PlanEvent; visitLabel: string; onSaved: (plan: PlanVersionClient) => void; onMap: () => void; compact?: boolean; actionsOnly?: boolean;
 }) {
   const [data, setData] = useState<AttractionRecommendations | null>(null);
   const [loading, setLoading] = useState(true);
@@ -226,6 +228,9 @@ export function AttractionTimelineCard({ tripId, plan, event, visitLabel, onSave
     {compact ? <div className={styles.recommendationCompact}>
       <button type="button" onClick={() => setOpen(true)} aria-label={`查看景点详情：${event.title}`} aria-haspopup="dialog" title="查看景点与候选" className={styles.compactLink}><ChevronRight aria-hidden="true" className="size-3.5" /></button>
       <button type="button" onClick={onMap} aria-label={`定位地图：${visitLabel}${event.title}`} title="地图与详情" className={styles.compactLink}><MapPin aria-hidden="true" className="size-3.5" /></button>
+    </div> : actionsOnly ? <div className={styles.recommendationActions}>
+      <button type="button" onClick={() => setOpen(true)} aria-label={`查看景点详情：${event.title}`} aria-haspopup="dialog" className={styles.recommendationLink}>查看景点与候选<ChevronRight aria-hidden="true" className="size-4" /></button>
+      <button type="button" onClick={onMap} aria-label={`定位地图：${visitLabel}${event.title}`} className={styles.mapLink}><MapPin aria-hidden="true" className="size-4" />地图与详情</button>
     </div> : <div className={styles.recommendation}>
       <Photo key={photo?.id ?? "missing"} photo={photo} compact />
       <div className={styles.recommendationBody}>

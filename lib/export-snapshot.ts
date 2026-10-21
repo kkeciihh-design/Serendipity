@@ -32,6 +32,8 @@ export type ExportSnapshot = {
   weather?: WeatherRecord[];
   advisories?: { revision: number; items: AdvisoryItem[] };
   schemaVersion: 1; id: string; generatedAt: string;
+  /** Human-facing trip title captured with the immutable export state. */
+  tripTitle?: string;
   plan: PlanVersionRecord;
   latestRequestRevision: number | null;
   requirementUpToDate: boolean;

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { effectiveEvidenceStatus, reservationRequirement } from "./evidence";
 import { ChecklistError, parseChecklistItems } from "./checklist";
 import { mergeChecklist } from "./checklist-merge";
+import { sanitizeTravelerText } from "./content-sanitizer";
 import type { PlanVersionRecord } from "./plan-service";
 
 export const checklistBasis = (items: ReturnType<typeof parseChecklistItems>) => createHash("sha256")
@@ -10,11 +11,17 @@ export const checklistBasis = (items: ReturnType<typeof parseChecklistItems>) =>
 
 export async function projectChecklist(transaction: Prisma.TransactionClient, previous: ReturnType<typeof parseChecklistItems>, plan: PlanVersionRecord) {
   const facts = await transaction.evidenceFact.findMany({ where: { planVersionId: plan.id, field: "reservation" } });
-  return mergeChecklist(previous, plan, facts.map((fact) => {
+  const merged = mergeChecklist(previous, plan, facts.map((fact) => {
     const effective = effectiveEvidenceStatus({ ...fact, field: "reservation", status: fact.status === "verified" ? "verified" : fact.status === "conflict" ? "conflict" : "unverified", applicableFrom: fact.applicableFrom?.toISOString() ?? null, applicableUntil: fact.applicableUntil?.toISOString() ?? null });
     const requirement = ["required", "not_required"].includes(fact.extractedValue) ? fact.extractedValue : reservationRequirement(fact.extractedValue);
     return { eventId: fact.targetId, required: effective === "verified" ? requirement === "required" ? true : requirement === "not_required" ? false : null : null,
       text: fact.contentQuote || fact.extractedValue, sourceLabel: `来自预约来源资料 · ${effective === "verified" ? "适用要求已核验；办理结果需自行确认" : "要求待复核"}` };
+  }));
+  return merged.map((item) => ({
+    ...item,
+    title: sanitizeTravelerText(item.title),
+    note: item.note ? sanitizeTravelerText(item.note) : item.note,
+    sourceLabel: sanitizeTravelerText(item.sourceLabel),
   }));
 }
 

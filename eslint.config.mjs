@@ -19,4 +19,11 @@ export default defineConfig([
       },
     },
   },
+  {
+    // Browser globals referenced inside Playwright page.evaluate callbacks.
+    files: ["scripts/verify-area*.mjs", "scripts/capture-craftsmanship-polish.mjs", "scripts/measure-dock.mjs"],
+    languageOptions: {
+      globals: { getComputedStyle: "readonly", window: "readonly" },
+    },
+  },
 ]);

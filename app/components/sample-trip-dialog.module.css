@@ -1,6 +1,24 @@
-.dialog {
+.mask {
   position: fixed;
   inset: 0;
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+}
+
+.mask[open] { display: flex; align-items: center; justify-content: center; }
+.mask::backdrop { background: rgb(16 26 21 / 52%); }
+
+.dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   width: min(1040px, calc(100vw - 64px));
   max-width: none;
   height: min(880px, calc(100dvh - 64px));
@@ -8,7 +26,9 @@
   margin: auto;
   padding: 0;
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 60%);
+  /* No bright inner outline around the header: the shadow alone lifts the card
+     off the backdrop. */
+  border: 0;
   border-radius: 24px;
   color: #283b30;
   background: #fcfbf7;
@@ -16,8 +36,6 @@
   contain: layout paint;
 }
 
-.dialog[open] { display: flex; flex-direction: column; }
-.dialog::backdrop { background: rgb(16 26 21 / 52%); }
 .dialog :focus-visible { outline: 2px solid #57765a; outline-offset: -3px; border-radius: 5px; }
 .windowHeader { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 18px 8px 32px; border-bottom: 1px solid #e7e4da; }
 .windowHeader > p { display: flex; align-items: center; gap: 12px; font-size: 11px; letter-spacing: .08em; }
@@ -29,11 +47,14 @@
 .planningFooter { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 32px; border-top: 1px solid #e1e4d6; background: #f4f2e9; }
 .planningFooter > p { color: #52684a; font-family: var(--font-serif); font-size: 14px; line-height: 1.7; }
 .planningFooter > p > span { display: block; color: #8a927d; font-family: var(--font-sans); font-size: 10px; }
-.planButton { display: inline-flex; flex-shrink: 0; min-height: 46px; align-items: center; justify-content: center; gap: 13px; padding: 12px 20px; border-radius: 8px; color: #faf8ef; background: #3e5a45; font-size: 13px; cursor: pointer; transition: background .2s; }
-.planButton:hover { background: #304b39; }
+.planButton { display: inline-flex; flex-shrink: 0; min-height: 46px; align-items: center; justify-content: center; gap: 13px; padding: 12px 20px; border: 0; border-radius: 8px; color: #faf8ef; background: #1B362A; font-size: 13px; cursor: pointer; transition: background .2s; }
+.planButton:hover { background: #142A20; }
 .planButton:focus-visible { outline-color: #e2cfaa; }
-.scrollArea { position: relative; min-height: 0; overflow: auto; overflow-anchor: none; overscroll-behavior: contain; contain: paint; scrollbar-width: thin; scrollbar-color: #c7cabb transparent; }
-.cover { position: relative; display: flex; min-height: 210px; align-items: flex-end; isolation: isolate; padding: 36px 44px 30px; color: #faf8ef; background: #304237; }
+/* Keeps the card's 24px corners intact: the dialog clips, this inner scroller
+   moves, and its scrollbar track stays invisible. */
+.scrollArea { position: relative; min-height: 0; overflow: auto; overflow-anchor: none; overscroll-behavior: contain; contain: paint; scrollbar-width: none; -ms-overflow-style: none; }
+.scrollArea::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.cover { position: relative; display: flex; flex: 0 0 210px; height: 210px; min-height: 190px; max-height: 230px; align-items: flex-end; isolation: isolate; overflow: hidden; padding: 36px 44px 30px; color: #faf8ef; background: #304237; }
 .landscape { position: absolute; inset: 0; z-index: -2; overflow: hidden; }
 .photo { object-fit: cover; }
 .sketch { width: 100%; height: 100%; }
@@ -120,7 +141,7 @@
 
 @media (max-width: 800px) {
   .dialog { width: calc(100vw - 36px); height: calc(100dvh - 48px); border-radius: 20px; }
-  .cover { padding-inline: 28px; min-height: 200px; }
+  .cover { padding-inline: 28px; height: 200px; }
   .coverSeal, .referenceLabel { display: none; }
   .overview { padding-inline: 28px; gap: 16px; }
   .overview > div + div { padding-left: 16px; }
@@ -141,7 +162,7 @@
   .planningFooter { display: block; padding: 12px 20px; }
   .planningFooter > p { display: none; }
   .planButton { width: 100%; }
-  .cover { min-height: 202px; padding: 26px 22px; }
+  .cover { height: 202px; padding: 26px 22px; }
   .cover h2 { font-size: 26px; }
   .eyebrow { font-size: 10px; margin-bottom: 12px; }
   .subtitle { font-size: 11px; }

@@ -31,17 +31,20 @@ describe("PDF handbook with controlled Chromium", () => {
   });
   for (const days of [2, 4]) it(`${days} days: complete Chinese PDF, chapters, resources and privacy`, async () => {
     const s = await longImageFixture(days), html = await renderPdfHtml(s, options, content);
-    for (const text of ["完整旅行手册", "旅行总览", "景点推荐", "餐厅推荐", "住宿区域", "全程预算", "出发前清单", "旅行提醒", "资料来源", "22:55", "1500 元", "OpenStreetMap", "CC BY"]) expect(html).toContain(text);
+    for (const text of ["完整旅行手册", "旅行总览", "景点推荐", "餐厅推荐", "住宿区域", "全程预算", "行前核对与准备清单", "资料来源", "22:55", "1500 元", "OpenStreetMap", "CC BY"]) expect(html).toContain(text);
+    expect(html).not.toContain("<h2>待确认事项</h2>");
+    expect(html).not.toContain("<h2>旅行提醒与注意事项</h2>");
+    expect(html).not.toContain("<h2>出发前清单</h2>");
     expect(html).not.toContain(PRIVATE_ADDRESS); expect(html).not.toContain("08车06A");
     const m = await save(`${days}days`, html); expect(m.pages).toBeGreaterThan(days);
     expect(m.eventIds.sort()).toEqual(s.plan.events.map((e) => e.id).sort());
   }, 90_000);
-  it("missing manual confirmations allow suggested maps or a compact fallback; invalid saved points still fail", async () => {
+  it("missing manual confirmations still preserve every named stop; invalid saved points fail", async () => {
     const s = await longImageFixture();
     s.plan.events.find((e) => e.id === "d2-activity")!.placeId = null;
-    expect(await renderPdfHtml(s, options, content)).toContain("map-unavailable");
+    expect(await renderPdfHtml(s, options, content)).not.toContain("map-unavailable");
     Object.assign(s.plan.events.find((e) => e.id === "d2-activity")!, { latitude: 24.91, longitude: 118.58 });
-    expect(await renderPdfHtml(s, options, content)).toContain("含待核实建议标点");
+    expect(await renderPdfHtml(s, options, content)).toContain("建议地点或方位参考");
     const html = await renderPdfHtml(s, options, { mode: "simplified", includePhotos: false });
     expect(html).toContain("简化旅行资料（无地图）"); expect(html).not.toContain("<svg");
     s.plan.events.find((e) => e.id === "d2-activity")!.placeId = s.plan.places[1].id;
@@ -50,11 +53,11 @@ describe("PDF handbook with controlled Chromium", () => {
     s.plan.places[0].longitude = 112; s.plan.places[0].provider = "amap";
     await expect(renderPdfHtml(s, options, content)).rejects.toThrow("许可");
   });
-  it("coincident map markers group without dropping any original daily numbers", async () => {
+  it("coincident map markers stay separate with readable daily numbers", async () => {
     const s = await longImageFixture();
     s.plan.events.find((e) => e.id === "d1-lunch")!.placeId = s.plan.places[0].id;
     const map = renderGeographicMap(s, options, s.plan.events[0].date, undefined, true);
-    expect(map.match(/<circle/g)).toHaveLength(1); expect(map).toContain("A1 · 1.4"); expect(map).toContain("A1 · 1.5");
+    expect(map.match(/class="route-stop"/g)).toHaveLength(5); expect(map).not.toContain("A1 · 1.4"); expect(map).toContain("1.4"); expect(map).toContain("1.5");
   });
   it("cross-city maps and long cards, multi-page checklist/sources preserve all content", async () => {
     const s = await longImageFixture(2), event = s.plan.events.find((e) => e.id === "d1-lunch")!;

@@ -28,9 +28,9 @@
 .eventCard {
   position: relative;
   display: block;
-  border: 1px solid #e5dfd1;
+  border: 1px solid #273f3026;
   border-radius: 1rem;
-  background: #fffefa;
+  background: #ffffff;
   box-shadow: 0 5px 18px rgb(82 69 44 / 3%);
   transition: border-color .15s, box-shadow .15s;
 }
@@ -73,35 +73,31 @@
 }
 
 .timeRange {
-  color: #63704b;
-  font-size: .7rem;
+  color: #4A5850;
+  font-size: .82rem;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   line-height: 1.6;
 }
 
+/* One low-key text label only: no chip, no fill, no border. */
 .categoryBadge {
   display: inline-flex;
   align-items: center;
-  gap: .3rem;
-  border-radius: 999px;
-  padding: .3rem .5rem;
-  color: #657448;
-  background: #eff2e7;
-  font-size: .7rem;
-  font-weight: 600;
+  gap: .25rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: #8b917c;
+  background: none;
+  font-size: .78rem;
+  font-weight: 500;
   white-space: nowrap;
 }
 
-.categoryBadge[data-category="food"] {
-  color: #a47443;
-  background: #f8eee0;
-}
+.categoryBadge[data-category="food"] { color: #98886f; }
 
-.categoryBadge[data-category="stay"] {
-  color: #7c7394;
-  background: #f1edf6;
-}
+.categoryBadge[data-category="stay"] { color: #8e8a99; }
 
 .eventBody {
   display: block;
@@ -117,9 +113,9 @@
 
 .eventTitle {
   min-width: 0;
-  color: #3e4435;
-  font-size: 1.12rem;
-  font-weight: 650;
+  color: #141E19;
+  font-size: 18px;
+  font-weight: 600;
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
@@ -160,42 +156,83 @@
 .eventLocation {
   display: block;
   margin-top: .2rem;
-  color: #90917f;
-  font-size: .74rem;
+  color: #606C64;
+  font-size: .84rem;
   line-height: 1.6;
 }
 
-.eventNote {
+/* Middle section: two to three clean, contiguous lines of route and highlight
+   text. Plain paragraph ink — never a coloured capsule. */
+.noteLead {
   display: block;
-  margin-top: .4rem;
-  color: #626653;
-  font-size: .8rem;
-  line-height: 1.9;
-  white-space: pre-wrap;
+  margin-top: .45rem;
+  color: #26322B;
+  font-size: 15px;
+  line-height: 1.75;
   overflow-wrap: anywhere;
 }
 
-.costRow {
+/* The one and only separator inside the card. */
+.factFooter {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: .65rem;
-  margin-top: .65rem;
-  color: #7b7e69;
-  font-size: .73rem;
-  line-height: 1.6;
+  align-items: baseline;
+  gap: .15rem .9rem;
+  margin-top: 1rem;
+  padding-top: .75rem;
+  border-top: 1px solid rgb(24 34 29 / 8%);
 }
 
-.cost,
-.locked {
+.factItem {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: baseline;
+  gap: .4rem;
+  color: #4A5850;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.7;
+}
+
+/* Facts are plain small text: no pill, no tint, no border, no background. */
+.factLabel {
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: #8d9280;
+  background: none;
+  font-size: .68rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.factLabel[data-note-kind="ticket"],
+.factLabel[data-note-kind="hours"],
+.factLabel[data-note-kind="tip"],
+.factLabel[data-note-kind="cost"] {
+  color: #8d9280;
+  background: none;
+}
+
+.factLabel[data-note-kind="locked"] {
   display: inline-flex;
   align-items: center;
-  gap: .3rem;
+  gap: .2rem;
+  color: #9a9a88;
+  background: none;
 }
 
-.locked {
-  color: #7b785e;
-  font-size: .7rem;
+.factText { color: #5a6149; overflow-wrap: anywhere; }
+
+/* The plain "·" that joins the metadata items, sitting before every item but
+   the first. */
+.factSeparator {
+  flex: none;
+  color: #b3b8a8;
+  font-size: .68rem;
+  line-height: 1.7;
 }
 
 .recommendation {
@@ -247,7 +284,7 @@
   align-items: center;
   gap: .25rem;
   color: #75815b;
-  font-size: .7rem;
+  font-size: 13px;
   font-weight: 550;
 }
 
@@ -344,8 +381,8 @@
 .routeConnection {
   min-width: 0;
   margin: .3rem 0 0 calc(var(--rail-width) + 1rem);
-  color: #a0a38f;
-  font-size: .66rem;
+  color: #6E776B;
+  font-size: .78rem;
   line-height: 1.6;
 }
 
@@ -377,22 +414,89 @@
   color: var(--color-sage);
 }
 
-.advisory {
-  position: static;
+/* Pending advisories are one quiet line of small amber text, right-aligned on
+   the card's own bottom metadata row. Never a full-width slab. */
+.advisoryCorner {
   display: flex;
   min-width: 0;
-  width: 100%;
-  align-items: center;
-  gap: .4rem;
-  padding: .6rem 1rem;
-  color: var(--color-clay);
-  background: #fbf2e6;
-  font-size: .72rem;
-  line-height: 1.7;
-  text-align: left;
-  overflow-wrap: anywhere;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: .15rem .8rem;
+  margin-left: auto;
 }
 
+.advisoryCorner .advisory { pointer-events: auto;  font-size: .78rem; }
+
+/* Quiet amber text, not a filled chip: no background, no border, no pill. */
+.advisory {
+  position: static;
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 1.4rem;
+  align-items: center;
+  gap: .25rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: #9a7433;
+  background: none;
+  font-size: .78rem;
+  line-height: 1.7;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color .2s ease;
+}
+
+.advisory:hover { color: #7d5c22; background: none; }
+
+/* The card's single bottom bar: one thin rule, plain facts on the left and
+   the card actions plus the short status badge on the right. No tinted tray,
+   no pills -- the rule is the only separator. */
+.cardMetaRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem .75rem;
+  margin-top: .75rem;
+  margin-left: calc(var(--rail-width) + 1.8rem);
+  padding-top: .625rem;
+  border-top: 1px solid rgb(24 34 29 / 8%);
+  color: #4A5850;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.cardMetaRow .factFooter {
+  flex: 1 1 18rem;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.cardMetaRow .factText { color: #4A5850; }
+.cardMetaRow .factText strong { font-weight: 700; }
+
+.cardMetaRight {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .55rem 1rem;
+}
+
+.cardMetaRight .recommendationActions { margin: 0; }
+.cardMetaRight .statusBadge { margin-top: 0; }
+.cardMetaRow .advisoryCorner { flex: 0 1 auto; justify-content: flex-end; }
+
+/* The visit number: a solid pine-green medallion with white ink, echoing the
+   numbered markers the map draws on the right. It is the one filled element in
+   the rail, which is what gives the timeline its rhythm back. */
 .visitBadge {
   display: inline-flex;
   flex: none;
@@ -400,13 +504,25 @@
   justify-content: center;
   width: 1.9rem;
   height: 1.9rem;
-  border: 2px solid white;
+  border: 1px solid #1B362A;
   border-radius: 50%;
-  background: #466855;
-  color: white;
-  font-size: 1.2rem;
+  background: #1B362A;
+  color: #fff;
+  font-size: 1.02rem;
+  font-weight: 500;
   line-height: 1;
-  box-shadow: 0 1px 5px #0002;
+  box-shadow: 0 .1rem .35rem rgb(24 34 29 / 18%);
+}
+
+/* The head time range: quiet plain text under the numbered marker. */
+.visitTime {
+  color: #7c8672;
+  font-size: .78rem;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.01em;
+  line-height: 1.5;
+  white-space: nowrap;
 }
 
 .briefingCard { background: #f2f3eb; border-color: transparent; box-shadow: none; }
@@ -414,11 +530,11 @@
 .briefingBody { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .6rem; color: #737b66; font-size: .75rem; line-height: 1.75; overflow-wrap: anywhere; }
 .briefingBody strong { font-weight: 500; color: #52634b; }
 .briefingLabel { font-size: .65rem; color: #7c876e; }
-.briefingCard .advisory { border-radius: 0 0 1rem 1rem; }
+.briefingCard .advisoryCorner { justify-content: flex-start; }
 
 @media (max-width: 639px) {
   .timeline {
-    --rail-width: 4.7rem;
+    --rail-width: 5.5rem;
     gap: .6rem;
   }
 
@@ -432,13 +548,26 @@
     gap: .1rem .4rem;
   }
 
+  .advisoryCorner {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .advisory { white-space: normal; text-align: left;  font-size: .78rem; }
+
+  .cardMetaRow {
+    margin-left: calc(var(--rail-width) + 1.35rem);
+    padding-top: .625rem;
+  }
+
   .eventTitle {
-    font-size: 1rem;
+    font-size: 18px;
   }
 
   .timeRange {
-    font-size: .63rem;
-  }
+    font-size: .82rem;
+   color: #4A5850; }
 
   .recommendation,
   .eventFooter {

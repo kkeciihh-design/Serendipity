@@ -15,12 +15,15 @@ export interface DesktopBuildRequest {
   windowsHide: true;
   stdio: ["ignore", number, number];
   logPath: string;
+  onProgress?: (message: string) => void;
 }
 
 export interface DesktopBuildOptions {
+  configFile?: string;
   executor?: (request: DesktopBuildRequest) => Promise<void>;
   acquireBuildLock?: (config: DesktopBuildConfig, timeout: number) => Promise<() => Promise<void>>;
   lockTimeoutMs?: number;
+  onProgress?: (message: string) => void;
 }
 
 export function prepareDesktopBuild<T extends DesktopBuildConfig>(config: T, options?: DesktopBuildOptions): Promise<{

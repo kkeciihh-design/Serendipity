@@ -29,7 +29,7 @@ function requestDuration(originalRequest: string) {
   return digits[statedDays] ?? null;
 }
 
-function editorialTheme(snapshot: RequestSnapshot | null) {
+function editorialTheme(snapshot: RequestSnapshot | null, originalRequest = "") {
   if (snapshot?.pace === "relaxed") return "轻松漫游";
   const interests = snapshot?.interests.join("、") ?? "";
   if (/人文|历史|文化|博物馆|古迹/.test(interests)) return "人文漫游";
@@ -37,6 +37,9 @@ function editorialTheme(snapshot: RequestSnapshot | null) {
   if (/自然|山水|公园|徒步|户外/.test(interests)) return "山水漫游";
   if (/摄影|拍照|建筑/.test(interests)) return "光影漫游";
   if (/亲子|儿童/.test(interests)) return "亲子漫游";
+  // With no snapshot to read a pace from, the traveller's own wording decides:
+  // "三天轻松漫游" is what they asked for, not our generic 自在漫游 default.
+  if (!snapshot && /轻松|悠闲|慢慢|休闲|随性|放松|不赶|慢节奏/.test(originalRequest)) return "轻松漫游";
   return "自在漫游";
 }
 
@@ -44,10 +47,18 @@ export function tripDisplayTitle({
   title,
   originalRequest,
   snapshot,
+  destination: knownDestination,
 }: {
   title: string;
   originalRequest: string;
   snapshot: RequestSnapshot | null;
+  /**
+   * A destination already resolved from the original words by the caller (see
+   * resolveDestination). Used only when the snapshot carries no real
+   * destination, so a card never falls back to the useless 下一站 placeholder
+   * while the traveller has plainly named where they are going.
+   */
+  destination?: string | null;
 }) {
   const original = originalRequest.trim();
   const firstLine = original.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
@@ -60,6 +71,8 @@ export function tripDisplayTitle({
   const days = tripSummaryDays(snapshot) ?? requestDuration(original);
   const dayLabels = ["", "一", "两", "三", "四", "五", "六", "七", "八", "九", "十"];
   const duration = days ? `${dayLabels[days] ?? days}日` : "";
-  const destination = snapshot?.destination?.trim() || "下一站";
-  return `${destination} · ${duration}${editorialTheme(snapshot)}`;
+  const destination = snapshot?.destination?.trim()
+    || knownDestination?.trim()
+    || "下一站";
+  return `${destination} · ${duration}${editorialTheme(snapshot, original)}`;
 }
