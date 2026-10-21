@@ -72,11 +72,7 @@ npm run lint
 npm run test:e2e
 ```
 
-端到端测试需要 Playwright 浏览器：
-
-```bash
-npx playwright install chromium
-```
+端到端测试默认使用本机 Microsoft Edge。若改用 Chromium，先执行 `npx playwright install chromium`，再通过 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 指定浏览器可执行文件。
 
 ## 仓库约定
 
