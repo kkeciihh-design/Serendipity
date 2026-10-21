@@ -13,11 +13,10 @@ next-env.d.ts
 *.log
 npm-debug.log*
 
-# Version text requirements and handoffs; keep large/local verification output out.
-docs/**
-!docs/**/
-!docs/**/*.md
-docs/阶段验收/证据/
+# Local development notes, handoffs and acceptance reports.
+docs/
+PROJECT_STATUS.md
+Serendipity-*.md
 
 # local data and browser test output
 data/
@@ -25,6 +24,8 @@ test-data/
 test-results/
 playwright-report/
 output/
+tmp/
+test-min.css
 
 # Private databases, sidecars, encryption keys and desktop control state.
 *.db
